@@ -17,6 +17,7 @@ pub enum Message {
     NextPage,
     PreviousPage,
     FontSizeChanged(u32),
+    ToggleTheme,
 }
 
 /// Core application state.
@@ -25,6 +26,7 @@ pub struct App {
     pages: Vec<String>,
     current_page: usize,
     font_size: u32,
+    night_mode: bool,
 }
 
 impl App {
@@ -58,6 +60,9 @@ impl App {
                     self.repaginate();
                 }
             }
+            Message::ToggleTheme => {
+                self.night_mode = !self.night_mode;
+            }
         }
         Task::none()
     }
@@ -65,6 +70,9 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let total_pages = self.pages.len().max(1);
         let page_label = format!("Page {} of {}", self.current_page + 1, total_pages);
+
+        let theme_label = if self.night_mode { "Day Mode" } else { "Night Mode" };
+        let theme_toggle = button(theme_label).on_press(Message::ToggleTheme);
 
         let prev_button = if self.current_page > 0 {
             button("Previous").on_press(Message::PreviousPage)
@@ -78,7 +86,7 @@ impl App {
             button("Next")
         };
 
-        let controls = row![prev_button, next_button, text(page_label)]
+        let controls = row![prev_button, next_button, theme_toggle, text(page_label)]
             .spacing(10)
             .align_y(Alignment::Center);
 
@@ -116,13 +124,14 @@ impl App {
 /// Helper to launch the app with the provided text.
 pub fn run_app(text: String) -> iced::Result {
     iced::application("EPUB Viewer", App::update, App::view)
-        .theme(|_| Theme::Dark)
+        .theme(|app: &App| if app.night_mode { Theme::Dark } else { Theme::Light })
         .run_with(move || {
             let mut app = App {
                 pages: Vec::new(),
                 full_text: text,
                 current_page: 0,
                 font_size: DEFAULT_FONT_SIZE,
+                night_mode: true,
             };
             app.repaginate();
             (app, Task::none())
