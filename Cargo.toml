@@ -1,6 +1,10 @@
 [package]
 name = "ebup-viewer"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+anyhow = "1"
+epub = "1.2"
+html2text = "0.6"
+iced = { version = "0.12", default-features = false, features = ["wgpu", "tokio"] }

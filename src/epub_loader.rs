@@ -1,0 +1,45 @@
+//! EPUB loading utilities.
+//!
+//! This module is intentionally small: it knows how to open an EPUB, walk
+//! through its spine, strip basic markup, and return a single `String` of text.
+//! Keeping it isolated makes it easy to swap out or enhance parsing later
+//! (e.g., extracting a table of contents or preserving styling).
+
+use anyhow::{Context, Result};
+use epub::doc::EpubDoc;
+use std::path::Path;
+
+/// Load an EPUB from disk and return its text content as a single string.
+pub fn load_epub_text(path: &Path) -> Result<String> {
+    let mut doc = EpubDoc::new(path)
+        .with_context(|| format!("Failed to open EPUB at {}", path.display()))?;
+
+    let mut combined = String::new();
+
+    loop {
+        match doc.get_current_str() {
+            Ok(Some(chapter)) => {
+                if !combined.is_empty() {
+                    combined.push_str("\n\n");
+                }
+                // Use a lightweight HTML-to-text pass to remove most markup.
+                let plain = html2text::from_read(chapter.as_bytes(), 80);
+                combined.push_str(&plain);
+            }
+            Ok(None) => break,
+            Err(err) => {
+                return Err(anyhow::Error::new(err)).context("Failed to read EPUB chapter");
+            }
+        }
+
+        if doc.go_next().is_err() {
+            break;
+        }
+    }
+
+    if combined.trim().is_empty() {
+        combined.push_str("No textual content found in this EPUB.");
+    }
+
+    Ok(combined)
+}
