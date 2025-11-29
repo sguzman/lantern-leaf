@@ -3,17 +3,20 @@
 //! Responsibilities here are intentionally minimal:
 //! - Parse command-line arguments.
 //! - Load the EPUB text via `epub_loader`.
-//! - Launch the GUI application with the loaded text.
+//! - Load user configuration from `conf/config.toml`.
+//! - Launch the GUI application with the loaded text and config.
 
 mod app;
+mod config;
 mod epub_loader;
 mod pagination;
 
 use crate::app::run_app;
+use crate::config::load_config;
 use crate::epub_loader::load_epub_text;
 use anyhow::{anyhow, Context, Result};
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn main() {
     if let Err(err) = run() {
@@ -24,8 +27,9 @@ fn main() {
 
 fn run() -> Result<()> {
     let epub_path = parse_args()?;
+    let config = load_config(Path::new("conf/config.toml"));
     let text = load_epub_text(&epub_path)?;
-    run_app(text).context("Failed to start the GUI")?;
+    run_app(text, config).context("Failed to start the GUI")?;
     Ok(())
 }
 

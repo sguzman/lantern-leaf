@@ -8,3 +8,5 @@ anyhow = "1"
 epub = "2.1.5"
 html2text = "0.16.4"
 iced = { version = "0.13.1", default-features = false, features = ["wgpu", "tokio"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

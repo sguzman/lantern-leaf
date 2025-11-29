@@ -4,6 +4,7 @@
 //! provide the already-loaded plain text (see `epub_loader`) and relies on
 //! `pagination` to break that text into pages based on the current font size.
 
+use crate::config::{AppConfig, FontFamily, FontWeight, Justification, ThemeMode};
 use crate::pagination::{paginate, MAX_FONT_SIZE, MIN_FONT_SIZE};
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{
@@ -13,13 +14,36 @@ use iced::widget::text::LineHeight;
 use iced::{Element, Font, Length, Task, Theme};
 use iced::font::{Family, Weight};
 
-/// Default font size used on startup.
-const DEFAULT_FONT_SIZE: u32 = 16;
-const DEFAULT_LINE_SPACING: f32 = 1.2;
-const DEFAULT_MARGIN: u16 = 12;
+/// Limits and defaults for reader controls.
 const MAX_MARGIN: u16 = 48;
 const MAX_WORD_SPACING: u32 = 5;
 const MAX_LETTER_SPACING: u32 = 3;
+const FONT_FAMILIES: [FontFamily; 13] = [
+    FontFamily::Sans,
+    FontFamily::Serif,
+    FontFamily::Monospace,
+    FontFamily::Lexend,
+    FontFamily::FiraCode,
+    FontFamily::AtkinsonHyperlegible,
+    FontFamily::AtkinsonHyperlegibleNext,
+    FontFamily::LexicaUltralegible,
+    FontFamily::Courier,
+    FontFamily::FrankGothic,
+    FontFamily::Hermit,
+    FontFamily::Hasklug,
+    FontFamily::NotoSans,
+];
+const FONT_WEIGHTS: [FontWeight; 3] = [
+    FontWeight::Light,
+    FontWeight::Normal,
+    FontWeight::Bold,
+];
+const JUSTIFICATIONS: [Justification; 4] = [
+    Justification::Left,
+    Justification::Center,
+    Justification::Right,
+    Justification::Justified,
+];
 
 /// Messages emitted by the UI.
 #[derive(Debug, Clone)]
@@ -58,6 +82,15 @@ pub struct App {
 }
 
 impl App {
+    fn justification_alignment(&self) -> Horizontal {
+        match self.justification {
+            Justification::Left => Horizontal::Left,
+            Justification::Center => Horizontal::Center,
+            Justification::Right => Horizontal::Right,
+            Justification::Justified => Horizontal::Left,
+        }
+    }
+
     /// Re-run pagination after a state change (e.g., font size).
     fn repaginate(&mut self) {
         self.pages = paginate(&self.full_text, self.font_size);
@@ -172,7 +205,7 @@ impl App {
                     .size(self.font_size as f32)
                     .line_height(LineHeight::Relative(self.line_spacing))
                     .width(Length::Fill)
-                    .align_x(self.justification.alignment_hint())
+                    .align_x(self.justification_alignment())
                     .font(self.current_font()),
             )
             .padding([self.margin_vertical, self.margin_horizontal]),
@@ -194,148 +227,44 @@ impl App {
 }
 
 /// Helper to launch the app with the provided text.
-pub fn run_app(text: String) -> iced::Result {
+pub fn run_app(text: String, config: AppConfig) -> iced::Result {
     iced::application("EPUB Viewer", App::update, App::view)
         .theme(|app: &App| if app.night_mode { Theme::Dark } else { Theme::Light })
         .run_with(move || {
+            let font_size = config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
+            let line_spacing = config.line_spacing.clamp(0.8, 2.5);
+            let margin_horizontal = config.margin_horizontal.min(MAX_MARGIN);
+            let margin_vertical = config.margin_vertical.min(MAX_MARGIN);
+            let word_spacing = config.word_spacing.min(MAX_WORD_SPACING);
+            let letter_spacing = config.letter_spacing.min(MAX_LETTER_SPACING);
+
             let mut app = App {
                 pages: Vec::new(),
                 full_text: text,
                 current_page: 0,
-                font_size: DEFAULT_FONT_SIZE,
-                night_mode: true,
+                font_size,
+                night_mode: matches!(config.theme, ThemeMode::Night),
                 settings_open: false,
-                font_family: FontFamily::Sans,
-                font_weight: FontWeight::Normal,
-                line_spacing: DEFAULT_LINE_SPACING,
-                justification: Justification::Left,
-                word_spacing: 0,
-                letter_spacing: 0,
-                margin_horizontal: DEFAULT_MARGIN,
-                margin_vertical: DEFAULT_MARGIN,
+                font_family: config.font_family,
+                font_weight: config.font_weight,
+                line_spacing,
+                justification: config.justification,
+                word_spacing,
+                letter_spacing,
+                margin_horizontal,
+                margin_vertical,
             };
             app.repaginate();
             (app, Task::none())
         })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FontFamily {
-    Sans,
-    Serif,
-    Monospace,
-    Lexend,
-    FiraCode,
-    AtkinsonHyperlegible,
-    AtkinsonHyperlegibleNext,
-    LexicaUltralegible,
-    Courier,
-    FrankGothic,
-    Hermit,
-    Hasklug,
-    NotoSans,
-}
-
-impl std::fmt::Display for FontFamily {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FontFamily::Sans => write!(f, "Sans"),
-            FontFamily::Serif => write!(f, "Serif"),
-            FontFamily::Monospace => write!(f, "Monospace"),
-            FontFamily::Lexend => write!(f, "Lexend"),
-            FontFamily::FiraCode => write!(f, "Fira Code"),
-            FontFamily::AtkinsonHyperlegible => write!(f, "Atkinson Hyperlegible"),
-            FontFamily::AtkinsonHyperlegibleNext => write!(f, "Atkinson Hyperlegible Next"),
-            FontFamily::LexicaUltralegible => write!(f, "Lexica Ultralegible"),
-            FontFamily::Courier => write!(f, "Courier"),
-            FontFamily::FrankGothic => write!(f, "Frank Gothic"),
-            FontFamily::Hermit => write!(f, "Hermit"),
-            FontFamily::Hasklug => write!(f, "Hasklug"),
-            FontFamily::NotoSans => write!(f, "Noto Sans"),
-        }
-    }
-}
-
-impl FontFamily {
-    const ALL: [FontFamily; 13] = [
-        FontFamily::Sans,
-        FontFamily::Serif,
-        FontFamily::Monospace,
-        FontFamily::Lexend,
-        FontFamily::FiraCode,
-        FontFamily::AtkinsonHyperlegible,
-        FontFamily::AtkinsonHyperlegibleNext,
-        FontFamily::LexicaUltralegible,
-        FontFamily::Courier,
-        FontFamily::FrankGothic,
-        FontFamily::Hermit,
-        FontFamily::Hasklug,
-        FontFamily::NotoSans,
-    ];
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FontWeight {
-    Light,
-    Normal,
-    Bold,
-}
-
-impl std::fmt::Display for FontWeight {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FontWeight::Light => write!(f, "Light"),
-            FontWeight::Normal => write!(f, "Normal"),
-            FontWeight::Bold => write!(f, "Bold"),
-        }
-    }
-}
-
 impl FontWeight {
-    const ALL: [FontWeight; 3] = [FontWeight::Light, FontWeight::Normal, FontWeight::Bold];
-
     fn to_weight(self) -> Weight {
         match self {
             FontWeight::Light => Weight::Light,
             FontWeight::Normal => Weight::Normal,
             FontWeight::Bold => Weight::Bold,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Justification {
-    Left,
-    Center,
-    Right,
-    Justified,
-}
-
-impl std::fmt::Display for Justification {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Justification::Left => write!(f, "Left"),
-            Justification::Center => write!(f, "Center"),
-            Justification::Right => write!(f, "Right"),
-            Justification::Justified => write!(f, "Justified"),
-        }
-    }
-}
-
-impl Justification {
-    const ALL: [Justification; 4] = [
-        Justification::Left,
-        Justification::Center,
-        Justification::Right,
-        Justification::Justified,
-    ];
-
-    fn alignment_hint(self) -> Horizontal {
-        match self {
-            Justification::Left => Horizontal::Left,
-            Justification::Center => Horizontal::Center,
-            Justification::Right => Horizontal::Right,
-            Justification::Justified => Horizontal::Left,
         }
     }
 }
@@ -405,11 +334,15 @@ impl App {
 
     fn settings_panel(&self) -> Element<'_, Message> {
         let family_picker =
-            pick_list(FontFamily::ALL, Some(self.font_family), Message::FontFamilyChanged);
+            pick_list(FONT_FAMILIES, Some(self.font_family), Message::FontFamilyChanged);
         let weight_picker =
-            pick_list(FontWeight::ALL, Some(self.font_weight), Message::FontWeightChanged);
+            pick_list(FONT_WEIGHTS, Some(self.font_weight), Message::FontWeightChanged);
         let justification_picker =
-            pick_list(Justification::ALL, Some(self.justification), Message::JustificationChanged);
+            pick_list(
+                JUSTIFICATIONS,
+                Some(self.justification),
+                Message::JustificationChanged,
+            );
 
         let line_spacing_slider = slider(
             0.8..=2.5,

@@ -1,0 +1,10 @@
+theme = "night"
+font_size = 18
+line_spacing = 1.3
+margin_horizontal = 20
+margin_vertical = 16
+font_family = "fira-code"
+font_weight = "normal"
+justification = "justified"
+word_spacing = 1
+letter_spacing = 0
