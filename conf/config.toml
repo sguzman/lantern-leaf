@@ -1,10 +1,10 @@
-theme = "night"
-font_size = 18
+theme = "day"
+font_size = 16
 line_spacing = 1.3
-margin_horizontal = 20
-margin_vertical = 16
-font_family = "fira-code"
-font_weight = "normal"
+margin_horizontal = 0
+margin_vertical = 0
+font_family = "lexend"
+font_weight = "bold"
 justification = "justified"
-word_spacing = 1
+word_spacing = 0
 letter_spacing = 0
