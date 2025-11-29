@@ -5,6 +5,7 @@
 //! `pagination` to break that text into pages based on the current font size.
 
 use crate::config::{AppConfig, FontFamily, FontWeight, Justification, ThemeMode};
+use crate::cache::save_last_page;
 use crate::pagination::{paginate, MAX_FONT_SIZE, MIN_FONT_SIZE};
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{
@@ -79,6 +80,7 @@ pub struct App {
     justification: Justification,
     word_spacing: u32,
     letter_spacing: u32,
+    epub_path: std::path::PathBuf,
 }
 
 impl App {
@@ -103,15 +105,19 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        let mut page_changed = false;
+
         match message {
             Message::NextPage => {
                 if self.current_page + 1 < self.pages.len() {
                     self.current_page += 1;
+                    page_changed = true;
                 }
             }
             Message::PreviousPage => {
                 if self.current_page > 0 {
                     self.current_page -= 1;
+                    page_changed = true;
                 }
             }
             Message::FontSizeChanged(size) => {
@@ -152,6 +158,11 @@ impl App {
                 self.letter_spacing = spacing.min(MAX_LETTER_SPACING);
             }
         }
+
+        if page_changed {
+            save_last_page(&self.epub_path, self.current_page);
+        }
+
         Task::none()
     }
 
@@ -230,7 +241,12 @@ impl App {
 }
 
 /// Helper to launch the app with the provided text.
-pub fn run_app(text: String, config: AppConfig) -> iced::Result {
+pub fn run_app(
+    text: String,
+    config: AppConfig,
+    epub_path: std::path::PathBuf,
+    last_page: Option<usize>,
+) -> iced::Result {
     iced::application("EPUB Viewer", App::update, App::view)
         .theme(|app: &App| if app.night_mode { Theme::Dark } else { Theme::Light })
         .run_with(move || {
@@ -256,8 +272,12 @@ pub fn run_app(text: String, config: AppConfig) -> iced::Result {
                 letter_spacing,
                 margin_horizontal,
                 margin_vertical,
+                epub_path,
             };
             app.repaginate();
+            if let Some(last) = last_page {
+                app.current_page = last.min(app.pages.len().saturating_sub(1));
+            }
             (app, Task::none())
         })
 }

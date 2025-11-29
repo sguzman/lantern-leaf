@@ -7,12 +7,14 @@
 //! - Launch the GUI application with the loaded text and config.
 
 mod app;
+mod cache;
 mod config;
 mod epub_loader;
 mod pagination;
 
 use crate::app::run_app;
 use crate::config::load_config;
+use crate::cache::load_last_page;
 use crate::epub_loader::load_epub_text;
 use anyhow::{anyhow, Context, Result};
 use std::env;
@@ -28,8 +30,9 @@ fn main() {
 fn run() -> Result<()> {
     let epub_path = parse_args()?;
     let config = load_config(Path::new("conf/config.toml"));
+    let last_page = load_last_page(&epub_path);
     let text = load_epub_text(&epub_path)?;
-    run_app(text, config).context("Failed to start the GUI")?;
+    run_app(text, config, epub_path, last_page).context("Failed to start the GUI")?;
     Ok(())
 }
 
