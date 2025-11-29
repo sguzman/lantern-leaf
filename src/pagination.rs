@@ -22,24 +22,40 @@ pub fn paginate(text: &str, font_size: u32) -> Vec<String> {
     let lines_per_page = (28.0 * (16.0 / normalized))
         .round()
         .clamp(10.0, 80.0) as usize;
-    let mut chars_per_page = chars_per_line.saturating_mul(lines_per_page).max(1);
+    let chars_per_page = chars_per_line.saturating_mul(lines_per_page).max(1);
 
-    // Guard against overflow for extremely small or extreme values.
-    if chars_per_page == 0 {
-        chars_per_page = 1;
+    // Split into paragraphs, preserving order. We consider a blank line as a
+    // paragraph boundary, which matches how `html2text` emits content.
+    let paragraphs = split_paragraphs(text);
+    if paragraphs.is_empty() {
+        return vec![String::new()];
     }
 
     let mut pages = Vec::new();
     let mut current = String::new();
-    let mut count = 0usize;
+    let mut current_len = 0usize;
 
-    for ch in text.chars() {
-        current.push(ch);
-        count += 1;
+    for para in paragraphs {
+        // Paragraph length plus a separating blank line if not first on page.
+        let separator_len = if current.is_empty() { 0 } else { 2 }; // "\n\n"
+        let para_len = para.len();
+        let prospective_len = current_len + separator_len + para_len;
 
-        if count >= chars_per_page {
+        if !current.is_empty() && prospective_len > chars_per_page {
+            // Finish the current page and start a new one.
             pages.push(std::mem::take(&mut current));
-            count = 0;
+            current_len = 0;
+        }
+
+        if current.is_empty() {
+            // Start the page with this paragraph (may exceed page size; we
+            // still keep paragraphs intact).
+            current.push_str(&para);
+            current_len = para_len;
+        } else {
+            current.push_str("\n\n");
+            current.push_str(&para);
+            current_len += separator_len + para_len;
         }
     }
 
@@ -48,4 +64,27 @@ pub fn paginate(text: &str, font_size: u32) -> Vec<String> {
     }
 
     pages
+}
+
+/// Split text into paragraphs separated by blank lines.
+fn split_paragraphs(text: &str) -> Vec<String> {
+    let mut paragraphs = Vec::new();
+    let mut buffer = Vec::new();
+
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            if !buffer.is_empty() {
+                paragraphs.push(buffer.join("\n"));
+                buffer.clear();
+            }
+        } else {
+            buffer.push(line);
+        }
+    }
+
+    if !buffer.is_empty() {
+        paragraphs.push(buffer.join("\n"));
+    }
+
+    paragraphs
 }
