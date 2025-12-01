@@ -476,18 +476,13 @@ impl App {
             return None;
         }
 
-        let base = if total_sentences > 1 {
-            sentence_idx.min(total_sentences.saturating_sub(1)) as f32
-                / total_sentences.saturating_sub(1) as f32
+        let clamped_idx = sentence_idx.min(total_sentences.saturating_sub(1)) as f32;
+        let y = if self.center_spoken_sentence {
+            ((clamped_idx + 0.5) / total_sentences as f32).clamp(0.0, 1.0)
+        } else if total_sentences > 1 {
+            (clamped_idx / total_sentences.saturating_sub(1) as f32).clamp(0.0, 1.0)
         } else {
             0.0
-        };
-
-        let y = if self.center_spoken_sentence {
-            let half_step = 0.5 / total_sentences as f32;
-            (base - half_step).clamp(0.0, 1.0)
-        } else {
-            base
         };
 
         Some(iced::widget::scrollable::RelativeOffset { x: 0.0, y })
