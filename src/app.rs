@@ -26,7 +26,6 @@ use std::path::PathBuf;
 use std::fs::File;
 use std::io::BufReader;
 use rodio::{Decoder, Source};
-use iced::widget::container::Style;
 
 /// Limits and defaults for reader controls.
 const MAX_MARGIN: u16 = 48;
@@ -409,37 +408,52 @@ impl App {
         let text_view_content: Element<'_, Message> = if self.tts_playback.is_some()
             && !self.last_sentences.is_empty()
         {
+            // Inline spans keep natural text flow while allowing highlight of the active sentence.
             let sentences = split_sentences(page_content.clone());
-            let highlight_idx = self.current_sentence_idx.unwrap_or(0);
-            let items: Column<'_, Message> = sentences
+            if sentences.is_empty() {
+                return text(page_content)
+                    .size(self.font_size as f32)
+                    .line_height(LineHeight::Relative(self.line_spacing))
+                    .width(Length::Fill)
+                    .wrapping(Wrapping::WordOrGlyph)
+                    .align_x(self.justification_alignment())
+                    .font(self.current_font())
+                    .into();
+            }
+            let highlight_idx = self
+                .current_sentence_idx
+                .unwrap_or(0)
+                .min(sentences.len().saturating_sub(1));
+            let highlight = self.highlight_color();
+
+            let spans: Vec<iced::widget::text::Span<'_, Message>> = sentences
                 .into_iter()
                 .enumerate()
-                .fold(column![].spacing(6), |col, (idx, sentence)| {
-                    let is_active = idx == highlight_idx;
-                    let highlight = self.highlight_color();
-                    let style = move |_theme: &Theme| Style {
-                        background: if is_active {
-                            Some(iced::Background::Color(highlight))
-                        } else {
-                            None
-                        },
-                        ..Default::default()
-                    };
-                    col.push(
-                        container(
-                            text(sentence)
-                                .size(self.font_size as f32)
-                                .line_height(LineHeight::Relative(self.line_spacing))
-                                .width(Length::Fill)
-                                .wrapping(Wrapping::WordOrGlyph)
-                                .align_x(self.justification_alignment())
-                                .font(self.current_font()),
-                        )
-                        .padding(4)
-                        .style(style),
-                    )
-                });
-            items.into()
+                .map(|(idx, sentence)| {
+                    let mut span: iced::widget::text::Span<'_, Message> =
+                        iced::widget::text::Span::new(format!("{sentence} "))
+                            .font(self.current_font())
+                            .size(self.font_size as f32)
+                            .line_height(LineHeight::Relative(self.line_spacing));
+
+                    if idx == highlight_idx {
+                        span = span
+                            .background(iced::Background::Color(highlight))
+                            .padding(iced::Padding::from(2u16));
+                    }
+
+                    span
+                })
+                .collect();
+
+            let rich: iced::widget::text::Rich<'_, Message> =
+                iced::widget::text::Rich::with_spans(spans);
+
+            rich
+                .width(Length::Fill)
+                .wrapping(Wrapping::WordOrGlyph)
+                .align_x(self.justification_alignment())
+                .into()
         } else {
             text(page_content)
                 .size(self.font_size as f32)
