@@ -83,7 +83,6 @@ pub enum Message {
     PlayFromPageStart,
     PlayFromCursor(usize),
     SetTtsSpeed(f32),
-    JumpToCurrentAudio,
     SeekForward,
     SeekBackward,
     TtsPrepared {
