@@ -125,7 +125,8 @@ pub struct App {
     last_sentences: Vec<String>,
     current_sentence_idx: Option<usize>,
     tts_track: Vec<(PathBuf, Duration)>,
-    tts_deadline: Option<Instant>,
+    tts_started_at: Option<Instant>,
+    tts_elapsed: Duration,
     tts_running: bool,
     day_highlight: HighlightColor,
     night_highlight: HighlightColor,
@@ -140,7 +141,7 @@ impl App {
             playback.stop();
         }
         self.tts_running = false;
-        self.tts_deadline = None;
+        self.tts_started_at = None;
     }
 
     fn justification_alignment(&self) -> Horizontal {
@@ -317,12 +318,7 @@ impl App {
                     info!("Resuming TTS playback");
                     playback.play();
                     self.tts_running = true;
-                    if let Some(idx) = self.current_sentence_idx {
-                        if let Some((_, dur)) = self.tts_track.get(idx) {
-                            let lead = Duration::from_millis(HIGHLIGHT_LEAD_MS);
-                            self.tts_deadline = Some(Instant::now() + dur.saturating_sub(lead));
-                        }
-                    }
+                    self.tts_started_at = Some(Instant::now());
                 } else {
                     info!("Starting TTS playback from current page");
                     tasks.push(self.start_playback_from(self.current_page, 0));
@@ -366,7 +362,9 @@ impl App {
                     playback.pause();
                 }
                 self.tts_running = false;
-                self.tts_deadline = None;
+                if let Some(started) = self.tts_started_at.take() {
+                    self.tts_elapsed += Instant::now().saturating_duration_since(started);
+                }
             }
             Message::SeekForward => {
                 let next_idx = self.current_sentence_idx.unwrap_or(0) + 1;
@@ -408,7 +406,6 @@ impl App {
             }
             Message::Tick(now) => {
                 if self.tts_running {
-                    // If paused, skip ticking.
                     if self
                         .tts_playback
                         .as_ref()
@@ -418,13 +415,28 @@ impl App {
                         return Task::none();
                     }
 
-                    // If the sink finished early, advance to next page or stop.
-                    if self
-                        .tts_playback
-                        .as_ref()
-                        .map(|p| p.is_finished())
-                        .unwrap_or(true)
-                    {
+                    let Some(started) = self.tts_started_at else {
+                        return Task::none();
+                    };
+                    let elapsed = self.tts_elapsed + now.saturating_duration_since(started);
+
+                    // compute which sentence we should be on
+                    let mut acc = Duration::ZERO;
+                    let mut target_idx = None;
+                    for (i, (_, dur)) in self.tts_track.iter().enumerate() {
+                        acc += *dur;
+                        if elapsed <= acc {
+                            target_idx = Some(i);
+                            break;
+                        }
+                    }
+
+                    if let Some(idx) = target_idx {
+                        if Some(idx) != self.current_sentence_idx {
+                            self.current_sentence_idx = Some(idx);
+                        }
+                    } else {
+                        // we've passed the end of this track
                         self.stop_playback();
                         if self.current_page + 1 < self.pages.len() {
                             self.current_page += 1;
@@ -432,32 +444,6 @@ impl App {
                             tasks.push(self.start_playback_from(self.current_page, 0));
                         } else {
                             info!("Playback finished at end of book");
-                        }
-                        return Task::none();
-                    }
-
-                    if let Some(deadline) = self.tts_deadline {
-                        if now >= deadline {
-                            let next_idx = self.current_sentence_idx.unwrap_or(0) + 1;
-                            if next_idx < self.last_sentences.len() {
-                                self.current_sentence_idx = Some(next_idx);
-                                if let Some((_, dur)) = self.tts_track.get(next_idx) {
-                                    let lead = Duration::from_millis(HIGHLIGHT_LEAD_MS);
-                                    let next_deadline = Instant::now() + dur.saturating_sub(lead);
-                                    self.tts_deadline = Some(next_deadline);
-                                } else {
-                                    self.tts_running = false;
-                                    self.tts_deadline = None;
-                                }
-                            } else if self.current_page + 1 < self.pages.len() {
-                                self.current_page += 1;
-                                info!("Reached end of page during Tick, advancing");
-                                tasks.push(self.start_playback_from(self.current_page, 0));
-                            } else {
-                                info!("Reached end of playback during Tick");
-                                self.tts_running = false;
-                                self.tts_deadline = None;
-                            }
                         }
                     }
                 }
@@ -506,13 +492,18 @@ impl App {
                         self.tts_track = files.clone();
                         self.current_sentence_idx =
                             Some(start_idx.min(files.len().saturating_sub(1)));
-                        if let Some((_, dur)) = self.tts_track.first() {
-                            let lead = Duration::from_millis(HIGHLIGHT_LEAD_MS);
-                            let next_deadline = Instant::now() + dur.saturating_sub(lead);
-                            self.tts_deadline = Some(next_deadline);
-                            self.tts_running = true;
-                            debug!(deadline = ?next_deadline, "Started TTS playback and highlighting");
-                        }
+                        let base = self
+                            .tts_track
+                            .iter()
+                            .take(start_idx)
+                            .fold(Duration::ZERO, |acc, (_, d)| acc + *d);
+                        self.tts_elapsed = base;
+                        self.tts_started_at = Some(Instant::now());
+                        self.tts_running = true;
+                        debug!(
+                            base_ms = base.as_millis(),
+                            "Started TTS playback and highlighting"
+                        );
                     } else {
                         warn!("Failed to start playback from prepared files");
                     }
@@ -819,7 +810,8 @@ pub fn run_app(
                 last_sentences: Vec::new(),
                 current_sentence_idx: None,
                 tts_track: Vec::new(),
-                tts_deadline: None,
+                tts_started_at: None,
+                tts_elapsed: Duration::ZERO,
                 tts_running: false,
                 day_highlight: config.day_highlight,
                 night_highlight: config.night_highlight,
@@ -1098,6 +1090,8 @@ impl App {
         let speed = self.tts_speed;
         let threads = self.tts_threads.max(1);
         let page_id = page;
+        self.tts_started_at = None;
+        self.tts_elapsed = Duration::ZERO;
         self.tts_request_id = self.tts_request_id.wrapping_add(1);
         let request_id = self.tts_request_id;
         self.save_epub_config();
