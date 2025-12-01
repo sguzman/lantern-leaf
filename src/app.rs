@@ -9,6 +9,7 @@ use crate::config::{AppConfig, FontFamily, FontWeight, Justification, ThemeMode}
 use crate::text_utils::split_sentences;
 use crate::tts::{TtsEngine, TtsPlayback};
 use crate::pagination::{paginate, MAX_FONT_SIZE, MIN_FONT_SIZE};
+use iced::Color;
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{
     button, column, container, pick_list, row, scrollable, slider, text, Column, Row,
@@ -16,6 +17,7 @@ use iced::widget::{
 use iced::widget::text::{LineHeight, Wrapping};
 use iced::{Element, Font, Length, Task, Theme};
 use iced::font::{Family, Weight};
+use iced::widget::container::Style;
 
 /// Limits and defaults for reader controls.
 const MAX_MARGIN: u16 = 48;
@@ -99,6 +101,7 @@ pub struct App {
     tts_open: bool,
     tts_speed: f32,
     last_sentences: Vec<String>,
+    current_sentence_idx: Option<usize>,
 }
 
 impl App {
@@ -274,16 +277,59 @@ impl App {
 
         let page_content = self.formatted_page_content();
 
-        let text_widget = text(page_content)
-            .size(self.font_size as f32)
-            .line_height(LineHeight::Relative(self.line_spacing))
-            .width(Length::Fill)
-            .wrapping(Wrapping::WordOrGlyph)
-            .align_x(self.justification_alignment())
-            .font(self.current_font());
+        let text_view_content: Element<'_, Message> = if self.tts_playback.is_some()
+            && !self.last_sentences.is_empty()
+        {
+            let sentences = split_sentences(page_content.clone());
+            let highlight_idx = self.current_sentence_idx.unwrap_or(0);
+            let items: Column<'_, Message> = sentences
+                .into_iter()
+                .enumerate()
+                .fold(column![].spacing(6), |col, (idx, sentence)| {
+                    let is_active = idx == highlight_idx;
+                    let style = move |_theme: &Theme| {
+                        Style {
+                            background: if is_active {
+                                Some(iced::Background::Color(Color {
+                                    r: 0.2,
+                                    g: 0.4,
+                                    b: 0.7,
+                                    a: 0.15,
+                                }))
+                            } else {
+                                None
+                            },
+                            ..Default::default()
+                        }
+                    };
+                    col.push(
+                        container(
+                            text(sentence)
+                                .size(self.font_size as f32)
+                                .line_height(LineHeight::Relative(self.line_spacing))
+                                .width(Length::Fill)
+                                .wrapping(Wrapping::WordOrGlyph)
+                                .align_x(self.justification_alignment())
+                                .font(self.current_font()),
+                        )
+                        .padding(4)
+                        .style(style),
+                    )
+                });
+            items.into()
+        } else {
+            text(page_content)
+                .size(self.font_size as f32)
+                .line_height(LineHeight::Relative(self.line_spacing))
+                .width(Length::Fill)
+                .wrapping(Wrapping::WordOrGlyph)
+                .align_x(self.justification_alignment())
+                .font(self.current_font())
+                .into()
+        };
 
         let text_view = scrollable(
-            container(text_widget)
+            container(text_view_content)
                 .width(Length::Fill)
                 .padding([self.margin_vertical, self.margin_horizontal]),
         )
@@ -351,6 +397,7 @@ pub fn run_app(
                 tts_open: false,
                 tts_speed: config.tts_speed.clamp(MIN_TTS_SPEED, MAX_TTS_SPEED),
                 last_sentences: Vec::new(),
+                current_sentence_idx: None,
             };
             app.repaginate();
             if let Some(last) = last_page {
@@ -561,6 +608,7 @@ impl App {
                 .to_string(),
         );
         self.last_sentences = sentences.clone();
+        self.current_sentence_idx = Some(sentence_idx.min(sentences.len().saturating_sub(1)));
 
         let sentence_idx = sentence_idx.min(sentences.len().saturating_sub(1));
         let mut files = Vec::new();
