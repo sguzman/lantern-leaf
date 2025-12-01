@@ -20,3 +20,5 @@ tts_model_path = "/usr/share/piper-voices/en/en_US/ryan/high/en_US-ryan-high.onn
 tts_espeak_path = "/usr/share"
 tts_speed = 2.5
 tts_threads = 16
+auto_scroll_tts = true
+center_spoken_sentence = true
