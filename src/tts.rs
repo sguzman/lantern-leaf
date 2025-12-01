@@ -12,8 +12,6 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-const DEFAULT_ESPEAK_PATH: &str = "/usr/share/espeak-ng-data";
-
 #[derive(Clone)]
 pub struct TtsEngine {
     model_path: PathBuf,
@@ -23,8 +21,7 @@ pub struct TtsEngine {
 }
 
 impl TtsEngine {
-    pub fn new(model_path: PathBuf, speed: f32) -> Result<Self> {
-        let espeak_path = PathBuf::from(DEFAULT_ESPEAK_PATH);
+    pub fn new(model_path: PathBuf, espeak_path: PathBuf, speed: f32) -> Result<Self> {
         let piper = Piper::new(
             model_path.to_string_lossy().to_string(),
             None::<String>,

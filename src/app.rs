@@ -334,7 +334,11 @@ pub fn run_app(
                 margin_horizontal,
                 margin_vertical,
                 epub_path,
-                tts_engine: TtsEngine::new(config.tts_model_path.clone().into(), config.tts_speed)
+                tts_engine: TtsEngine::new(
+                    config.tts_model_path.clone().into(),
+                    config.tts_espeak_path.clone().into(),
+                    config.tts_speed,
+                )
                     .ok(),
                 tts_playback: None,
                 tts_open: false,
