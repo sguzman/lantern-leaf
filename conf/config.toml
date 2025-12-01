@@ -10,6 +10,8 @@ word_spacing = 0
 letter_spacing = 0
 show_tts = true
 show_settings = true
+day_highlight = { r = 0.2, g = 0.4, b = 0.7, a = 0.15 }
+night_highlight = { r = 0.8, g = 0.8, b = 0.5, a = 0.2 }
 # TTS configuration
 tts_model_path = "/usr/share/piper-voices/en/en_US/ryan/high/en_US-ryan-high.onnx"
 tts_espeak_path = "/usr/share/espeak-ng-data"

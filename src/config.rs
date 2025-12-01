@@ -41,6 +41,10 @@ pub struct AppConfig {
     pub show_tts: bool,
     #[serde(default = "default_show_settings")]
     pub show_settings: bool,
+    #[serde(default = "default_day_highlight")]
+    pub day_highlight: HighlightColor,
+    #[serde(default = "default_night_highlight")]
+    pub night_highlight: HighlightColor,
 }
 
 impl Default for AppConfig {
@@ -61,6 +65,8 @@ impl Default for AppConfig {
             tts_espeak_path: default_tts_espeak_path(),
             show_tts: default_show_tts(),
             show_settings: default_show_settings(),
+            day_highlight: default_day_highlight(),
+            night_highlight: default_night_highlight(),
         }
     }
 }
@@ -229,4 +235,30 @@ fn default_show_tts() -> bool {
 
 fn default_show_settings() -> bool {
     true
+}
+
+fn default_day_highlight() -> HighlightColor {
+    HighlightColor {
+        r: 0.2,
+        g: 0.4,
+        b: 0.7,
+        a: 0.15,
+    }
+}
+
+fn default_night_highlight() -> HighlightColor {
+    HighlightColor {
+        r: 0.8,
+        g: 0.8,
+        b: 0.5,
+        a: 0.2,
+    }
+}
+
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
+pub struct HighlightColor {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
 }

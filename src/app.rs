@@ -5,7 +5,9 @@
 //! `pagination` to break that text into pages based on the current font size.
 
 use crate::cache::save_last_page;
-use crate::config::{AppConfig, FontFamily, FontWeight, Justification, ThemeMode};
+use crate::config::{
+    AppConfig, FontFamily, FontWeight, HighlightColor, Justification, ThemeMode,
+};
 use crate::text_utils::split_sentences;
 use crate::tts::{TtsEngine, TtsPlayback};
 use crate::pagination::{paginate, MAX_FONT_SIZE, MIN_FONT_SIZE};
@@ -114,6 +116,8 @@ pub struct App {
     tts_track: Vec<(PathBuf, Duration)>,
     tts_deadline: Option<Instant>,
     tts_running: bool,
+    day_highlight: HighlightColor,
+    night_highlight: HighlightColor,
 }
 
 impl App {
@@ -386,20 +390,14 @@ impl App {
                 .enumerate()
                 .fold(column![].spacing(6), |col, (idx, sentence)| {
                     let is_active = idx == highlight_idx;
-                    let style = move |_theme: &Theme| {
-                        Style {
-                            background: if is_active {
-                                Some(iced::Background::Color(Color {
-                                    r: 0.2,
-                                    g: 0.4,
-                                    b: 0.7,
-                                    a: 0.15,
-                                }))
-                            } else {
-                                None
-                            },
-                            ..Default::default()
-                        }
+                    let highlight = self.highlight_color();
+                    let style = move |_theme: &Theme| Style {
+                        background: if is_active {
+                            Some(iced::Background::Color(highlight))
+                        } else {
+                            None
+                        },
+                        ..Default::default()
                     };
                     col.push(
                         container(
@@ -459,6 +457,20 @@ impl App {
             Subscription::none()
         }
     }
+
+    fn highlight_color(&self) -> Color {
+        let base = if self.night_mode {
+            self.night_highlight
+        } else {
+            self.day_highlight
+        };
+        Color {
+            r: base.r,
+            g: base.g,
+            b: base.b,
+            a: base.a,
+        }
+    }
 }
 
 /// Helper to launch the app with the provided text.
@@ -500,15 +512,17 @@ pub fn run_app(
                     config.tts_espeak_path.clone().into(),
                 )
                     .ok(),
-                tts_playback: None,
-                tts_open: config.show_tts,
-                tts_speed: config.tts_speed.clamp(MIN_TTS_SPEED, MAX_TTS_SPEED),
-                last_sentences: Vec::new(),
-                current_sentence_idx: None,
-                tts_track: Vec::new(),
-                tts_deadline: None,
-                tts_running: false,
-            };
+            tts_playback: None,
+            tts_open: config.show_tts,
+            tts_speed: config.tts_speed.clamp(MIN_TTS_SPEED, MAX_TTS_SPEED),
+            last_sentences: Vec::new(),
+            current_sentence_idx: None,
+            tts_track: Vec::new(),
+            tts_deadline: None,
+            tts_running: false,
+            day_highlight: config.day_highlight,
+            night_highlight: config.night_highlight,
+        };
             app.repaginate();
             if let Some(last) = last_page {
                 app.current_page = last.min(app.pages.len().saturating_sub(1));
