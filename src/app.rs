@@ -79,6 +79,8 @@ pub enum Message {
     WordSpacingChanged(u32),
     LetterSpacingChanged(u32),
     ToggleTtsControls,
+    DayHighlightChanged(Component, f32),
+    NightHighlightChanged(Component, f32),
     Play,
     Pause,
     PlayFromPageStart,
@@ -209,6 +211,12 @@ impl App {
             }
             Message::LetterSpacingChanged(spacing) => {
                 self.letter_spacing = spacing.min(MAX_LETTER_SPACING);
+            }
+            Message::DayHighlightChanged(component, value) => {
+                self.day_highlight = apply_component(self.day_highlight, component, value);
+            }
+            Message::NightHighlightChanged(component, value) => {
+                self.night_highlight = apply_component(self.night_highlight, component, value);
             }
             Message::ToggleTtsControls => {
                 self.tts_open = !self.tts_open;
@@ -473,6 +481,40 @@ impl App {
     }
 }
 
+fn color_row<'a>(
+    label: &'a str,
+    color: HighlightColor,
+    msg: impl Fn(Component, f32) -> Message + Copy + 'a,
+) -> Row<'a, Message> {
+    row![
+        text(label),
+        slider(0.0..=1.0, color.r, move |v| msg(Component::R, v)).step(0.01),
+        slider(0.0..=1.0, color.g, move |v| msg(Component::G, v)).step(0.01),
+        slider(0.0..=1.0, color.b, move |v| msg(Component::B, v)).step(0.01),
+        slider(0.0..=1.0, color.a, move |v| msg(Component::A, v)).step(0.01),
+    ]
+    .spacing(6)
+    .align_y(Vertical::Center)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Component {
+    R,
+    G,
+    B,
+    A,
+}
+
+fn apply_component(mut color: HighlightColor, component: Component, value: f32) -> HighlightColor {
+    let clamped = value.clamp(0.0, 1.0);
+    match component {
+        Component::R => color.r = clamped,
+        Component::G => color.g = clamped,
+        Component::B => color.b = clamped,
+        Component::A => color.a = clamped,
+    }
+    color
+}
 /// Helper to launch the app with the provided text.
 pub fn run_app(
     text: String,
@@ -667,6 +709,17 @@ impl App {
             row![text(format!("Letter spacing: {}", self.letter_spacing)), letter_spacing_slider]
                 .spacing(8)
                 .align_y(Vertical::Center),
+            text("Highlight Colors").size(18.0),
+            color_row(
+                "Day highlight",
+                self.day_highlight,
+                |c, v| Message::DayHighlightChanged(c, v),
+            ),
+            color_row(
+                "Night highlight",
+                self.night_highlight,
+                |c, v| Message::NightHighlightChanged(c, v),
+            ),
         ]
         .spacing(12)
         .width(Length::Fixed(280.0));
