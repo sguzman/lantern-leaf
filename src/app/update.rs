@@ -147,6 +147,10 @@ impl App {
                     self.pause_after_sentence = clamped;
                     info!(pause_secs = clamped, "Updated pause after sentence");
                     self.save_epub_config();
+                    if self.tts_playback.is_some() {
+                        let idx = self.current_sentence_idx.unwrap_or(0);
+                        tasks.push(self.start_playback_from(self.current_page, idx));
+                    }
                 }
             }
             Message::NightHighlightChanged(component, value) => {
@@ -278,8 +282,9 @@ impl App {
 
                     let mut acc = Duration::ZERO;
                     let mut target_idx = None;
+                    let pause = Duration::from_secs_f32(self.pause_after_sentence);
                     for (i, (_, dur)) in self.tts_track.iter().enumerate() {
-                        acc += *dur;
+                        acc += *dur + pause;
                         if elapsed <= acc {
                             target_idx = Some(i);
                             break;
@@ -346,11 +351,12 @@ impl App {
                         self.tts_track = files.clone();
                         self.current_sentence_idx =
                             Some(start_idx.min(files.len().saturating_sub(1)));
+                        let pause = Duration::from_secs_f32(self.pause_after_sentence);
                         let base = self
                             .tts_track
                             .iter()
                             .take(start_idx)
-                            .fold(Duration::ZERO, |acc, (_, d)| acc + *d);
+                            .fold(Duration::ZERO, |acc, (_, d)| acc + *d + pause);
                         self.tts_elapsed = base;
                         self.tts_started_at = Some(Instant::now());
                         self.tts_running = true;
