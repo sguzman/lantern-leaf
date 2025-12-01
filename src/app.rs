@@ -32,7 +32,7 @@ const MAX_MARGIN: u16 = 48;
 const MAX_WORD_SPACING: u32 = 5;
 const MAX_LETTER_SPACING: u32 = 3;
 const MIN_TTS_SPEED: f32 = 0.1;
-const MAX_TTS_SPEED: f32 = 2.0;
+const MAX_TTS_SPEED: f32 = 3.0;
 const HIGHLIGHT_LEAD_MS: u64 = 30;
 const FONT_FAMILIES: [FontFamily; 13] = [
     FontFamily::Sans,

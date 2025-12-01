@@ -222,7 +222,7 @@ fn default_tts_model() -> String {
 }
 
 fn default_tts_speed() -> f32 {
-    2.0
+    2.5
 }
 
 fn default_tts_espeak_path() -> String {
