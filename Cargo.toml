@@ -14,3 +14,4 @@ sha2 = "0.10"
 piper1_rs = { package = "piper1-rs", version = "0.1.0" }
 rodio = { version = "0.18", features = ["vorbis", "flac"] }
 hound = "3.5"
+threadpool = "1.8"

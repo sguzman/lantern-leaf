@@ -4,33 +4,23 @@
 use anyhow::{Context, Result};
 use hound::WavSpec;
 use piper1_rs::{Piper, PiperSynthesisOptions};
-use rodio::{Decoder, OutputStream, Sink};
+use rodio::{Decoder, OutputStream, Sink, Source};
 use sha2::{Digest, Sha256};
+use threadpool::ThreadPool;
+use std::sync::mpsc;
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 pub struct TtsEngine {
     model_path: PathBuf,
     espeak_path: PathBuf,
-    inner: Arc<Mutex<Piper>>,
 }
 
 impl TtsEngine {
     pub fn new(model_path: PathBuf, espeak_path: PathBuf) -> Result<Self> {
-        let piper = Piper::new(
-            model_path.to_string_lossy().to_string(),
-            None::<String>,
-            espeak_path.to_string_lossy().to_string(),
-        )
-        .context("Loading Piper model")?;
-        Ok(Self {
-            model_path,
-            espeak_path,
-            inner: Arc::new(Mutex::new(piper)),
-        })
+        Ok(Self { model_path, espeak_path })
     }
 
     /// Ensure audio for a sentence exists, returning the cached path.
@@ -44,7 +34,12 @@ impl TtsEngine {
             fs::create_dir_all(parent)?;
         }
 
-        let mut piper = self.inner.lock().expect("tts mutex poisoned");
+        let mut piper = Piper::new(
+            self.model_path.to_string_lossy().to_string(),
+            None::<String>,
+            self.espeak_path.to_string_lossy().to_string(),
+        )
+        .context("Loading Piper model")?;
         let mut options: PiperSynthesisOptions = piper.get_default_synthesis_options();
 
         // Piper length_scale is roughly inverse speed.
@@ -80,6 +75,42 @@ impl TtsEngine {
 
         sink.play();
         Ok(TtsPlayback { _stream, sink })
+    }
+
+    /// Prepare a batch of sentences concurrently using a thread pool.
+    pub fn prepare_batch(
+        &self,
+        cache_root: PathBuf,
+        sentences: Vec<String>,
+        start_idx: usize,
+        speed: f32,
+        threads: usize,
+    ) -> Result<Vec<(PathBuf, std::time::Duration)>> {
+        let pool = ThreadPool::new(threads.max(1));
+        let (tx, rx) = mpsc::channel();
+
+        for sentence in sentences.into_iter().skip(start_idx) {
+            let engine = self.clone();
+            let cache_root = cache_root.clone();
+            let tx = tx.clone();
+            pool.execute(move || {
+                let result = engine
+                    .ensure_audio(&cache_root, &sentence, speed)
+                    .and_then(|path| {
+                        let dur = sentence_duration(&path);
+                        Ok((path, dur))
+                    });
+                let _ = tx.send(result);
+            });
+        }
+        drop(tx);
+
+        let mut results = Vec::new();
+        for res in rx {
+            results.push(res?);
+        }
+
+        Ok(results)
     }
 }
 
@@ -129,4 +160,16 @@ fn write_wav(path: &Path, sample_rate: u32, samples: &[f32]) -> Result<()> {
     }
     writer.finalize()?;
     Ok(())
+}
+
+fn sentence_duration(path: &Path) -> std::time::Duration {
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return std::time::Duration::from_secs(1),
+    };
+    let reader = BufReader::new(file);
+    Decoder::new(reader)
+        .ok()
+        .and_then(|d| d.total_duration())
+        .unwrap_or(std::time::Duration::from_secs(1))
 }

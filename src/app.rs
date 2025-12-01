@@ -23,9 +23,6 @@ use iced::{Element, Font, Length, Task, Theme};
 use iced::font::{Family, Weight};
 use std::time::{Duration, Instant};
 use std::path::PathBuf;
-use std::fs::File;
-use std::io::BufReader;
-use rodio::{Decoder, Source};
 
 /// Limits and defaults for reader controls.
 const MAX_MARGIN: u16 = 48;
@@ -87,6 +84,11 @@ pub enum Message {
     SetTtsSpeed(f32),
     SeekForward,
     SeekBackward,
+    TtsPrepared {
+        page: usize,
+        start_idx: usize,
+        files: Vec<(PathBuf, Duration)>,
+    },
     Tick(Instant),
 }
 
@@ -112,6 +114,7 @@ pub struct App {
     tts_playback: Option<TtsPlayback>,
     tts_open: bool,
     tts_speed: f32,
+    tts_threads: usize,
     last_sentences: Vec<String>,
     current_sentence_idx: Option<usize>,
     tts_track: Vec<(PathBuf, Duration)>,
@@ -146,6 +149,7 @@ impl App {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         let mut page_changed = false;
+        let mut tasks: Vec<Task<Message>> = Vec::new();
 
         match message {
             Message::NextPage => {
@@ -154,7 +158,7 @@ impl App {
                     page_changed = true;
                     let playing = self.tts_playback.as_ref().map(|p| !p.is_paused()).unwrap_or(false);
                     if playing {
-                        self.start_playback_from(self.current_page, 0);
+                        tasks.push(self.start_playback_from(self.current_page, 0));
                     } else {
                         self.current_sentence_idx = None;
                         self.tts_running = false;
@@ -168,7 +172,7 @@ impl App {
                     page_changed = true;
                     let playing = self.tts_playback.as_ref().map(|p| !p.is_paused()).unwrap_or(false);
                     if playing {
-                        self.start_playback_from(self.current_page, 0);
+                        tasks.push(self.start_playback_from(self.current_page, 0));
                     } else {
                         self.current_sentence_idx = None;
                         self.tts_running = false;
@@ -241,7 +245,7 @@ impl App {
                 // Restart playback at current position with new synthesis speed to preserve pitch
                 if self.tts_playback.is_some() {
                     let idx = self.current_sentence_idx.unwrap_or(0);
-                    self.start_playback_from(self.current_page, idx);
+                    tasks.push(self.start_playback_from(self.current_page, idx));
                 }
                 self.save_epub_config();
             }
@@ -249,14 +253,14 @@ impl App {
                 if let Some(playback) = &self.tts_playback {
                     playback.play();
                 } else {
-                    self.start_playback_from(self.current_page, 0);
+                    tasks.push(self.start_playback_from(self.current_page, 0));
                 }
             }
             Message::PlayFromPageStart => {
-                self.start_playback_from(self.current_page, 0);
+                tasks.push(self.start_playback_from(self.current_page, 0));
             }
             Message::PlayFromCursor(idx) => {
-                self.start_playback_from(self.current_page, idx);
+                tasks.push(self.start_playback_from(self.current_page, idx));
             }
             Message::Pause => {
                 if let Some(playback) = &self.tts_playback {
@@ -268,10 +272,10 @@ impl App {
             Message::SeekForward => {
                 let next_idx = self.current_sentence_idx.unwrap_or(0) + 1;
                 if next_idx < self.last_sentences.len() {
-                    self.start_playback_from(self.current_page, next_idx);
+                    tasks.push(self.start_playback_from(self.current_page, next_idx));
                 } else if self.current_page + 1 < self.pages.len() {
                     self.current_page += 1;
-                    self.start_playback_from(self.current_page, 0);
+                    tasks.push(self.start_playback_from(self.current_page, 0));
                     page_changed = true;
                     self.save_epub_config();
                 }
@@ -279,7 +283,7 @@ impl App {
             Message::SeekBackward => {
                 let current_idx = self.current_sentence_idx.unwrap_or(0);
                 if current_idx > 0 {
-                    self.start_playback_from(self.current_page, current_idx - 1);
+                    tasks.push(self.start_playback_from(self.current_page, current_idx - 1));
                 } else if self.current_page > 0 {
                     self.current_page -= 1;
                     let last_idx = split_sentences(
@@ -291,7 +295,7 @@ impl App {
                     )
                     .len()
                     .saturating_sub(1);
-                    self.start_playback_from(self.current_page, last_idx);
+                    tasks.push(self.start_playback_from(self.current_page, last_idx));
                     page_changed = true;
                     self.save_epub_config();
                 }
@@ -317,7 +321,7 @@ impl App {
                     {
                         if self.current_page + 1 < self.pages.len() {
                             self.current_page += 1;
-                            self.start_playback_from(self.current_page, 0);
+                            tasks.push(self.start_playback_from(self.current_page, 0));
                         } else {
                             self.tts_running = false;
                             self.tts_deadline = None;
@@ -340,11 +344,30 @@ impl App {
                                 }
                             } else if self.current_page + 1 < self.pages.len() {
                                 self.current_page += 1;
-                                self.start_playback_from(self.current_page, 0);
+                                tasks.push(self.start_playback_from(self.current_page, 0));
                             } else {
                                 self.tts_running = false;
                                 self.tts_deadline = None;
                             }
+                        }
+                    }
+                }
+            }
+            Message::TtsPrepared { page, start_idx, files } => {
+                if page != self.current_page {
+                    // Stale result; ignore.
+                    return Task::none();
+                }
+                if let Some(engine) = &self.tts_engine {
+                    if let Ok(playback) = engine.play_files(&files.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>()) {
+                        self.tts_playback = Some(playback);
+                        self.tts_track = files.clone();
+                        self.current_sentence_idx = Some(start_idx.min(files.len().saturating_sub(1)));
+                        if let Some((_, dur)) = self.tts_track.first() {
+                            let lead = Duration::from_millis(HIGHLIGHT_LEAD_MS);
+                            let next_deadline = Instant::now() + dur.saturating_sub(lead);
+                            self.tts_deadline = Some(next_deadline);
+                            self.tts_running = true;
                         }
                     }
                 }
@@ -355,7 +378,11 @@ impl App {
             save_last_page(&self.epub_path, self.current_page);
         }
 
-        Task::none()
+        if tasks.is_empty() {
+            Task::none()
+        } else {
+            Task::batch(tasks)
+        }
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -531,6 +558,7 @@ impl App {
             tts_model_path: self.tts_model_path.clone(),
             tts_speed: self.tts_speed,
             tts_espeak_path: self.tts_espeak_path.clone(),
+            tts_threads: self.tts_threads,
             show_tts: self.tts_open,
             show_settings: self.settings_open,
             day_highlight: self.day_highlight,
@@ -617,6 +645,7 @@ pub fn run_app(
             tts_playback: None,
             tts_open: config.show_tts,
             tts_speed: config.tts_speed.clamp(MIN_TTS_SPEED, MAX_TTS_SPEED),
+            tts_threads: config.tts_threads.max(1),
             last_sentences: Vec::new(),
             current_sentence_idx: None,
             tts_track: Vec::new(),
@@ -829,9 +858,9 @@ impl App {
         .into()
     }
 
-    fn start_playback_from(&mut self, page: usize, sentence_idx: usize) {
+    fn start_playback_from(&mut self, page: usize, sentence_idx: usize) -> Task<Message> {
         let Some(engine) = &self.tts_engine else {
-            return;
+            return Task::none();
         };
 
         let sentences = split_sentences(
@@ -845,42 +874,29 @@ impl App {
         self.current_sentence_idx = Some(sentence_idx.min(sentences.len().saturating_sub(1)));
 
         let sentence_idx = sentence_idx.min(sentences.len().saturating_sub(1));
-        let mut files = Vec::new();
-        let mut track = Vec::new();
         let cache_root = crate::cache::tts_dir(&self.epub_path);
-        for (_i, sent) in sentences.iter().enumerate().skip(sentence_idx) {
-            if let Ok(path) = engine.ensure_audio(&cache_root, sent, self.tts_speed) {
-                let dur = sentence_duration(&path, self.tts_speed);
-                track.push((path.clone(), dur));
-                files.push(path);
-            }
-        }
-
-        if let Ok(playback) = engine.play_files(&files) {
-            self.tts_playback = Some(playback);
-            self.tts_track = track;
-            self.current_sentence_idx = Some(sentence_idx.min(self.last_sentences.len().saturating_sub(1)));
-            if let Some((_, dur)) = self.tts_track.first() {
-                let lead = Duration::from_millis(HIGHLIGHT_LEAD_MS);
-                let next_deadline = Instant::now() + dur.saturating_sub(lead);
-                self.tts_deadline = Some(next_deadline);
-                self.tts_running = true;
-            }
-        }
+        let speed = self.tts_speed;
+        let threads = self.tts_threads.max(1);
+        let page_id = page;
+        let engine = engine.clone();
         self.save_epub_config();
+
+        Task::perform(
+            async move {
+                engine
+                    .prepare_batch(cache_root, sentences, sentence_idx, speed, threads)
+                    .map(|files| Message::TtsPrepared {
+                        page: page_id,
+                        start_idx: sentence_idx,
+                        files,
+                    })
+                    .unwrap_or_else(|_| Message::TtsPrepared {
+                        page: page_id,
+                        start_idx: sentence_idx,
+                        files: Vec::new(),
+                    })
+            },
+            |msg| msg,
+        )
     }
-}
-
-fn sentence_duration(path: &PathBuf, _speed: f32) -> Duration {
-    let file = match File::open(path) {
-        Ok(f) => f,
-        Err(_) => return Duration::from_secs(1),
-    };
-    let reader = BufReader::new(file);
-    let dur = Decoder::new(reader)
-        .ok()
-        .and_then(|d| d.total_duration())
-        .unwrap_or(Duration::from_secs(1));
-
-    dur
 }
