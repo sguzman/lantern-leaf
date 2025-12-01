@@ -36,9 +36,12 @@ fn main() {
 
 fn run(reload_handle: &ReloadHandle) -> Result<()> {
     let epub_path = parse_args()?;
-    let mut config = load_config(Path::new("conf/config.toml"));
-    if let Some(overrides) = load_epub_config(&epub_path) {
+    let base_config = load_config(Path::new("conf/config.toml"));
+    let mut config = base_config.clone();
+    if let Some(mut overrides) = load_epub_config(&epub_path) {
         info!("Loaded per-epub overrides from cache");
+        // Always honor the base config's log level so user changes take effect.
+        overrides.log_level = base_config.log_level;
         config = overrides;
     }
     set_log_level(reload_handle, config.log_level.as_filter_str());
