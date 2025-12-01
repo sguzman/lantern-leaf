@@ -477,12 +477,13 @@ impl App {
         }
 
         let clamped_idx = sentence_idx.min(total_sentences.saturating_sub(1)) as f32;
+        let denom = total_sentences.saturating_sub(1).max(1) as f32;
+        let step = 1.0 / denom;
+        let base = (clamped_idx / denom).clamp(0.0, 1.0);
         let y = if self.center_spoken_sentence {
-            ((clamped_idx + 0.5) / total_sentences as f32).clamp(0.0, 1.0)
-        } else if total_sentences > 1 {
-            (clamped_idx / total_sentences.saturating_sub(1) as f32).clamp(0.0, 1.0)
+            (base - 0.5 * step).clamp(0.0, 1.0)
         } else {
-            0.0
+            base
         };
 
         Some(iced::widget::scrollable::RelativeOffset { x: 0.0, y })
