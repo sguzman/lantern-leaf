@@ -250,14 +250,14 @@ impl App {
             .align_y(Vertical::Center),
             checkbox(
                 "Auto-scroll to spoken sentence",
-                self.auto_scroll_tts,
-                Message::AutoScrollTtsChanged
-            ),
+                self.auto_scroll_tts
+            )
+            .on_toggle(Message::AutoScrollTtsChanged),
             checkbox(
                 "Center tracked sentence while auto-scrolling",
-                self.center_spoken_sentence,
-                Message::CenterSpokenSentenceChanged
-            ),
+                self.center_spoken_sentence
+            )
+            .on_toggle(Message::CenterSpokenSentenceChanged),
             row![
                 text(format!("Lines per page: {}", self.lines_per_page)),
                 lines_per_page_slider
