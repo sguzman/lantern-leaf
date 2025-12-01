@@ -20,6 +20,7 @@ pub struct TtsEngine {
 
 impl TtsEngine {
     pub fn new(model_path: PathBuf, espeak_path: PathBuf) -> Result<Self> {
+        let espeak_path = sanitize_espeak_root(espeak_path);
         Ok(Self { model_path, espeak_path })
     }
 
@@ -144,6 +145,22 @@ fn cache_path(base: &Path, model_path: &Path, sentence: &str, speed: f32) -> Pat
     hasher.update(speed.to_le_bytes());
     let hash = format!("{:x}", hasher.finalize());
     base.join(format!("tts-{hash}.wav"))
+}
+
+/// Piper expects the parent directory that contains `espeak-ng-data/phonindex`.
+/// Users often point directly at `.../espeak-ng-data`; trim that to avoid
+/// duplicated segments like `/espeak-ng-data/espeak-ng-data/phonindex`.
+fn sanitize_espeak_root(path: PathBuf) -> PathBuf {
+    if path
+        .file_name()
+        .map(|n| n == "espeak-ng-data")
+        .unwrap_or(false)
+    {
+        if let Some(parent) = path.parent() {
+            return parent.to_path_buf();
+        }
+    }
+    path
 }
 
 fn write_wav(path: &Path, sample_rate: u32, samples: &[f32]) -> Result<()> {

@@ -229,7 +229,7 @@ fn default_tts_speed() -> f32 {
 }
 
 fn default_tts_espeak_path() -> String {
-    "/usr/share/espeak-ng-data".to_string()
+    "/usr/share".to_string()
 }
 
 fn default_tts_threads() -> usize {
