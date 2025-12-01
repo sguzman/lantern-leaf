@@ -15,5 +15,6 @@ piper1_rs = { package = "piper1-rs", version = "0.1.0" }
 rodio = { version = "0.18", features = ["vorbis", "flac"] }
 hound = "3.5"
 threadpool = "1.8"
+once_cell = "1.19"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }

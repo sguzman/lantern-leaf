@@ -754,6 +754,7 @@ dependencies = [
  "hound",
  "html2text",
  "iced",
+ "once_cell",
  "piper1-rs",
  "rodio",
  "serde",

@@ -3,15 +3,17 @@
 
 use anyhow::{Context, Result};
 use hound::WavSpec;
+use once_cell::sync::Lazy;
 use piper1_rs::{Piper, PiperSynthesisOptions};
 use rodio::{Decoder, OutputStream, Sink, Source};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
-use threadpool::ThreadPool;
+use std::sync::Mutex;
 use tracing::{debug, info, warn};
+
+static PIPER_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 #[derive(Clone)]
 pub struct TtsEngine {
@@ -82,60 +84,43 @@ impl TtsEngine {
         speed: f32,
         threads: usize,
     ) -> Result<Vec<(PathBuf, std::time::Duration)>> {
-        let pool = ThreadPool::new(threads.max(1));
-        let (tx, rx) = mpsc::channel();
-        let engine = self.clone();
+        let _lock = PIPER_GUARD.lock().unwrap();
+        let mut piper = Piper::new(
+            self.model_path.to_string_lossy().to_string(),
+            None::<String>,
+            self.espeak_path.to_string_lossy().to_string(),
+        )
+        .context("Loading Piper model")?;
+
         info!(
             sentence_count = sentences.len(),
             start_idx, speed, threads, "Preparing TTS batch"
         );
-        pool.execute(move || {
-            let mut piper = match Piper::new(
-                engine.model_path.to_string_lossy().to_string(),
-                None::<String>,
-                engine.espeak_path.to_string_lossy().to_string(),
-            ) {
-                Ok(p) => p,
-                Err(err) => {
-                    warn!("Failed to load Piper model in worker: {err}");
-                    let _ = tx.send(Err(anyhow::Error::new(err).context("Loading Piper model")));
-                    return;
-                }
-            };
 
-            let mut collected = Vec::new();
-            for sentence in sentences.into_iter().skip(start_idx) {
-                let path = cache_path(&cache_root, &engine.model_path, &sentence, speed);
+        let mut collected = Vec::new();
+        for sentence in sentences.into_iter().skip(start_idx) {
+            let path = cache_path(&cache_root, &self.model_path, &sentence, speed);
 
-                if !path.exists() {
-                    debug!(path = %path.display(), "Synthesizing new sentence");
-                    if let Some(parent) = path.parent() {
-                        if let Err(err) = fs::create_dir_all(parent) {
-                            warn!("Failed to create TTS cache dir: {err}");
-                            let _ = tx.send(Err(err.into()));
-                            return;
-                        }
-                    }
-
-                    if let Err(err) = synth_with_piper(&mut piper, &path, &sentence, speed) {
-                        warn!("Failed to synthesize sentence: {err}");
-                        let _ = tx.send(Err(err));
-                        return;
+            if !path.exists() {
+                debug!(path = %path.display(), "Synthesizing new sentence");
+                if let Some(parent) = path.parent() {
+                    if let Err(err) = fs::create_dir_all(parent) {
+                        warn!("Failed to create TTS cache dir: {err}");
+                        return Err(err.into());
                     }
                 }
 
-                let dur = sentence_duration(&path);
-                collected.push((path, dur));
+                if let Err(err) = synth_with_piper(&mut piper, &path, &sentence, speed) {
+                    warn!("Failed to synthesize sentence: {err}");
+                    return Err(err);
+                }
             }
-            debug!(count = collected.len(), "Prepared TTS batch");
-            let _ = tx.send(Ok(collected));
-        });
 
-        // Only one job is submitted; receive its result.
-        match rx.recv() {
-            Ok(res) => res,
-            Err(_) => Ok(Vec::new()),
+            let dur = sentence_duration(&path);
+            collected.push((path, dur));
         }
+        debug!(count = collected.len(), "Prepared TTS batch");
+        Ok(collected)
     }
 }
 
