@@ -235,6 +235,8 @@ impl App {
                 if let Some(playback) = &self.tts_playback {
                     playback.pause();
                 }
+                self.tts_running = false;
+                self.tts_deadline = None;
             }
             Message::SeekForward => {
                 let next_idx = self.current_sentence_idx.unwrap_or(0) + 1;
@@ -267,11 +269,21 @@ impl App {
             }
             Message::Tick(now) => {
                 if self.tts_running {
+                    // If paused, skip ticking.
+                    if self
+                        .tts_playback
+                        .as_ref()
+                        .map(|p| p.is_paused())
+                        .unwrap_or(false)
+                    {
+                        return Task::none();
+                    }
+
                     // If the sink finished early, advance to next page or stop.
                     if self
                         .tts_playback
                         .as_ref()
-                        .map(|p| p.is_paused() || p.is_finished())
+                        .map(|p| p.is_finished())
                         .unwrap_or(true)
                     {
                         if self.current_page + 1 < self.pages.len() {
