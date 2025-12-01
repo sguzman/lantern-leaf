@@ -18,11 +18,13 @@ use iced::Subscription;
 use iced::alignment::{Horizontal, Vertical};
 use iced::font::{Family, Weight};
 use iced::time;
+use iced::widget::scrollable::{self, Id as ScrollId, RelativeOffset};
 use iced::widget::text::{LineHeight, Wrapping};
 use iced::widget::{
     Column, Row, button, column, container, pick_list, row, scrollable, slider, text,
 };
 use iced::{Element, Font, Length, Task, Theme};
+use once_cell::sync::Lazy;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -34,6 +36,7 @@ const MAX_LETTER_SPACING: u32 = 3;
 const MIN_TTS_SPEED: f32 = 0.1;
 const MAX_TTS_SPEED: f32 = 3.0;
 const HIGHLIGHT_LEAD_MS: u64 = 30;
+static TEXT_SCROLL_ID: Lazy<ScrollId> = Lazy::new(|| ScrollId::new("text-scroll"));
 const FONT_FAMILIES: [FontFamily; 13] = [
     FontFamily::Sans,
     FontFamily::Serif,
@@ -335,8 +338,22 @@ impl App {
             }
             Message::JumpToCurrentAudio => {
                 if let Some(idx) = self.current_sentence_idx {
-                    info!(idx, "Jumping to current audio sentence");
-                    tasks.push(self.start_playback_from(self.current_page, idx));
+                    let total = self.last_sentences.len();
+                    if total > 0 {
+                        let fraction = if total > 1 {
+                            (idx as f32 / (total.saturating_sub(1)) as f32).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        info!(
+                            idx,
+                            fraction, "Jumping to current audio sentence (scroll only)"
+                        );
+                        tasks.push(scrollable::snap_to(
+                            TEXT_SCROLL_ID.clone(),
+                            RelativeOffset::new(0.0, fraction),
+                        ));
+                    }
                 }
             }
             Message::Pause => {
@@ -633,6 +650,7 @@ impl App {
                 .width(Length::Fill)
                 .padding([self.margin_vertical, self.margin_horizontal]),
         )
+        .id(TEXT_SCROLL_ID.clone())
         .height(Length::FillPortion(1));
 
         let mut content: Column<'_, Message> = column![controls, font_controls, text_view]
