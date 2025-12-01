@@ -506,21 +506,20 @@ impl App {
     }
 
     fn persist_bookmark(&self) {
-        let sentences = if self.last_sentences.is_empty() {
-            split_sentences(
-                self.pages
-                    .get(self.current_page)
-                    .map(String::as_str)
-                    .unwrap_or("")
-                    .to_string(),
-            )
-        } else {
-            self.last_sentences.clone()
-        };
+        let sentences = self.current_sentences();
 
         let sentence_idx = self
             .current_sentence_idx
-            .filter(|idx| *idx < sentences.len());
+            .filter(|idx| *idx < sentences.len())
+            .or_else(|| {
+                if sentences.is_empty() {
+                    None
+                } else {
+                    let frac = Self::sanitize_offset(self.last_scroll_offset).y;
+                    let idx = (frac * (sentences.len().saturating_sub(1) as f32)).round() as usize;
+                    Some(idx.min(sentences.len().saturating_sub(1)))
+                }
+            });
         let sentence_text = sentence_idx.and_then(|idx| sentences.get(idx).cloned());
         let scroll_y = Self::sanitize_offset(self.last_scroll_offset).y;
 
@@ -546,6 +545,16 @@ impl App {
             x: clamp(offset.x),
             y: clamp(offset.y),
         }
+    }
+
+    fn current_sentences(&self) -> Vec<String> {
+        split_sentences(
+            self.pages
+                .get(self.current_page)
+                .map(String::as_str)
+                .unwrap_or("")
+                .to_string(),
+        )
     }
 
     pub(super) fn scroll_offset_for_sentence(
