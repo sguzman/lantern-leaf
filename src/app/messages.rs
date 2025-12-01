@@ -1,4 +1,4 @@
-use crate::config::{FontFamily, FontWeight, Justification};
+use crate::config::{FontFamily, FontWeight};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -15,7 +15,6 @@ pub enum Message {
     LineSpacingChanged(f32),
     MarginHorizontalChanged(u16),
     MarginVerticalChanged(u16),
-    JustificationChanged(Justification),
     WordSpacingChanged(u32),
     LetterSpacingChanged(u32),
     LinesPerPageChanged(u32),

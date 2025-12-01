@@ -92,11 +92,6 @@ impl App {
                 );
                 self.save_epub_config();
             }
-            Message::JustificationChanged(justification) => {
-                debug!(?justification, "Text justification changed");
-                self.justification = justification;
-                self.save_epub_config();
-            }
             Message::WordSpacingChanged(spacing) => {
                 self.word_spacing = spacing.min(MAX_WORD_SPACING);
                 debug!(word_spacing = self.word_spacing, "Word spacing changed");

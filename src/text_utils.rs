@@ -8,15 +8,15 @@ pub fn split_sentences(text: String) -> Vec<String> {
     for ch in text.chars() {
         current.push(ch);
         if matches!(ch, '.' | '!' | '?') {
-            if !current.trim().is_empty() {
-                sentences.push(current.trim().to_string());
+            if current.chars().any(|c| !c.is_whitespace()) {
+                sentences.push(current.clone());
             }
             current.clear();
         }
     }
 
-    if !current.trim().is_empty() {
-        sentences.push(current.trim().to_string());
+    if current.chars().any(|c| !c.is_whitespace()) {
+        sentences.push(current);
     }
 
     sentences

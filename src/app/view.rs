@@ -3,6 +3,7 @@ use super::state::{App, MAX_LETTER_SPACING, MAX_MARGIN, MAX_WORD_SPACING, MIN_TT
 use crate::config::HighlightColor;
 use crate::pagination::{MAX_FONT_SIZE, MAX_LINES_PER_PAGE, MIN_FONT_SIZE, MIN_LINES_PER_PAGE};
 use crate::text_utils::split_sentences;
+use iced::alignment::Horizontal;
 use iced::alignment::Vertical;
 use iced::widget::text::{LineHeight, Wrapping};
 use iced::widget::{
@@ -80,7 +81,7 @@ impl App {
                         .line_height(LineHeight::Relative(self.line_spacing))
                         .width(Length::Fill)
                         .wrapping(Wrapping::WordOrGlyph)
-                        .align_x(self.justification_alignment())
+                        .align_x(Horizontal::Left)
                         .font(self.current_font())
                         .into();
                 }
@@ -95,7 +96,7 @@ impl App {
                     .enumerate()
                     .map(|(idx, sentence)| {
                         let mut span: iced::widget::text::Span<'_, Message> =
-                            iced::widget::text::Span::new(format!("{sentence} "))
+                            iced::widget::text::Span::new(sentence)
                                 .font(self.current_font())
                                 .size(self.font_size as f32)
                                 .line_height(LineHeight::Relative(self.line_spacing));
@@ -115,7 +116,7 @@ impl App {
 
                 rich.width(Length::Fill)
                     .wrapping(Wrapping::WordOrGlyph)
-                    .align_x(self.justification_alignment())
+                    .align_x(Horizontal::Left)
                     .into()
             } else {
                 text(page_content)
@@ -123,7 +124,7 @@ impl App {
                     .line_height(LineHeight::Relative(self.line_spacing))
                     .width(Length::Fill)
                     .wrapping(Wrapping::WordOrGlyph)
-                    .align_x(self.justification_alignment())
+                    .align_x(Horizontal::Left)
                     .font(self.current_font())
                     .into()
             };
@@ -184,11 +185,6 @@ impl App {
             Some(self.font_weight),
             Message::FontWeightChanged,
         );
-        let justification_picker = pick_list(
-            super::state::JUSTIFICATIONS,
-            Some(self.justification),
-            Message::JustificationChanged,
-        );
 
         let line_spacing_slider =
             slider(0.8..=2.5, self.line_spacing, Message::LineSpacingChanged).step(0.05);
@@ -248,11 +244,8 @@ impl App {
             ]
             .spacing(8)
             .align_y(Vertical::Center),
-            checkbox(
-                "Auto-scroll to spoken sentence",
-                self.auto_scroll_tts
-            )
-            .on_toggle(Message::AutoScrollTtsChanged),
+            checkbox("Auto-scroll to spoken sentence", self.auto_scroll_tts)
+                .on_toggle(Message::AutoScrollTtsChanged),
             checkbox(
                 "Center tracked sentence while auto-scrolling",
                 self.center_spoken_sentence
@@ -276,9 +269,6 @@ impl App {
             ]
             .spacing(8)
             .align_y(Vertical::Center),
-            row![text("Justification"), justification_picker]
-                .spacing(8)
-                .align_y(Vertical::Center),
             row![
                 text(format!("Word spacing: {}", self.word_spacing)),
                 word_spacing_slider

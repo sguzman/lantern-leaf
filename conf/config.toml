@@ -7,7 +7,6 @@ margin_horizontal = 0
 margin_vertical = 0
 font_family = "lexend"
 font_weight = "bold"
-justification = "justified"
 word_spacing = 0
 letter_spacing = 0
 log_level = "info"

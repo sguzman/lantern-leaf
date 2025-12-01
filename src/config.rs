@@ -27,8 +27,6 @@ pub struct AppConfig {
     #[serde(default)]
     pub font_weight: FontWeight,
     #[serde(default)]
-    pub justification: Justification,
-    #[serde(default)]
     pub word_spacing: u32,
     #[serde(default)]
     pub letter_spacing: u32,
@@ -70,7 +68,6 @@ impl Default for AppConfig {
             margin_vertical: default_margin(),
             font_family: FontFamily::Sans,
             font_weight: FontWeight::Normal,
-            justification: Justification::Left,
             word_spacing: 0,
             letter_spacing: 0,
             tts_model_path: default_tts_model(),
@@ -181,34 +178,6 @@ impl std::fmt::Display for FontWeight {
             FontWeight::Light => "Light",
             FontWeight::Normal => "Normal",
             FontWeight::Bold => "Bold",
-        };
-        write!(f, "{}", label)
-    }
-}
-
-/// Text justification.
-#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum Justification {
-    Left,
-    Center,
-    Right,
-    Justified,
-}
-
-impl Default for Justification {
-    fn default() -> Self {
-        Justification::Left
-    }
-}
-
-impl std::fmt::Display for Justification {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let label = match self {
-            Justification::Left => "Left",
-            Justification::Center => "Center",
-            Justification::Right => "Right",
-            Justification::Justified => "Justified",
         };
         write!(f, "{}", label)
     }

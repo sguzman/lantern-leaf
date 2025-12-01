@@ -1,12 +1,9 @@
 use crate::cache::save_epub_config;
-use crate::config::{
-    AppConfig, FontFamily, FontWeight, HighlightColor, Justification, LogLevel, ThemeMode,
-};
+use crate::config::{AppConfig, FontFamily, FontWeight, HighlightColor, LogLevel, ThemeMode};
 use crate::pagination::{
     MAX_FONT_SIZE, MAX_LINES_PER_PAGE, MIN_FONT_SIZE, MIN_LINES_PER_PAGE, paginate,
 };
 use crate::tts::{TtsEngine, TtsPlayback};
-use iced::alignment::Horizontal;
 use iced::font::{Family, Weight};
 use iced::widget::scrollable::Id as ScrollId;
 use iced::{Color, Font, Task};
@@ -40,12 +37,6 @@ pub(crate) const FONT_FAMILIES: [FontFamily; 13] = [
 ];
 pub(crate) const FONT_WEIGHTS: [FontWeight; 3] =
     [FontWeight::Light, FontWeight::Normal, FontWeight::Bold];
-pub(crate) const JUSTIFICATIONS: [Justification; 4] = [
-    Justification::Left,
-    Justification::Center,
-    Justification::Right,
-    Justification::Justified,
-];
 
 /// Core application state.
 pub struct App {
@@ -60,7 +51,6 @@ pub struct App {
     pub(super) line_spacing: f32,
     pub(super) margin_horizontal: u16,
     pub(super) margin_vertical: u16,
-    pub(super) justification: Justification,
     pub(super) word_spacing: u32,
     pub(super) letter_spacing: u32,
     pub(super) lines_per_page: usize,
@@ -89,15 +79,6 @@ pub struct App {
 }
 
 impl App {
-    pub(super) fn justification_alignment(&self) -> Horizontal {
-        match self.justification {
-            Justification::Left => Horizontal::Left,
-            Justification::Center => Horizontal::Center,
-            Justification::Right => Horizontal::Right,
-            Justification::Justified => Horizontal::Left,
-        }
-    }
-
     /// Re-run pagination after a state change (e.g., font size).
     pub(super) fn repaginate(&mut self) {
         self.pages = paginate(&self.full_text, self.font_size, self.lines_per_page);
@@ -208,7 +189,6 @@ impl App {
             margin_vertical: self.margin_vertical,
             font_family: self.font_family,
             font_weight: self.font_weight,
-            justification: self.justification,
             word_spacing: self.word_spacing,
             letter_spacing: self.letter_spacing,
             lines_per_page: self.lines_per_page,
@@ -256,7 +236,6 @@ impl App {
             font_family: config.font_family,
             font_weight: config.font_weight,
             line_spacing,
-            justification: config.justification,
             word_spacing,
             letter_spacing,
             lines_per_page,
@@ -300,7 +279,6 @@ impl App {
         tracing::info!(
             font_size = app.font_size,
             night_mode = app.night_mode,
-            justification = ?app.justification,
             "Initialized app state"
         );
 
