@@ -8,6 +8,7 @@ font_weight = "bold"
 justification = "justified"
 word_spacing = 0
 letter_spacing = 0
+log_level = "debug"
 show_tts = true
 show_settings = true
 day_highlight = { r = 0.2, g = 0.4, b = 0.7, a = 0.15 }

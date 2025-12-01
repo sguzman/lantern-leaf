@@ -22,24 +22,32 @@ use anyhow::{Context, Result, anyhow};
 use std::env;
 use std::path::{Path, PathBuf};
 use tracing::{error, info, warn};
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{EnvFilter, fmt, prelude::*, reload};
+
+type ReloadHandle = reload::Handle<EnvFilter, tracing_subscriber::Registry>;
 
 fn main() {
-    init_tracing();
-    if let Err(err) = run() {
+    let reload_handle = init_tracing();
+    if let Err(err) = run(&reload_handle) {
         error!("{err:?}");
         std::process::exit(1);
     }
 }
 
-fn run() -> Result<()> {
+fn run(reload_handle: &ReloadHandle) -> Result<()> {
     let epub_path = parse_args()?;
-    info!(path = %epub_path.display(), "Starting EPUB viewer");
     let mut config = load_config(Path::new("conf/config.toml"));
     if let Some(overrides) = load_epub_config(&epub_path) {
         info!("Loaded per-epub overrides from cache");
         config = overrides;
     }
+    set_log_level(reload_handle, config.log_level.as_filter_str());
+    info!(
+        path = %epub_path.display(),
+        level = %config.log_level,
+        "Starting EPUB viewer"
+    );
+    info!(path = %epub_path.display(), "Opening EPUB");
     info!(
         model = %config.tts_model_path,
         espeak = %config.tts_espeak_path,
@@ -65,17 +73,29 @@ fn parse_args() -> Result<PathBuf> {
     if !path.exists() {
         return Err(anyhow!("File not found: {}", path.as_path().display()));
     }
-    info!(path = %path.display(), "Opening EPUB");
     Ok(path)
 }
 
-fn init_tracing() {
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .with_target(true)
-        .with_file(true)
-        .with_line_number(true)
+fn init_tracing() -> ReloadHandle {
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("debug"));
+    let (filter_layer, handle) = reload::Layer::new(env_filter);
+    tracing_subscriber::registry()
+        .with(filter_layer)
+        .with(
+            fmt::layer()
+                .with_target(true)
+                .with_file(true)
+                .with_line_number(true),
+        )
         .init();
-    warn!("Logging initialized; override level with RUST_LOG");
+    warn!("Logging initialized; override level with config.log_level or RUST_LOG");
+    handle
+}
+
+fn set_log_level(handle: &ReloadHandle, level: &str) {
+    if let Err(err) = handle.modify(|filter| *filter = EnvFilter::new(level)) {
+        warn!(%level, "Failed to update log level from config: {err}");
+    } else {
+        info!(%level, "Applied log level from config");
+    }
 }

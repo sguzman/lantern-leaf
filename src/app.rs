@@ -5,7 +5,9 @@
 //! `pagination` to break that text into pages based on the current font size.
 
 use crate::cache::save_last_page;
-use crate::config::{AppConfig, FontFamily, FontWeight, HighlightColor, Justification, ThemeMode};
+use crate::config::{
+    AppConfig, FontFamily, FontWeight, HighlightColor, Justification, LogLevel, ThemeMode,
+};
 use crate::pagination::{MAX_FONT_SIZE, MIN_FONT_SIZE, paginate};
 use crate::text_utils::split_sentences;
 use crate::tts::{TtsEngine, TtsPlayback};
@@ -119,6 +121,7 @@ pub struct App {
     night_highlight: HighlightColor,
     tts_model_path: String,
     tts_espeak_path: String,
+    log_level: LogLevel,
 }
 
 impl App {
@@ -651,6 +654,7 @@ impl App {
             show_settings: self.settings_open,
             day_highlight: self.day_highlight,
             night_highlight: self.night_highlight,
+            log_level: self.log_level,
         };
 
         crate::cache::save_epub_config(&self.epub_path, &config);
@@ -749,6 +753,7 @@ pub fn run_app(
                 night_highlight: config.night_highlight,
                 tts_model_path: config.tts_model_path,
                 tts_espeak_path: config.tts_espeak_path,
+                log_level: config.log_level,
             };
             app.repaginate();
             if let Some(last) = last_page {

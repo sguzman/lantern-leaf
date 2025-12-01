@@ -48,6 +48,8 @@ pub struct AppConfig {
     pub day_highlight: HighlightColor,
     #[serde(default = "default_night_highlight")]
     pub night_highlight: HighlightColor,
+    #[serde(default = "default_log_level")]
+    pub log_level: LogLevel,
 }
 
 impl Default for AppConfig {
@@ -71,6 +73,7 @@ impl Default for AppConfig {
             show_settings: default_show_settings(),
             day_highlight: default_day_highlight(),
             night_highlight: default_night_highlight(),
+            log_level: default_log_level(),
         }
     }
 }
@@ -281,10 +284,56 @@ fn default_night_highlight() -> HighlightColor {
     }
 }
 
+fn default_log_level() -> LogLevel {
+    LogLevel::Debug
+}
+
 #[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub struct HighlightColor {
     pub r: f32,
     pub g: f32,
     pub b: f32,
     pub a: f32,
+}
+
+/// Supported logging verbosity levels.
+#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl Default for LogLevel {
+    fn default() -> Self {
+        LogLevel::Debug
+    }
+}
+
+impl std::fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            LogLevel::Trace => "trace",
+            LogLevel::Debug => "debug",
+            LogLevel::Info => "info",
+            LogLevel::Warn => "warn",
+            LogLevel::Error => "error",
+        };
+        write!(f, "{}", label)
+    }
+}
+
+impl LogLevel {
+    pub fn as_filter_str(self) -> &'static str {
+        match self {
+            LogLevel::Trace => "trace",
+            LogLevel::Debug => "debug",
+            LogLevel::Info => "info",
+            LogLevel::Warn => "warn",
+            LogLevel::Error => "error",
+        }
+    }
 }
