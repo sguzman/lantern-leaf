@@ -162,6 +162,11 @@ impl TtsPlayback {
     pub fn is_finished(&self) -> bool {
         self.sink.empty()
     }
+
+    pub fn stop(self) {
+        self.sink.stop();
+        // stream dropped automatically
+    }
 }
 
 fn cache_path(base: &Path, model_path: &Path, sentence: &str, speed: f32) -> PathBuf {

@@ -87,6 +87,7 @@ pub enum Message {
     TtsPrepared {
         page: usize,
         start_idx: usize,
+        request_id: u64,
         files: Vec<(PathBuf, Duration)>,
     },
     Tick(Instant),
@@ -110,6 +111,7 @@ pub struct App {
     letter_spacing: u32,
     lines_per_page: usize,
     epub_path: std::path::PathBuf,
+    tts_request_id: u64,
     // TTS
     tts_engine: Option<TtsEngine>,
     tts_playback: Option<TtsPlayback>,
@@ -129,6 +131,14 @@ pub struct App {
 }
 
 impl App {
+    fn stop_playback(&mut self) {
+        if let Some(playback) = self.tts_playback.take() {
+            playback.stop();
+        }
+        self.tts_running = false;
+        self.tts_deadline = None;
+    }
+
     fn justification_alignment(&self) -> Horizontal {
         match self.justification {
             Justification::Left => Horizontal::Left,
@@ -166,18 +176,7 @@ impl App {
                     self.current_page += 1;
                     page_changed = true;
                     info!(page = self.current_page + 1, "Navigated to next page");
-                    let playing = self
-                        .tts_playback
-                        .as_ref()
-                        .map(|p| !p.is_paused())
-                        .unwrap_or(false);
-                    if playing {
-                        tasks.push(self.start_playback_from(self.current_page, 0));
-                    } else {
-                        self.current_sentence_idx = None;
-                        self.tts_running = false;
-                        self.tts_deadline = None;
-                    }
+                    tasks.push(self.start_playback_from(self.current_page, 0));
                 }
             }
             Message::PreviousPage => {
@@ -185,18 +184,7 @@ impl App {
                     self.current_page -= 1;
                     page_changed = true;
                     info!(page = self.current_page + 1, "Navigated to previous page");
-                    let playing = self
-                        .tts_playback
-                        .as_ref()
-                        .map(|p| !p.is_paused())
-                        .unwrap_or(false);
-                    if playing {
-                        tasks.push(self.start_playback_from(self.current_page, 0));
-                    } else {
-                        self.current_sentence_idx = None;
-                        self.tts_running = false;
-                        self.tts_deadline = None;
-                    }
+                    tasks.push(self.start_playback_from(self.current_page, 0));
                 }
             }
             Message::FontSizeChanged(size) => {
@@ -324,6 +312,13 @@ impl App {
                 if let Some(playback) = &self.tts_playback {
                     info!("Resuming TTS playback");
                     playback.play();
+                    self.tts_running = true;
+                    if let Some(idx) = self.current_sentence_idx {
+                        if let Some((_, dur)) = self.tts_track.get(idx) {
+                            let lead = Duration::from_millis(HIGHLIGHT_LEAD_MS);
+                            self.tts_deadline = Some(Instant::now() + dur.saturating_sub(lead));
+                        }
+                    }
                 } else {
                     info!("Starting TTS playback from current page");
                     tasks.push(self.start_playback_from(self.current_page, 0));
@@ -402,14 +397,13 @@ impl App {
                         .map(|p| p.is_finished())
                         .unwrap_or(true)
                     {
+                        self.stop_playback();
                         if self.current_page + 1 < self.pages.len() {
                             self.current_page += 1;
                             info!("Playback finished page, advancing");
                             tasks.push(self.start_playback_from(self.current_page, 0));
                         } else {
                             info!("Playback finished at end of book");
-                            self.tts_running = false;
-                            self.tts_deadline = None;
                         }
                         return Task::none();
                     }
@@ -443,8 +437,17 @@ impl App {
             Message::TtsPrepared {
                 page,
                 start_idx,
+                request_id,
                 files,
             } => {
+                if request_id != self.tts_request_id {
+                    debug!(
+                        request_id,
+                        current = self.tts_request_id,
+                        "Ignoring stale TTS request"
+                    );
+                    return Task::none();
+                }
                 info!(
                     page,
                     start_idx,
@@ -462,11 +465,11 @@ impl App {
                 }
                 if files.is_empty() {
                     warn!("TTS batch was empty; stopping playback");
-                    self.tts_running = false;
-                    self.tts_deadline = None;
+                    self.stop_playback();
                     self.current_sentence_idx = None;
                     return Task::none();
                 }
+                self.stop_playback();
                 if let Some(engine) = &self.tts_engine {
                     if let Ok(playback) =
                         engine.play_files(&files.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>())
@@ -792,6 +795,7 @@ pub fn run_app(
                 tts_model_path: config.tts_model_path,
                 tts_espeak_path: config.tts_espeak_path,
                 log_level: config.log_level,
+                tts_request_id: 0,
             };
             app.repaginate();
             if let Some(last) = last_page {
@@ -1036,6 +1040,11 @@ impl App {
             return Task::none();
         };
 
+        // Stop any existing playback before starting a new request.
+        self.stop_playback();
+        self.tts_track.clear();
+        self.tts_track.clear();
+
         let sentences = split_sentences(
             self.pages
                 .get(page)
@@ -1052,6 +1061,8 @@ impl App {
         let threads = self.tts_threads.max(1);
         let page_id = page;
         let engine = engine.clone();
+        self.tts_request_id = self.tts_request_id.wrapping_add(1);
+        let request_id = self.tts_request_id;
         self.save_epub_config();
         info!(
             page = page + 1,
@@ -1065,11 +1076,13 @@ impl App {
                     .map(|files| Message::TtsPrepared {
                         page: page_id,
                         start_idx: sentence_idx,
+                        request_id,
                         files,
                     })
                     .unwrap_or_else(|_| Message::TtsPrepared {
                         page: page_id,
                         start_idx: sentence_idx,
+                        request_id,
                         files: Vec::new(),
                     })
             },
