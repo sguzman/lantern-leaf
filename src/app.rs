@@ -75,6 +75,7 @@ pub enum Message {
     LetterSpacingChanged(u32),
     LinesPerPageChanged(u32),
     ToggleTtsControls,
+    JumpToCurrentAudio,
     DayHighlightChanged(Component, f32),
     NightHighlightChanged(Component, f32),
     Play,
@@ -82,6 +83,7 @@ pub enum Message {
     PlayFromPageStart,
     PlayFromCursor(usize),
     SetTtsSpeed(f32),
+    JumpToCurrentAudio,
     SeekForward,
     SeekBackward,
     TtsPrepared {
@@ -331,6 +333,12 @@ impl App {
             Message::PlayFromCursor(idx) => {
                 info!(idx, "Playing from cursor");
                 tasks.push(self.start_playback_from(self.current_page, idx));
+            }
+            Message::JumpToCurrentAudio => {
+                if let Some(idx) = self.current_sentence_idx {
+                    info!(idx, "Jumping to current audio sentence");
+                    tasks.push(self.start_playback_from(self.current_page, idx));
+                }
             }
             Message::Pause => {
                 if let Some(playback) = &self.tts_playback {
@@ -1010,6 +1018,12 @@ impl App {
             button(play_label).on_press(Message::Pause)
         };
         let play_from_start = button("Play Page").on_press(Message::PlayFromPageStart);
+        let jump_disabled = self.current_sentence_idx.is_none();
+        let jump_button = if jump_disabled {
+            button("Jump to Audio").style(iced::theme::Button::Secondary)
+        } else {
+            button("Jump to Audio").on_press(Message::JumpToCurrentAudio)
+        };
 
         let speed_slider = slider(
             MIN_TTS_SPEED..=MAX_TTS_SPEED,
@@ -1023,6 +1037,7 @@ impl App {
             play_button,
             button("⏭").on_press(Message::SeekForward),
             play_from_start,
+            jump_button,
             text(format!("Speed: {:.2}x", self.tts_speed)),
             speed_slider,
         ]
