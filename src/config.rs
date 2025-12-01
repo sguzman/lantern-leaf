@@ -9,7 +9,7 @@ use std::fs;
 use std::path::Path;
 
 /// High-level app configuration; deserializable from TOML.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub theme: ThemeMode,
@@ -72,7 +72,7 @@ impl Default for AppConfig {
 }
 
 /// Theme mode.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum ThemeMode {
     Day,
@@ -96,7 +96,7 @@ impl std::fmt::Display for ThemeMode {
 }
 
 /// Font family options.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum FontFamily {
     Sans,
@@ -142,7 +142,7 @@ impl std::fmt::Display for FontFamily {
 }
 
 /// Font weight options.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum FontWeight {
     Light,
@@ -168,7 +168,7 @@ impl std::fmt::Display for FontWeight {
 }
 
 /// Text justification.
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Justification {
     Left,

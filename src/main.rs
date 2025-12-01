@@ -16,7 +16,7 @@ mod text_utils;
 
 use crate::app::run_app;
 use crate::config::load_config;
-use crate::cache::load_last_page;
+use crate::cache::{load_last_page, load_epub_config};
 use crate::epub_loader::load_epub_text;
 use anyhow::{anyhow, Context, Result};
 use std::env;
@@ -31,7 +31,10 @@ fn main() {
 
 fn run() -> Result<()> {
     let epub_path = parse_args()?;
-    let config = load_config(Path::new("conf/config.toml"));
+    let mut config = load_config(Path::new("conf/config.toml"));
+    if let Some(overrides) = load_epub_config(&epub_path) {
+        config = overrides;
+    }
     let last_page = load_last_page(&epub_path);
     let text = load_epub_text(&epub_path)?;
     run_app(text, config, epub_path, last_page).context("Failed to start the GUI")?;

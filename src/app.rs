@@ -120,6 +120,8 @@ pub struct App {
     tts_running: bool,
     day_highlight: HighlightColor,
     night_highlight: HighlightColor,
+    tts_model_path: String,
+    tts_espeak_path: String,
 }
 
 impl App {
@@ -184,42 +186,55 @@ impl App {
             }
             Message::ToggleTheme => {
                 self.night_mode = !self.night_mode;
+                self.save_epub_config();
             }
             Message::ToggleSettings => {
                 self.settings_open = !self.settings_open;
+                self.save_epub_config();
             }
             Message::FontFamilyChanged(family) => {
                 self.font_family = family;
+                self.save_epub_config();
             }
             Message::FontWeightChanged(weight) => {
                 self.font_weight = weight;
+                self.save_epub_config();
             }
             Message::LineSpacingChanged(spacing) => {
                 self.line_spacing = spacing.clamp(0.8, 2.5);
+                self.save_epub_config();
             }
             Message::MarginHorizontalChanged(margin) => {
                 self.margin_horizontal = margin.min(MAX_MARGIN);
+                self.save_epub_config();
             }
             Message::MarginVerticalChanged(margin) => {
                 self.margin_vertical = margin.min(MAX_MARGIN);
+                self.save_epub_config();
             }
             Message::JustificationChanged(justification) => {
                 self.justification = justification;
+                self.save_epub_config();
             }
             Message::WordSpacingChanged(spacing) => {
                 self.word_spacing = spacing.min(MAX_WORD_SPACING);
+                self.save_epub_config();
             }
             Message::LetterSpacingChanged(spacing) => {
                 self.letter_spacing = spacing.min(MAX_LETTER_SPACING);
+                self.save_epub_config();
             }
             Message::DayHighlightChanged(component, value) => {
                 self.day_highlight = apply_component(self.day_highlight, component, value);
+                self.save_epub_config();
             }
             Message::NightHighlightChanged(component, value) => {
                 self.night_highlight = apply_component(self.night_highlight, component, value);
+                self.save_epub_config();
             }
             Message::ToggleTtsControls => {
                 self.tts_open = !self.tts_open;
+                self.save_epub_config();
             }
             Message::SetTtsSpeed(speed) => {
                 let clamped = speed.clamp(MIN_TTS_SPEED, MAX_TTS_SPEED);
@@ -229,6 +244,7 @@ impl App {
                     let idx = self.current_sentence_idx.unwrap_or(0);
                     self.start_playback_from(self.current_page, idx);
                 }
+                self.save_epub_config();
             }
             Message::Play => {
                 if let Some(playback) = &self.tts_playback {
@@ -258,6 +274,7 @@ impl App {
                     self.current_page += 1;
                     self.start_playback_from(self.current_page, 0);
                     page_changed = true;
+                    self.save_epub_config();
                 }
             }
             Message::SeekBackward => {
@@ -277,6 +294,7 @@ impl App {
                     .saturating_sub(1);
                     self.start_playback_from(self.current_page, last_idx);
                     page_changed = true;
+                    self.save_epub_config();
                 }
             }
             Message::Tick(now) => {
@@ -479,6 +497,34 @@ impl App {
             a: base.a,
         }
     }
+
+    fn save_epub_config(&self) {
+        let config = AppConfig {
+            theme: if self.night_mode {
+                ThemeMode::Night
+            } else {
+                ThemeMode::Day
+            },
+            font_size: self.font_size,
+            line_spacing: self.line_spacing,
+            margin_horizontal: self.margin_horizontal,
+            margin_vertical: self.margin_vertical,
+            font_family: self.font_family,
+            font_weight: self.font_weight,
+            justification: self.justification,
+            word_spacing: self.word_spacing,
+            letter_spacing: self.letter_spacing,
+            tts_model_path: self.tts_model_path.clone(),
+            tts_speed: self.tts_speed,
+            tts_espeak_path: self.tts_espeak_path.clone(),
+            show_tts: self.tts_open,
+            show_settings: self.settings_open,
+            day_highlight: self.day_highlight,
+            night_highlight: self.night_highlight,
+        };
+
+        crate::cache::save_epub_config(&self.epub_path, &config);
+    }
 }
 
 fn color_row<'a>(
@@ -549,11 +595,11 @@ pub fn run_app(
                 margin_horizontal,
                 margin_vertical,
                 epub_path,
-                tts_engine: TtsEngine::new(
-                    config.tts_model_path.clone().into(),
-                    config.tts_espeak_path.clone().into(),
-                )
-                    .ok(),
+            tts_engine: TtsEngine::new(
+                config.tts_model_path.clone().into(),
+                config.tts_espeak_path.clone().into(),
+            )
+                .ok(),
             tts_playback: None,
             tts_open: config.show_tts,
             tts_speed: config.tts_speed.clamp(MIN_TTS_SPEED, MAX_TTS_SPEED),
@@ -564,6 +610,8 @@ pub fn run_app(
             tts_running: false,
             day_highlight: config.day_highlight,
             night_highlight: config.night_highlight,
+            tts_model_path: config.tts_model_path,
+            tts_espeak_path: config.tts_espeak_path,
         };
             app.repaginate();
             if let Some(last) = last_page {
@@ -810,6 +858,7 @@ impl App {
                 self.tts_running = true;
             }
         }
+        self.save_epub_config();
     }
 }
 

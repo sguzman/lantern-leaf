@@ -4,6 +4,7 @@
 //! filename to avoid filesystem issues. The format is a tiny TOML file with a
 //! single `page` field.
 
+use crate::config::AppConfig;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
@@ -39,7 +40,7 @@ struct CacheEntry {
     page: usize,
 }
 
-fn hash_dir(epub_path: &Path) -> PathBuf {
+pub fn hash_dir(epub_path: &Path) -> PathBuf {
     let mut hasher = Sha256::new();
     hasher.update(epub_path.as_os_str().to_string_lossy().as_bytes());
     let hash = format!("{:x}", hasher.finalize());
@@ -52,4 +53,21 @@ fn bookmark_path(epub_path: &Path) -> PathBuf {
 
 pub fn tts_dir(epub_path: &Path) -> PathBuf {
     hash_dir(epub_path).join("tts")
+}
+
+pub fn load_epub_config(epub_path: &Path) -> Option<AppConfig> {
+    let path = hash_dir(epub_path).join("config.toml");
+    let data = fs::read_to_string(path).ok()?;
+    toml::from_str(&data).ok()
+}
+
+pub fn save_epub_config(epub_path: &Path, config: &AppConfig) {
+    let dir = hash_dir(epub_path);
+    let path = dir.join("config.toml");
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(contents) = toml::to_string(config) {
+        let _ = fs::write(path, contents);
+    }
 }
