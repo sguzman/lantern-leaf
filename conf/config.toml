@@ -8,6 +8,8 @@ font_weight = "bold"
 justification = "justified"
 word_spacing = 0
 letter_spacing = 0
+show_tts = true
+show_settings = true
 # TTS configuration
 tts_model_path = "/usr/share/piper-voices/en/en_US/ryan/high/en_US-ryan-high.onnx"
 tts_espeak_path = "/usr/share/espeak-ng-data"

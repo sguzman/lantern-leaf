@@ -37,6 +37,10 @@ pub struct AppConfig {
     pub tts_speed: f32,
     #[serde(default = "default_tts_espeak_path")]
     pub tts_espeak_path: String,
+    #[serde(default = "default_show_tts")]
+    pub show_tts: bool,
+    #[serde(default = "default_show_settings")]
+    pub show_settings: bool,
 }
 
 impl Default for AppConfig {
@@ -55,6 +59,8 @@ impl Default for AppConfig {
             tts_model_path: default_tts_model(),
             tts_speed: default_tts_speed(),
             tts_espeak_path: default_tts_espeak_path(),
+            show_tts: default_show_tts(),
+            show_settings: default_show_settings(),
         }
     }
 }
@@ -215,4 +221,12 @@ fn default_tts_speed() -> f32 {
 
 fn default_tts_espeak_path() -> String {
     "/usr/share/espeak-ng-data".to_string()
+}
+
+fn default_show_tts() -> bool {
+    true
+}
+
+fn default_show_settings() -> bool {
+    true
 }

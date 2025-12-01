@@ -450,7 +450,7 @@ pub fn run_app(
                 current_page: 0,
                 font_size,
                 night_mode: matches!(config.theme, ThemeMode::Night),
-                settings_open: false,
+                settings_open: config.show_settings,
                 font_family: config.font_family,
                 font_weight: config.font_weight,
                 line_spacing,
@@ -466,7 +466,7 @@ pub fn run_app(
                 )
                     .ok(),
                 tts_playback: None,
-                tts_open: false,
+                tts_open: config.show_tts,
                 tts_speed: config.tts_speed.clamp(MIN_TTS_SPEED, MAX_TTS_SPEED),
                 last_sentences: Vec::new(),
                 current_sentence_idx: None,
