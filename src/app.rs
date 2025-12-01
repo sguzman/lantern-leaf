@@ -675,24 +675,19 @@ impl App {
             .pages
             .get(self.current_page)
             .map(String::as_str)
-            .unwrap_or("");
-
-        let justified = if self.justification == Justification::Justified {
-            justify_text(base, self.font_size, self.margin_horizontal)
-        } else {
-            base.to_string()
-        };
+            .unwrap_or("")
+            .to_string();
 
         if self.word_spacing == 0 && self.letter_spacing == 0 {
-            return justified;
+            return base;
         }
 
         let word_gap = " ".repeat((self.word_spacing as usize).saturating_add(1));
         let letter_gap = " ".repeat(self.letter_spacing as usize);
 
-        let mut output = String::with_capacity(justified.len() + 16);
+        let mut output = String::with_capacity(base.len() + 16);
 
-        for ch in justified.chars() {
+        for ch in base.chars() {
             match ch {
                 ' ' => output.push_str(&word_gap),
                 '\n' => output.push('\n'),
@@ -888,91 +883,4 @@ fn sentence_duration(path: &PathBuf, _speed: f32) -> Duration {
         .unwrap_or(Duration::from_secs(1));
 
     dur
-}
-
-/// Attempt to justify text by distributing spaces between words to hit a target line width.
-fn justify_text(content: &str, font_size: u32, horizontal_margin: u16) -> String {
-    let mut target_width = approximate_chars_per_line(font_size).max(20);
-    // Shrink width a bit based on margins to better approximate the visible area.
-    target_width = target_width.saturating_sub((horizontal_margin / 2) as usize);
-    target_width = target_width.max(20);
-    let mut output = String::new();
-
-    for (pi, paragraph) in content.split("\n\n").enumerate() {
-        if pi > 0 {
-            output.push_str("\n\n");
-        }
-
-        let words: Vec<&str> = paragraph.split_whitespace().collect();
-        if words.is_empty() {
-            continue;
-        }
-
-        let mut line_words: Vec<&str> = Vec::new();
-        let mut line_len = 0usize;
-
-        for word in words {
-            let additional = if line_words.is_empty() {
-                word.len()
-            } else {
-                line_len + 1 + word.len()
-            };
-
-            if !line_words.is_empty() && additional > target_width {
-                output.push_str(&justify_line(&line_words, target_width));
-                output.push('\n');
-                line_words.clear();
-                line_len = 0;
-            }
-
-            if line_words.is_empty() {
-                line_len = word.len();
-            } else {
-                line_len += 1 + word.len();
-            }
-            line_words.push(word);
-        }
-
-        if !line_words.is_empty() {
-            // Last line of paragraph: leave ragged-right.
-            output.push_str(&line_words.join(" "));
-        }
-    }
-
-    output
-}
-
-fn justify_line(words: &[&str], target_width: usize) -> String {
-    if words.len() <= 1 {
-        return words.join(" ");
-    }
-
-    let total_chars: usize = words.iter().map(|w| w.len()).sum();
-    let gaps = words.len() - 1;
-    let base_spaces = 1;
-    let mut extra_spaces = target_width.saturating_sub(total_chars + gaps * base_spaces);
-
-    let mut result = String::new();
-
-    for (i, word) in words.iter().enumerate() {
-        result.push_str(word);
-        if i < gaps {
-            let mut spaces = base_spaces;
-            if extra_spaces > 0 {
-                let add = (extra_spaces + gaps - i - 1) / (gaps - i);
-                spaces += add;
-                extra_spaces = extra_spaces.saturating_sub(add);
-            }
-            result.push_str(&" ".repeat(spaces));
-        }
-    }
-
-    result
-}
-
-fn approximate_chars_per_line(font_size: u32) -> usize {
-    let normalized = font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE) as f32;
-    (80.0 * (16.0 / normalized))
-        .round()
-        .clamp(30.0, 120.0) as usize
 }
