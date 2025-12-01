@@ -11,3 +11,6 @@ iced = { version = "0.13.1", default-features = false, features = ["wgpu", "toki
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 sha2 = "0.10"
+piper1_rs = { package = "piper1-rs", version = "0.1.0" }
+rodio = { version = "0.18", features = ["vorbis", "flac"] }
+hound = "3.5"

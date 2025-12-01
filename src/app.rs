@@ -4,8 +4,10 @@
 //! provide the already-loaded plain text (see `epub_loader`) and relies on
 //! `pagination` to break that text into pages based on the current font size.
 
-use crate::config::{AppConfig, FontFamily, FontWeight, Justification, ThemeMode};
 use crate::cache::save_last_page;
+use crate::config::{AppConfig, FontFamily, FontWeight, Justification, ThemeMode};
+use crate::text_utils::split_sentences;
+use crate::tts::{TtsEngine, TtsPlayback};
 use crate::pagination::{paginate, MAX_FONT_SIZE, MIN_FONT_SIZE};
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{
@@ -19,6 +21,8 @@ use iced::font::{Family, Weight};
 const MAX_MARGIN: u16 = 48;
 const MAX_WORD_SPACING: u32 = 5;
 const MAX_LETTER_SPACING: u32 = 3;
+const MIN_TTS_SPEED: f32 = 0.1;
+const MAX_TTS_SPEED: f32 = 2.0;
 const FONT_FAMILIES: [FontFamily; 13] = [
     FontFamily::Sans,
     FontFamily::Serif,
@@ -62,6 +66,14 @@ pub enum Message {
     JustificationChanged(Justification),
     WordSpacingChanged(u32),
     LetterSpacingChanged(u32),
+    ToggleTtsControls,
+    Play,
+    Pause,
+    PlayFromPageStart,
+    PlayFromCursor(usize),
+    SetTtsSpeed(f32),
+    SeekForward,
+    SeekBackward,
 }
 
 /// Core application state.
@@ -81,6 +93,12 @@ pub struct App {
     word_spacing: u32,
     letter_spacing: u32,
     epub_path: std::path::PathBuf,
+    // TTS
+    tts_engine: Option<TtsEngine>,
+    tts_playback: Option<TtsPlayback>,
+    tts_open: bool,
+    tts_speed: f32,
+    last_sentences: Vec<String>,
 }
 
 impl App {
@@ -157,6 +175,45 @@ impl App {
             Message::LetterSpacingChanged(spacing) => {
                 self.letter_spacing = spacing.min(MAX_LETTER_SPACING);
             }
+            Message::ToggleTtsControls => {
+                self.tts_open = !self.tts_open;
+            }
+            Message::SetTtsSpeed(speed) => {
+                let clamped = speed.clamp(MIN_TTS_SPEED, MAX_TTS_SPEED);
+                self.tts_speed = clamped;
+                if let Some(playback) = &self.tts_playback {
+                    playback.set_speed(clamped);
+                }
+            }
+            Message::Play => {
+                self.start_playback_from(self.current_page, 0);
+            }
+            Message::PlayFromPageStart => {
+                self.start_playback_from(self.current_page, 0);
+            }
+            Message::PlayFromCursor(sentence_idx) => {
+                self.start_playback_from(self.current_page, sentence_idx);
+            }
+            Message::Pause => {
+                if let Some(playback) = &self.tts_playback {
+                    playback.pause();
+                }
+            }
+            Message::SeekForward => {
+                let next = self.current_page + 1;
+                if next < self.pages.len() {
+                    self.current_page = next;
+                    self.start_playback_from(self.current_page, 0);
+                    page_changed = true;
+                }
+            }
+            Message::SeekBackward => {
+                if self.current_page > 0 {
+                    self.current_page -= 1;
+                    self.start_playback_from(self.current_page, 0);
+                    page_changed = true;
+                }
+            }
         }
 
         if page_changed {
@@ -210,24 +267,28 @@ impl App {
 
         let page_content = self.formatted_page_content();
 
-        let text_view = scrollable(
-            container(
-                text(page_content)
-                    .size(self.font_size as f32)
-                    .line_height(LineHeight::Relative(self.line_spacing))
-                    .width(Length::Fill)
-                    .wrapping(Wrapping::WordOrGlyph)
-                    .align_x(self.justification_alignment())
-                    .font(self.current_font()),
-            )
+        let text_widget = text(page_content)
+            .size(self.font_size as f32)
+            .line_height(LineHeight::Relative(self.line_spacing))
             .width(Length::Fill)
-            .padding([self.margin_vertical, self.margin_horizontal]),
+            .wrapping(Wrapping::WordOrGlyph)
+            .align_x(self.justification_alignment())
+            .font(self.current_font());
+
+        let text_view = scrollable(
+            container(text_widget)
+                .width(Length::Fill)
+                .padding([self.margin_vertical, self.margin_horizontal]),
         )
         .height(Length::Fill);
 
-        let content: Column<'_, Message> = column![controls, font_controls, text_view]
+        let mut content: Column<'_, Message> = column![controls, font_controls, text_view]
             .padding(16)
             .spacing(12);
+
+        if self.tts_open {
+            content = content.push(self.tts_controls());
+        }
 
         let mut layout: Row<'_, Message> =
             row![container(content).width(Length::Fill)].spacing(16);
@@ -273,6 +334,12 @@ pub fn run_app(
                 margin_horizontal,
                 margin_vertical,
                 epub_path,
+                tts_engine: TtsEngine::new(config.tts_model_path.clone().into(), config.tts_speed)
+                    .ok(),
+                tts_playback: None,
+                tts_open: false,
+                tts_speed: config.tts_speed.clamp(MIN_TTS_SPEED, MAX_TTS_SPEED),
+                last_sentences: Vec::new(),
             };
             app.repaginate();
             if let Some(last) = last_page {
@@ -423,6 +490,77 @@ impl App {
         .width(Length::Fixed(280.0));
 
         container(panel).padding(12).into()
+    }
+
+    fn tts_controls(&self) -> Element<'_, Message> {
+        let play_label = if self
+            .tts_playback
+            .as_ref()
+            .map(|p| p.is_paused())
+            .unwrap_or(true)
+        {
+            "Play"
+        } else {
+            "Pause"
+        };
+
+        let play_button = if play_label == "Play" {
+            button(play_label).on_press(Message::Play)
+        } else {
+            button(play_label).on_press(Message::Pause)
+        };
+
+        let speed_slider = slider(
+            MIN_TTS_SPEED..=MAX_TTS_SPEED,
+            self.tts_speed,
+            Message::SetTtsSpeed,
+        )
+        .step(0.05);
+
+        let controls = row![
+            button("⏮").on_press(Message::SeekBackward),
+            play_button,
+            button("⏭").on_press(Message::SeekForward),
+            text(format!("Speed: {:.2}x", self.tts_speed)),
+            speed_slider,
+        ]
+        .spacing(10)
+        .align_y(Vertical::Center);
+
+        container(
+            column![text("TTS Controls"), controls]
+                .spacing(8)
+                .padding(8),
+        )
+        .into()
+    }
+
+    fn start_playback_from(&mut self, page: usize, sentence_idx: usize) {
+        let Some(engine) = &self.tts_engine else {
+            return;
+        };
+
+        let sentences = split_sentences(
+            self.pages
+                .get(page)
+                .map(String::as_str)
+                .unwrap_or("")
+                .to_string(),
+        );
+        self.last_sentences = sentences.clone();
+
+        let sentence_idx = sentence_idx.min(sentences.len().saturating_sub(1));
+        let mut files = Vec::new();
+        for sent in sentences.iter().skip(sentence_idx) {
+            if let Ok(path) = engine.ensure_audio(sent) {
+                files.push(path);
+            }
+        }
+
+        if let Ok(playback) = engine.play_files(&files) {
+            playback.set_speed(self.tts_speed);
+            self.tts_playback = Some(playback);
+        }
     }
 }
 

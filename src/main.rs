@@ -11,6 +11,8 @@ mod cache;
 mod config;
 mod epub_loader;
 mod pagination;
+mod tts;
+mod text_utils;
 
 use crate::app::run_app;
 use crate::config::load_config;

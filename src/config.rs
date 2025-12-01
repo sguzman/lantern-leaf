@@ -31,6 +31,10 @@ pub struct AppConfig {
     pub word_spacing: u32,
     #[serde(default)]
     pub letter_spacing: u32,
+    #[serde(default = "default_tts_model")]
+    pub tts_model_path: String,
+    #[serde(default = "default_tts_speed")]
+    pub tts_speed: f32,
 }
 
 impl Default for AppConfig {
@@ -46,6 +50,8 @@ impl Default for AppConfig {
             justification: Justification::Left,
             word_spacing: 0,
             letter_spacing: 0,
+            tts_model_path: default_tts_model(),
+            tts_speed: default_tts_speed(),
         }
     }
 }
@@ -194,4 +200,12 @@ fn default_line_spacing() -> f32 {
 
 fn default_margin() -> u16 {
     12
+}
+
+fn default_tts_model() -> String {
+    "/usr/share/piper-voices/en/en_US/ryan/high/en_US-ryan-high.onnx".to_string()
+}
+
+fn default_tts_speed() -> f32 {
+    1.0
 }

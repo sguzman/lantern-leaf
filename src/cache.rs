@@ -9,7 +9,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-const CACHE_DIR: &str = ".cache";
+pub const CACHE_DIR: &str = ".cache";
 
 /// Load the cached page for a given EPUB path, if present.
 pub fn load_last_page(epub_path: &Path) -> Option<usize> {
