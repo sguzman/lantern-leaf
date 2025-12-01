@@ -144,12 +144,28 @@ impl App {
                 if self.current_page + 1 < self.pages.len() {
                     self.current_page += 1;
                     page_changed = true;
+                    let playing = self.tts_playback.as_ref().map(|p| !p.is_paused()).unwrap_or(false);
+                    if playing {
+                        self.start_playback_from(self.current_page, 0);
+                    } else {
+                        self.current_sentence_idx = None;
+                        self.tts_running = false;
+                        self.tts_deadline = None;
+                    }
                 }
             }
             Message::PreviousPage => {
                 if self.current_page > 0 {
                     self.current_page -= 1;
                     page_changed = true;
+                    let playing = self.tts_playback.as_ref().map(|p| !p.is_paused()).unwrap_or(false);
+                    if playing {
+                        self.start_playback_from(self.current_page, 0);
+                    } else {
+                        self.current_sentence_idx = None;
+                        self.tts_running = false;
+                        self.tts_deadline = None;
+                    }
                 }
             }
             Message::FontSizeChanged(size) => {
@@ -218,17 +234,47 @@ impl App {
                 }
             }
             Message::SeekForward => {
-                let next = self.current_page + 1;
-                if next < self.pages.len() {
-                    self.current_page = next;
+                let sentences = split_sentences(
+                    self.pages
+                        .get(self.current_page)
+                        .map(String::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                );
+                if sentences.is_empty() {
+                    return Task::none();
+                }
+                let current_idx = self.current_sentence_idx.unwrap_or(0);
+                if current_idx + 1 < sentences.len() {
+                    self.start_playback_from(self.current_page, current_idx + 1);
+                } else if self.current_page + 1 < self.pages.len() {
+                    self.current_page += 1;
                     self.start_playback_from(self.current_page, 0);
                     page_changed = true;
                 }
             }
             Message::SeekBackward => {
-                if self.current_page > 0 {
+                let sentences = split_sentences(
+                    self.pages
+                        .get(self.current_page)
+                        .map(String::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                );
+                let current_idx = self.current_sentence_idx.unwrap_or(0);
+                if current_idx > 0 {
+                    self.start_playback_from(self.current_page, current_idx - 1);
+                } else if self.current_page > 0 {
                     self.current_page -= 1;
-                    self.start_playback_from(self.current_page, 0);
+                    let prev_sentences = split_sentences(
+                        self.pages
+                            .get(self.current_page)
+                            .map(String::as_str)
+                            .unwrap_or("")
+                            .to_string(),
+                    );
+                    let last_idx = prev_sentences.len().saturating_sub(1);
+                    self.start_playback_from(self.current_page, last_idx);
                     page_changed = true;
                 }
             }
