@@ -1,28 +1,25 @@
 //! Pagination utilities.
 //!
-//! The strategy here is intentionally simple: we approximate how many
-//! characters fit on a page based on the chosen font size, then split the
-//! text into fixed-size chunks. The logic is isolated so it can be swapped for
-//! a more sophisticated layout later.
+//! The strategy here is intentionally simple: we split text into fixed-size
+//! chunks based on a stable character budget so page count remains steady
+//! even when font size changes. The logic is isolated so it can be swapped
+//! for a more sophisticated layout later.
 
 /// Minimum allowed font size (points).
 pub const MIN_FONT_SIZE: u32 = 12;
 /// Maximum allowed font size (points).
 pub const MAX_FONT_SIZE: u32 = 36;
 
-/// Split the provided text into page-sized chunks based on the font size.
+/// Split the provided text into page-sized chunks.
 pub fn paginate(text: &str, font_size: u32) -> Vec<String> {
-    let normalized = font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE) as f32;
+    let _ = font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE); // kept for signature compatibility
 
-    // Roughly scale page size as font size changes. These constants are easy to
-    // tweak while keeping the function deterministic.
-    let chars_per_line = (80.0 * (16.0 / normalized))
-        .round()
-        .clamp(30.0, 120.0) as usize;
-    let lines_per_page = (28.0 * (16.0 / normalized))
-        .round()
-        .clamp(10.0, 80.0) as usize;
-    let chars_per_page = chars_per_line.saturating_mul(lines_per_page).max(1);
+    // Keep a stable page size regardless of font size so page count does not
+    // jump when the user tweaks text size. Font size still affects wrapping at
+    // render time, but pagination is based on a fixed character budget.
+    const CHARS_PER_LINE: usize = 80;
+    const LINES_PER_PAGE: usize = 28;
+    let chars_per_page = CHARS_PER_LINE.saturating_mul(LINES_PER_PAGE).max(1);
 
     // Split into paragraphs, preserving order. We consider a blank line as a
     // paragraph boundary, which matches how `html2text` emits content.
