@@ -50,6 +50,8 @@ pub struct AppConfig {
     pub night_highlight: HighlightColor,
     #[serde(default = "default_log_level")]
     pub log_level: LogLevel,
+    #[serde(default = "default_lines_per_page")]
+    pub lines_per_page: usize,
 }
 
 impl Default for AppConfig {
@@ -74,6 +76,7 @@ impl Default for AppConfig {
             day_highlight: default_day_highlight(),
             night_highlight: default_night_highlight(),
             log_level: default_log_level(),
+            lines_per_page: default_lines_per_page(),
         }
     }
 }
@@ -286,6 +289,10 @@ fn default_night_highlight() -> HighlightColor {
 
 fn default_log_level() -> LogLevel {
     LogLevel::Debug
+}
+
+fn default_lines_per_page() -> usize {
+    28
 }
 
 #[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]

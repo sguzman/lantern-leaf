@@ -8,7 +8,9 @@ use crate::cache::save_last_page;
 use crate::config::{
     AppConfig, FontFamily, FontWeight, HighlightColor, Justification, LogLevel, ThemeMode,
 };
-use crate::pagination::{MAX_FONT_SIZE, MIN_FONT_SIZE, paginate};
+use crate::pagination::{
+    MAX_FONT_SIZE, MAX_LINES_PER_PAGE, MIN_FONT_SIZE, MIN_LINES_PER_PAGE, paginate,
+};
 use crate::text_utils::split_sentences;
 use crate::tts::{TtsEngine, TtsPlayback};
 use iced::Color;
@@ -71,6 +73,7 @@ pub enum Message {
     JustificationChanged(Justification),
     WordSpacingChanged(u32),
     LetterSpacingChanged(u32),
+    LinesPerPageChanged(u32),
     ToggleTtsControls,
     DayHighlightChanged(Component, f32),
     NightHighlightChanged(Component, f32),
@@ -105,6 +108,7 @@ pub struct App {
     justification: Justification,
     word_spacing: u32,
     letter_spacing: u32,
+    lines_per_page: usize,
     epub_path: std::path::PathBuf,
     // TTS
     tts_engine: Option<TtsEngine>,
@@ -136,7 +140,7 @@ impl App {
 
     /// Re-run pagination after a state change (e.g., font size).
     fn repaginate(&mut self) {
-        self.pages = paginate(&self.full_text, self.font_size);
+        self.pages = paginate(&self.full_text, self.font_size, self.lines_per_page);
         if self.pages.is_empty() {
             self.pages
                 .push(String::from("This EPUB appears to contain no text."));
@@ -147,6 +151,7 @@ impl App {
         debug!(
             pages = self.pages.len(),
             font_size = self.font_size,
+            lines_per_page = self.lines_per_page,
             "Repaginated content"
         );
     }
@@ -260,6 +265,34 @@ impl App {
                     "Letter spacing changed"
                 );
                 self.save_epub_config();
+            }
+            Message::LinesPerPageChanged(lines) => {
+                let clamped =
+                    lines.clamp(MIN_LINES_PER_PAGE as u32, MAX_LINES_PER_PAGE as u32) as usize;
+                if clamped != self.lines_per_page {
+                    let anchor = self
+                        .pages
+                        .get(self.current_page)
+                        .and_then(|p| split_sentences(p.clone()).into_iter().next());
+                    let before = self.current_page;
+                    self.lines_per_page = clamped;
+                    self.repaginate();
+                    if let Some(sentence) = anchor {
+                        if let Some(idx) =
+                            self.pages.iter().position(|page| page.contains(&sentence))
+                        {
+                            self.current_page = idx;
+                        }
+                    }
+                    if self.current_page != before {
+                        page_changed = true;
+                    }
+                    debug!(
+                        lines_per_page = self.lines_per_page,
+                        "Lines per page changed"
+                    );
+                    self.save_epub_config();
+                }
             }
             Message::DayHighlightChanged(component, value) => {
                 self.day_highlight = apply_component(self.day_highlight, component, value);
@@ -646,6 +679,7 @@ impl App {
             justification: self.justification,
             word_spacing: self.word_spacing,
             letter_spacing: self.letter_spacing,
+            lines_per_page: self.lines_per_page,
             tts_model_path: self.tts_model_path.clone(),
             tts_speed: self.tts_speed,
             tts_espeak_path: self.tts_espeak_path.clone(),
@@ -718,6 +752,9 @@ pub fn run_app(
             let margin_vertical = config.margin_vertical.min(MAX_MARGIN);
             let word_spacing = config.word_spacing.min(MAX_WORD_SPACING);
             let letter_spacing = config.letter_spacing.min(MAX_LETTER_SPACING);
+            let lines_per_page = config
+                .lines_per_page
+                .clamp(MIN_LINES_PER_PAGE, MAX_LINES_PER_PAGE);
 
             let mut app = App {
                 pages: Vec::new(),
@@ -732,6 +769,7 @@ pub fn run_app(
                 justification: config.justification,
                 word_spacing,
                 letter_spacing,
+                lines_per_page,
                 margin_horizontal,
                 margin_vertical,
                 epub_path,
@@ -754,6 +792,7 @@ pub fn run_app(
                 tts_model_path: config.tts_model_path,
                 tts_espeak_path: config.tts_espeak_path,
                 log_level: config.log_level,
+                lines_per_page,
             };
             app.repaginate();
             if let Some(last) = last_page {
@@ -859,6 +898,12 @@ impl App {
 
         let line_spacing_slider =
             slider(0.8..=2.5, self.line_spacing, Message::LineSpacingChanged).step(0.05);
+        let lines_per_page_slider = slider(
+            MIN_LINES_PER_PAGE as f32..=MAX_LINES_PER_PAGE as f32,
+            self.lines_per_page as f32,
+            |value| Message::LinesPerPageChanged(value.round() as u32),
+        )
+        .step(1.0);
 
         let margin_slider = slider(
             0.0..=MAX_MARGIN as f32,
@@ -895,6 +940,12 @@ impl App {
             row![text("Line spacing"), line_spacing_slider]
                 .spacing(8)
                 .align_y(Vertical::Center),
+            row![
+                text(format!("Lines per page: {}", self.lines_per_page)),
+                lines_per_page_slider
+            ]
+            .spacing(8)
+            .align_y(Vertical::Center),
             row![
                 text(format!("Horizontal margin: {} px", self.margin_horizontal)),
                 margin_slider
