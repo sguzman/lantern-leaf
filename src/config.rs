@@ -58,6 +58,13 @@ pub struct AppConfig {
     pub center_spoken_sentence: bool,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum ConfigInput {
+    Tables(ConfigTables),
+    Flat(AppConfig),
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         AppConfig {
@@ -83,6 +90,88 @@ impl Default for AppConfig {
             pause_after_sentence: default_pause_after_sentence(),
             auto_scroll_tts: default_auto_scroll_tts(),
             center_spoken_sentence: default_center_spoken_sentence(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+struct ConfigTables {
+    #[serde(default)]
+    appearance: AppearanceConfig,
+    #[serde(default)]
+    reading_behavior: ReadingBehaviorConfig,
+    #[serde(default)]
+    ui: UiConfig,
+    #[serde(default)]
+    logging: LoggingConfig,
+    #[serde(default)]
+    tts: TtsConfig,
+}
+
+impl From<ConfigTables> for AppConfig {
+    fn from(tables: ConfigTables) -> Self {
+        AppConfig {
+            theme: tables.appearance.theme,
+            font_family: tables.appearance.font_family,
+            font_weight: tables.appearance.font_weight,
+            font_size: tables.appearance.font_size,
+            line_spacing: tables.appearance.line_spacing,
+            word_spacing: tables.appearance.word_spacing,
+            letter_spacing: tables.appearance.letter_spacing,
+            lines_per_page: tables.appearance.lines_per_page,
+            margin_horizontal: tables.appearance.margin_horizontal,
+            margin_vertical: tables.appearance.margin_vertical,
+            day_highlight: tables.appearance.day_highlight,
+            night_highlight: tables.appearance.night_highlight,
+            pause_after_sentence: tables.reading_behavior.pause_after_sentence,
+            auto_scroll_tts: tables.reading_behavior.auto_scroll_tts,
+            center_spoken_sentence: tables.reading_behavior.center_spoken_sentence,
+            show_tts: tables.ui.show_tts,
+            show_settings: tables.ui.show_settings,
+            log_level: tables.logging.log_level,
+            tts_model_path: tables.tts.tts_model_path,
+            tts_espeak_path: tables.tts.tts_espeak_path,
+            tts_speed: tables.tts.tts_speed,
+            tts_threads: tables.tts.tts_threads,
+        }
+    }
+}
+
+impl From<&AppConfig> for ConfigTables {
+    fn from(config: &AppConfig) -> Self {
+        ConfigTables {
+            appearance: AppearanceConfig {
+                theme: config.theme,
+                font_family: config.font_family,
+                font_weight: config.font_weight,
+                font_size: config.font_size,
+                line_spacing: config.line_spacing,
+                word_spacing: config.word_spacing,
+                letter_spacing: config.letter_spacing,
+                lines_per_page: config.lines_per_page,
+                margin_horizontal: config.margin_horizontal,
+                margin_vertical: config.margin_vertical,
+                day_highlight: config.day_highlight,
+                night_highlight: config.night_highlight,
+            },
+            reading_behavior: ReadingBehaviorConfig {
+                pause_after_sentence: config.pause_after_sentence,
+                auto_scroll_tts: config.auto_scroll_tts,
+                center_spoken_sentence: config.center_spoken_sentence,
+            },
+            ui: UiConfig {
+                show_tts: config.show_tts,
+                show_settings: config.show_settings,
+            },
+            logging: LoggingConfig {
+                log_level: config.log_level,
+            },
+            tts: TtsConfig {
+                tts_model_path: config.tts_model_path.clone(),
+                tts_espeak_path: config.tts_espeak_path.clone(),
+                tts_speed: config.tts_speed,
+                tts_threads: config.tts_threads,
+            },
         }
     }
 }
@@ -199,7 +288,7 @@ pub fn load_config(path: &Path) -> AppConfig {
         }
     };
 
-    match toml::from_str::<AppConfig>(&contents) {
+    match parse_config(&contents) {
         Ok(cfg) => {
             debug!("Parsed configuration from disk");
             cfg
@@ -209,6 +298,18 @@ pub fn load_config(path: &Path) -> AppConfig {
             AppConfig::default()
         }
     }
+}
+
+pub fn parse_config(contents: &str) -> Result<AppConfig, toml::de::Error> {
+    let cfg = toml::from_str::<ConfigInput>(contents)?;
+    Ok(match cfg {
+        ConfigInput::Tables(tables) => tables.into(),
+        ConfigInput::Flat(flat) => flat,
+    })
+}
+
+pub fn serialize_config(config: &AppConfig) -> Result<String, toml::ser::Error> {
+    toml::to_string(&ConfigTables::from(config))
 }
 
 fn default_font_size() -> u32 {
@@ -291,6 +392,127 @@ pub struct HighlightColor {
     pub g: f32,
     pub b: f32,
     pub a: f32,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+struct AppearanceConfig {
+    #[serde(default)]
+    theme: ThemeMode,
+    #[serde(default)]
+    font_family: FontFamily,
+    #[serde(default)]
+    font_weight: FontWeight,
+    #[serde(default = "default_font_size")]
+    font_size: u32,
+    #[serde(default = "default_line_spacing")]
+    line_spacing: f32,
+    #[serde(default)]
+    word_spacing: u32,
+    #[serde(default)]
+    letter_spacing: u32,
+    #[serde(default = "default_lines_per_page")]
+    lines_per_page: usize,
+    #[serde(default = "default_margin")]
+    margin_horizontal: u16,
+    #[serde(default = "default_margin")]
+    margin_vertical: u16,
+    #[serde(default = "default_day_highlight")]
+    day_highlight: HighlightColor,
+    #[serde(default = "default_night_highlight")]
+    night_highlight: HighlightColor,
+}
+
+impl Default for AppearanceConfig {
+    fn default() -> Self {
+        AppearanceConfig {
+            theme: ThemeMode::default(),
+            font_family: FontFamily::default(),
+            font_weight: FontWeight::default(),
+            font_size: default_font_size(),
+            line_spacing: default_line_spacing(),
+            word_spacing: 0,
+            letter_spacing: 0,
+            lines_per_page: default_lines_per_page(),
+            margin_horizontal: default_margin(),
+            margin_vertical: default_margin(),
+            day_highlight: default_day_highlight(),
+            night_highlight: default_night_highlight(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+struct ReadingBehaviorConfig {
+    #[serde(default = "default_pause_after_sentence")]
+    pause_after_sentence: f32,
+    #[serde(default = "default_auto_scroll_tts")]
+    auto_scroll_tts: bool,
+    #[serde(default = "default_center_spoken_sentence")]
+    center_spoken_sentence: bool,
+}
+
+impl Default for ReadingBehaviorConfig {
+    fn default() -> Self {
+        ReadingBehaviorConfig {
+            pause_after_sentence: default_pause_after_sentence(),
+            auto_scroll_tts: default_auto_scroll_tts(),
+            center_spoken_sentence: default_center_spoken_sentence(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+struct UiConfig {
+    #[serde(default = "default_show_tts")]
+    show_tts: bool,
+    #[serde(default = "default_show_settings")]
+    show_settings: bool,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        UiConfig {
+            show_tts: default_show_tts(),
+            show_settings: default_show_settings(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+struct LoggingConfig {
+    #[serde(default = "default_log_level")]
+    log_level: LogLevel,
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        LoggingConfig {
+            log_level: default_log_level(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+struct TtsConfig {
+    #[serde(default = "default_tts_model")]
+    tts_model_path: String,
+    #[serde(default = "default_tts_espeak_path")]
+    tts_espeak_path: String,
+    #[serde(default = "default_tts_speed")]
+    tts_speed: f32,
+    #[serde(default = "default_tts_threads")]
+    tts_threads: usize,
+}
+
+impl Default for TtsConfig {
+    fn default() -> Self {
+        TtsConfig {
+            tts_model_path: default_tts_model(),
+            tts_espeak_path: default_tts_espeak_path(),
+            tts_speed: default_tts_speed(),
+            tts_threads: default_tts_threads(),
+        }
+    }
 }
 
 /// Supported logging verbosity levels.

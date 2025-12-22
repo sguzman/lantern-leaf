@@ -6,7 +6,7 @@
 //! `page` field plus optional `sentence_idx`, `sentence_text`, and `scroll_y`
 //! for resuming inside the page.
 
-use crate::config::AppConfig;
+use crate::config::{parse_config, serialize_config, AppConfig};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
@@ -115,7 +115,7 @@ pub fn load_epub_config(epub_path: &Path) -> Option<AppConfig> {
             return None;
         }
     };
-    match toml::from_str(&data) {
+    match parse_config(&data) {
         Ok(cfg) => {
             debug!("Loaded cached EPUB config");
             Some(cfg)
@@ -133,7 +133,7 @@ pub fn save_epub_config(epub_path: &Path, config: &AppConfig) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    if let Ok(contents) = toml::to_string(config) {
+    if let Ok(contents) = serialize_config(config) {
         if let Err(err) = fs::write(&path, contents) {
             warn!(path = %path.display(), "Failed to save EPUB config: {err}");
         } else {
