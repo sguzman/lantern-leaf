@@ -15,6 +15,7 @@ impl App {
     pub fn view(&self) -> Element<'_, Message> {
         let total_pages = self.reader.pages.len().max(1);
         let page_label = format!("Page {} of {}", self.reader.current_page + 1, total_pages);
+        let tts_progress_label = self.audio_progress_label();
 
         let theme_label = if matches!(self.config.theme, crate::config::ThemeMode::Night) {
             "Day Mode"
@@ -53,7 +54,8 @@ impl App {
             theme_toggle,
             settings_toggle,
             tts_toggle,
-            text(page_label)
+            text(page_label),
+            text(tts_progress_label)
         ]
         .spacing(10)
         .align_y(Vertical::Center)
@@ -162,6 +164,32 @@ impl App {
 }
 
 impl App {
+    fn audio_progress_label(&self) -> String {
+        let total_sentences = self
+            .reader
+            .pages
+            .iter()
+            .map(|page| split_sentences(page.clone()).len())
+            .sum::<usize>();
+        if total_sentences == 0 {
+            return "TTS 0.0%".to_string();
+        }
+
+        let current_idx = self.tts.current_sentence_idx.unwrap_or(0);
+        let mut before = 0usize;
+        for (idx, page) in self.reader.pages.iter().enumerate() {
+            let count = split_sentences(page.clone()).len();
+            if idx < self.reader.current_page {
+                before += count;
+            } else {
+                break;
+            }
+        }
+        let global_idx = before.saturating_add(current_idx).min(total_sentences.saturating_sub(1));
+        let percent = (global_idx as f32 + 1.0) / total_sentences as f32 * 100.0;
+        format!("TTS {:.1}%", percent)
+    }
+
     fn color_row<'a>(
         &self,
         label: &'a str,
