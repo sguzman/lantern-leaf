@@ -2,7 +2,6 @@
 //! Audio is generated per sentence and stored as WAV for reuse.
 
 use anyhow::{Context, Result};
-use once_cell::sync::Lazy;
 use piper_rs::synth::{AudioOutputConfig, PiperSpeechSynthesizer};
 use piper_rs::from_config_path;
 use rodio::source::Zero;
@@ -12,10 +11,9 @@ use std::env;
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{mpsc, Arc};
+use threadpool::ThreadPool;
 use tracing::{debug, info, warn};
-
-static PIPER_GUARD: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 #[derive(Clone)]
 pub struct TtsEngine {
@@ -78,7 +76,6 @@ impl TtsEngine {
         speed: f32,
         threads: usize,
     ) -> Result<Vec<(PathBuf, std::time::Duration)>> {
-        let _lock = PIPER_GUARD.lock().unwrap();
         let config_path = resolve_piper_config(&self.model_path);
         if !config_path.exists() {
             anyhow::bail!(
@@ -88,35 +85,102 @@ impl TtsEngine {
             );
         }
         let model = from_config_path(&config_path).context("Loading Piper model")?;
-        let piper = PiperSpeechSynthesizer::new(model).context("Preparing Piper synthesizer")?;
 
         info!(
             sentence_count = sentences.len(),
             start_idx, speed, threads, "Preparing TTS batch"
         );
 
-        let mut collected = Vec::new();
-        for sentence in sentences.into_iter().skip(start_idx) {
-            let path = cache_path(&cache_root, &self.model_path, &sentence, speed);
+        let threads = threads.max(1);
+        let total = sentences.len().saturating_sub(start_idx);
+        let mut collected: Vec<Option<(PathBuf, std::time::Duration)>> = vec![None; total];
 
-            if !path.exists() {
-                debug!(path = %path.display(), "Synthesizing new sentence");
-                if let Some(parent) = path.parent() {
-                    if let Err(err) = fs::create_dir_all(parent) {
-                        warn!("Failed to create TTS cache dir: {err}");
-                        return Err(err.into());
+        if threads == 1 || total <= 1 {
+            let piper =
+                PiperSpeechSynthesizer::new(Arc::clone(&model)).context("Preparing Piper synthesizer")?;
+            for (offset, sentence) in sentences.into_iter().skip(start_idx).enumerate() {
+                let path = cache_path(&cache_root, &self.model_path, &sentence, speed);
+
+                if !path.exists() {
+                    debug!(path = %path.display(), "Synthesizing new sentence");
+                    if let Some(parent) = path.parent() {
+                        if let Err(err) = fs::create_dir_all(parent) {
+                            warn!("Failed to create TTS cache dir: {err}");
+                            return Err(err.into());
+                        }
+                    }
+
+                    if let Err(err) = synth_with_piper(&piper, &path, &sentence, speed) {
+                        warn!("Failed to synthesize sentence: {err}");
+                        return Err(err);
                     }
                 }
 
-                if let Err(err) = synth_with_piper(&piper, &path, &sentence, speed) {
-                    warn!("Failed to synthesize sentence: {err}");
-                    return Err(err);
+                let dur = sentence_duration(&path);
+                collected[offset] = Some((path, dur));
+            }
+        } else {
+            let pool = ThreadPool::new(threads);
+            let (tx, rx) = mpsc::channel::<Result<(usize, PathBuf, std::time::Duration)>>();
+            let mut pending = 0usize;
+
+            for (offset, sentence) in sentences.into_iter().skip(start_idx).enumerate() {
+                let path = cache_path(&cache_root, &self.model_path, &sentence, speed);
+                if path.exists() {
+                    let dur = sentence_duration(&path);
+                    collected[offset] = Some((path, dur));
+                    continue;
                 }
+
+                pending += 1;
+                let tx = tx.clone();
+                let model = Arc::clone(&model);
+                let cache_root = cache_root.clone();
+                let model_path = self.model_path.clone();
+                let sentence = sentence.clone();
+
+                pool.execute(move || {
+                    let result = (|| -> Result<(usize, PathBuf, std::time::Duration)> {
+                        let piper = PiperSpeechSynthesizer::new(model)
+                            .context("Preparing Piper synthesizer")?;
+                        let path = cache_path(&cache_root, &model_path, &sentence, speed);
+
+                        debug!(path = %path.display(), "Synthesizing new sentence");
+                        if let Some(parent) = path.parent() {
+                            fs::create_dir_all(parent)
+                                .context("Creating TTS cache directory")?;
+                        }
+
+                        synth_with_piper(&piper, &path, &sentence, speed)?;
+                        let dur = sentence_duration(&path);
+                        Ok((offset, path, dur))
+                    })();
+
+                    let _ = tx.send(result);
+                });
             }
 
-            let dur = sentence_duration(&path);
-            collected.push((path, dur));
+            drop(tx);
+            for _ in 0..pending {
+                match rx.recv() {
+                    Ok(Ok((offset, path, dur))) => {
+                        collected[offset] = Some((path, dur));
+                    }
+                    Ok(Err(err)) => {
+                        warn!("Failed to synthesize sentence: {err}");
+                        return Err(err);
+                    }
+                    Err(err) => {
+                        return Err(anyhow::anyhow!("TTS worker channel closed: {err}"));
+                    }
+                }
+            }
         }
+
+        let collected: Vec<(PathBuf, std::time::Duration)> = collected
+            .into_iter()
+            .flatten()
+            .collect();
         debug!(count = collected.len(), "Prepared TTS batch");
         Ok(collected)
     }
