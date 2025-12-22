@@ -29,4 +29,4 @@ tts_model_path = "/usr/share/piper-voices/en/en_US/ryan/high/en_US-ryan-high.onn
 tts_espeak_path = "/usr/share"
 tts_speed = 2.5
 # Number of parallel synthesis worker processes (1 = single-process).
-tts_threads = 1
+tts_threads = 16

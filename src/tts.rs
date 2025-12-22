@@ -2,6 +2,7 @@
 //! Audio is generated per sentence and stored as WAV for reuse.
 
 use anyhow::{Context, Result};
+use rodio::buffer::SamplesBuffer;
 use rodio::source::Zero;
 use rodio::{Decoder, OutputStream, Sink, Source};
 use serde::{Deserialize, Serialize};
@@ -56,6 +57,7 @@ impl TtsEngine {
     ) -> Result<TtsPlayback> {
         let (_stream, handle) = OutputStream::try_default().context("Opening audio output")?;
         let sink = Sink::try_new(&handle).context("Creating sink")?;
+        let speed = if speed <= f32::EPSILON { 1.0 } else { speed };
 
         info!(
             count = files.len(),
@@ -65,8 +67,18 @@ impl TtsEngine {
         );
         for file in files {
             let reader = BufReader::new(File::open(file)?);
-            let source = Decoder::new(reader)?.speed(speed);
-            sink.append(source);
+            let source = Decoder::new(reader)?;
+            if (speed - 1.0).abs() <= f32::EPSILON {
+                sink.append(source);
+            } else {
+                let channels = source.channels() as u16;
+                let sample_rate = source.sample_rate();
+                let samples: Vec<f32> = source.convert_samples().collect();
+                let stretched = time_stretch(&samples, sample_rate, channels, speed)
+                    .context("Time-stretching audio")?;
+                let buffer = SamplesBuffer::new(channels, sample_rate, stretched);
+                sink.append(buffer);
+            }
             if pause_after > std::time::Duration::ZERO {
                 let silence = Zero::<f32>::new(1, 48_000).take_duration(pause_after);
                 sink.append(silence);
@@ -225,6 +237,39 @@ fn sentence_duration(path: &Path) -> std::time::Duration {
         .ok()
         .and_then(|d| d.total_duration())
         .unwrap_or(std::time::Duration::from_secs(1))
+}
+
+fn time_stretch(
+    samples: &[f32],
+    sample_rate: u32,
+    channels: u16,
+    speed: f32,
+) -> Result<Vec<f32>> {
+    if (speed - 1.0).abs() <= f32::EPSILON {
+        return Ok(samples.to_vec());
+    }
+
+    let mut out_buf: Vec<f32> = Vec::new();
+    unsafe {
+        let stream = sonic_rs_sys::sonicCreateStream(sample_rate as i32, channels as i32);
+        sonic_rs_sys::sonicSetSpeed(stream, speed);
+        sonic_rs_sys::sonicWriteFloatToStream(stream, samples.as_ptr(), samples.len() as i32);
+        sonic_rs_sys::sonicFlushStream(stream);
+        let num_samples = sonic_rs_sys::sonicSamplesAvailable(stream);
+        if num_samples <= 0 {
+            sonic_rs_sys::sonicDestroyStream(stream);
+            anyhow::bail!("Sonic error: no samples available after time-stretch");
+        }
+        out_buf.reserve_exact(num_samples as usize);
+        sonic_rs_sys::sonicReadFloatFromStream(
+            stream,
+            out_buf.spare_capacity_mut().as_mut_ptr().cast(),
+            num_samples,
+        );
+        sonic_rs_sys::sonicDestroyStream(stream);
+        out_buf.set_len(num_samples as usize);
+    }
+    Ok(out_buf)
 }
 
 #[derive(Serialize)]
