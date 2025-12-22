@@ -1,0 +1,4 @@
+[env]
+# espeak-ng tries to link pcaudiolib for audio output; disable it to avoid
+# missing system dependency when we only need phonemization for piper.
+CMAKE_ARGS = "-DUSE_LIBPCAUDIO=OFF"
