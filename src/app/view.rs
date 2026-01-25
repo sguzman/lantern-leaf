@@ -94,33 +94,37 @@ impl App {
                     .min(sentences.len().saturating_sub(1));
                 let highlight = self.highlight_color();
 
-                let spans: Vec<iced::widget::text::Span<'_, Message>> = sentences
-                    .into_iter()
-                    .enumerate()
-                    .map(|(idx, sentence)| {
-                        let mut span: iced::widget::text::Span<'_, Message> =
-                            iced::widget::text::Span::new(sentence)
-                                .font(self.current_font())
-                                .size(self.config.font_size as f32)
-                                .line_height(LineHeight::Relative(self.config.line_spacing));
+                let mut text_column = column![];
 
-                        if idx == highlight_idx {
-                            span = span
-                                .background(iced::Background::Color(highlight))
-                                .padding(iced::Padding::from(2u16));
-                        }
+                for (idx, sentence) in sentences.into_iter().enumerate() {
+                    // Create text with proper styling
+                    let sentence_text = text(sentence)
+                        .font(self.current_font())
+                        .size(self.config.font_size as f32)
+                        .line_height(LineHeight::Relative(self.config.line_spacing))
+                        .width(Length::Fill)
+                        .wrapping(Wrapping::WordOrGlyph);
 
-                        span
-                    })
-                    .collect();
+                    // For highlighted sentence, apply visual distinction through padding
+                    let content: Element<'_, Message> = if idx == highlight_idx {
+                        container(sentence_text)
+                            .padding(2u16)
+                            .width(Length::Fill)
+                            .into()
+                    } else {
+                        container(sentence_text).width(Length::Fill).into()
+                    };
 
-                let rich: iced::widget::text::Rich<'_, Message> =
-                    iced::widget::text::Rich::with_spans(spans);
+                    // Create clickable button with padding=0 to minimize blue styling impact
+                    let btn = button(content)
+                        .on_press(Message::PlayFromCursor(idx))
+                        .padding(0)
+                        .width(Length::Fill);
 
-                rich.width(Length::Fill)
-                    .wrapping(Wrapping::WordOrGlyph)
-                    .align_x(Horizontal::Left)
-                    .into()
+                    text_column = text_column.push(btn);
+                }
+
+                text_column.width(Length::Fill).into()
             } else {
                 text(page_content)
                     .size(self.config.font_size as f32)
