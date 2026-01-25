@@ -7,6 +7,7 @@ pub use state::App;
 
 use crate::cache::Bookmark;
 use crate::config::AppConfig;
+use crate::theme;
 use iced::Theme;
 
 /// Helper to launch the app with the provided text.
@@ -19,11 +20,8 @@ pub fn run_app(
     iced::application("EPUB Viewer", App::update, App::view)
         .subscription(App::subscription)
         .theme(|app: &App| {
-            if matches!(app.config.theme, crate::config::ThemeMode::Night) {
-                Theme::Dark
-            } else {
-                Theme::Light
-            }
+            let custom_theme = theme::Theme::from(app.config.theme);
+            Theme::from(custom_theme)
         })
         .run_with(move || App::bootstrap(text, config, epub_path, bookmark))
 }

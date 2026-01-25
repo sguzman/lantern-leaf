@@ -104,19 +104,17 @@ impl App {
                         .width(Length::Fill)
                         .wrapping(Wrapping::WordOrGlyph);
 
-                    let sentence_container = container(sentence_text)
-                        .width(Length::Fill)
-                        .padding([0, if idx == highlight_idx { 2u16 } else { 0u16 }]);
+                    let padding_val = if idx == highlight_idx { 2u16 } else { 0u16 };
 
-                    let sentence_element: Element<'_, Message> = sentence_container.into();
+                    // Create a clickable text element - using text button style for minimal appearance
+                    let sentence_element = container(
+                        button(sentence_text)
+                            .on_press(Message::PlayFromCursor(idx))
+                            .padding(padding_val)
+                            .width(Length::Fill),
+                    );
 
-                    // Make each sentence clickable to jump TTS to that position
-                    let clickable_sentence = button(sentence_element)
-                        .on_press(Message::PlayFromCursor(idx))
-                        .padding(0)
-                        .width(Length::Fill);
-
-                    text_column = text_column.push(clickable_sentence);
+                    text_column = text_column.push(sentence_element);
                 }
 
                 text_column.width(Length::Fill).into()

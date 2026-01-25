@@ -12,6 +12,7 @@ mod config;
 mod epub_loader;
 mod pagination;
 mod text_utils;
+mod theme;
 mod tts;
 mod tts_worker;
 
