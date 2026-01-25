@@ -7,7 +7,7 @@ use iced::alignment::Horizontal;
 use iced::alignment::Vertical;
 use iced::widget::text::{LineHeight, Wrapping};
 use iced::widget::{
-    Column, Row, button, checkbox, column, container, pick_list, row, scrollable, slider, text,
+    button, checkbox, column, container, pick_list, row, scrollable, slider, text, Column, Row,
 };
 use iced::{Element, Length};
 
@@ -92,35 +92,34 @@ impl App {
                     .current_sentence_idx
                     .unwrap_or(0)
                     .min(sentences.len().saturating_sub(1));
-                let highlight = self.highlight_color();
+                let _highlight = self.highlight_color();
 
-                let spans: Vec<iced::widget::text::Span<'_, Message>> = sentences
-                    .into_iter()
-                    .enumerate()
-                    .map(|(idx, sentence)| {
-                        let mut span: iced::widget::text::Span<'_, Message> =
-                            iced::widget::text::Span::new(sentence)
-                                .font(self.current_font())
-                                .size(self.config.font_size as f32)
-                                .line_height(LineHeight::Relative(self.config.line_spacing));
+                let mut text_column = column![];
 
-                        if idx == highlight_idx {
-                            span = span
-                                .background(iced::Background::Color(highlight))
-                                .padding(iced::Padding::from(2u16));
-                        }
+                for (idx, sentence) in sentences.into_iter().enumerate() {
+                    let sentence_text = text(sentence)
+                        .font(self.current_font())
+                        .size(self.config.font_size as f32)
+                        .line_height(LineHeight::Relative(self.config.line_spacing))
+                        .width(Length::Fill)
+                        .wrapping(Wrapping::WordOrGlyph);
 
-                        span
-                    })
-                    .collect();
+                    let sentence_container = container(sentence_text)
+                        .width(Length::Fill)
+                        .padding([0, if idx == highlight_idx { 2u16 } else { 0u16 }]);
 
-                let rich: iced::widget::text::Rich<'_, Message> =
-                    iced::widget::text::Rich::with_spans(spans);
+                    let sentence_element: Element<'_, Message> = sentence_container.into();
 
-                rich.width(Length::Fill)
-                    .wrapping(Wrapping::WordOrGlyph)
-                    .align_x(Horizontal::Left)
-                    .into()
+                    // Make each sentence clickable to jump TTS to that position
+                    let clickable_sentence = button(sentence_element)
+                        .on_press(Message::PlayFromCursor(idx))
+                        .padding(0)
+                        .width(Length::Fill);
+
+                    text_column = text_column.push(clickable_sentence);
+                }
+
+                text_column.width(Length::Fill).into()
             } else {
                 text(page_content)
                     .size(self.config.font_size as f32)
@@ -135,10 +134,7 @@ impl App {
         let text_view = scrollable(
             container(text_view_content)
                 .width(Length::Fill)
-                .padding([
-                    self.config.margin_vertical,
-                    self.config.margin_horizontal,
-                ]),
+                .padding([self.config.margin_vertical, self.config.margin_horizontal]),
         )
         .on_scroll(|viewport| Message::Scrolled(viewport.relative_offset()))
         .id(super::state::TEXT_SCROLL_ID.clone())
@@ -185,7 +181,9 @@ impl App {
                 break;
             }
         }
-        let global_idx = before.saturating_add(current_idx).min(total_sentences.saturating_sub(1));
+        let global_idx = before
+            .saturating_add(current_idx)
+            .min(total_sentences.saturating_sub(1));
         let percent = (global_idx as f32 + 1.0) / total_sentences as f32 * 100.0;
         format!("TTS {:.1}%", percent)
     }
@@ -298,13 +296,19 @@ impl App {
             .spacing(8)
             .align_y(Vertical::Center),
             row![
-                text(format!("Horizontal margin: {} px", self.config.margin_horizontal)),
+                text(format!(
+                    "Horizontal margin: {} px",
+                    self.config.margin_horizontal
+                )),
                 margin_slider
             ]
             .spacing(8)
             .align_y(Vertical::Center),
             row![
-                text(format!("Vertical margin: {} px", self.config.margin_vertical)),
+                text(format!(
+                    "Vertical margin: {} px",
+                    self.config.margin_vertical
+                )),
                 margin_vertical_slider
             ]
             .spacing(8)
@@ -325,11 +329,9 @@ impl App {
             self.color_row("Day highlight", self.config.day_highlight, |c, v| {
                 Message::DayHighlightChanged(c, v)
             }),
-            self.color_row(
-                "Night highlight",
-                self.config.night_highlight,
-                |c, v| { Message::NightHighlightChanged(c, v) }
-            ),
+            self.color_row("Night highlight", self.config.night_highlight, |c, v| {
+                Message::NightHighlightChanged(c, v)
+            }),
         ]
         .spacing(12)
         .width(Length::Fixed(280.0));
