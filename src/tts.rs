@@ -208,6 +208,10 @@ impl TtsPlayback {
         // stream dropped automatically
     }
 
+    pub fn set_volume(&self, volume: f32) {
+        self.sink.set_volume(volume.max(0.0));
+    }
+
     pub fn sentence_durations(&self) -> &[std::time::Duration] {
         &self.sentence_durations
     }

@@ -40,6 +40,7 @@ impl From<ConfigTables> for AppConfig {
             tts_model_path: tables.tts.tts_model_path,
             tts_espeak_path: tables.tts.tts_espeak_path,
             tts_speed: tables.tts.tts_speed,
+            tts_volume: tables.tts.tts_volume,
             tts_threads: tables.tts.tts_threads,
         }
     }
@@ -78,6 +79,7 @@ impl From<&AppConfig> for ConfigTables {
                 tts_model_path: config.tts_model_path.clone(),
                 tts_espeak_path: config.tts_espeak_path.clone(),
                 tts_speed: config.tts_speed,
+                tts_volume: config.tts_volume,
                 tts_threads: config.tts_threads,
             },
         }
@@ -190,6 +192,8 @@ struct TtsConfig {
     tts_espeak_path: String,
     #[serde(default = "defaults::default_tts_speed")]
     tts_speed: f32,
+    #[serde(default = "defaults::default_tts_volume")]
+    tts_volume: f32,
     #[serde(default = "defaults::default_tts_threads")]
     tts_threads: usize,
 }
@@ -200,6 +204,7 @@ impl Default for TtsConfig {
             tts_model_path: defaults::default_tts_model(),
             tts_espeak_path: defaults::default_tts_espeak_path(),
             tts_speed: defaults::default_tts_speed(),
+            tts_volume: defaults::default_tts_volume(),
             tts_threads: defaults::default_tts_threads(),
         }
     }

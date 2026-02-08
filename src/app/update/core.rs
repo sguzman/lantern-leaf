@@ -78,6 +78,7 @@ impl App {
             Message::PlayFromCursor(idx) => self.handle_play_from_cursor(idx, &mut effects),
             Message::Pause => self.handle_pause(&mut effects),
             Message::SetTtsSpeed(speed) => self.handle_set_tts_speed(speed, &mut effects),
+            Message::SetTtsVolume(volume) => self.handle_set_tts_volume(volume, &mut effects),
             Message::SeekForward => self.handle_seek_forward(&mut effects),
             Message::SeekBackward => self.handle_seek_backward(&mut effects),
             Message::SentenceClicked(idx) => self.handle_sentence_clicked(idx, &mut effects),

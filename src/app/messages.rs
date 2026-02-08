@@ -31,6 +31,7 @@ pub enum Message {
     PlayFromPageStart,
     PlayFromCursor(usize),
     SetTtsSpeed(f32),
+    SetTtsVolume(f32),
     SeekForward,
     SeekBackward,
     SentenceClicked(usize),

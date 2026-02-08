@@ -18,6 +18,8 @@ pub(crate) const MAX_WORD_SPACING: u32 = 5;
 pub(crate) const MAX_LETTER_SPACING: u32 = 3;
 pub(crate) const MIN_TTS_SPEED: f32 = 0.1;
 pub(crate) const MAX_TTS_SPEED: f32 = 3.0;
+pub(crate) const MIN_TTS_VOLUME: f32 = 0.0;
+pub(crate) const MAX_TTS_VOLUME: f32 = 2.0;
 pub(crate) static TEXT_SCROLL_ID: Lazy<ScrollId> = Lazy::new(|| ScrollId::new("text-scroll"));
 pub(crate) const FONT_FAMILIES: [FontFamily; 13] = [
     FontFamily::Sans,
@@ -346,5 +348,6 @@ fn clamp_config(config: &mut AppConfig) {
         .clamp(MIN_LINES_PER_PAGE, MAX_LINES_PER_PAGE);
     config.pause_after_sentence = config.pause_after_sentence.clamp(0.0, 2.0);
     config.tts_speed = config.tts_speed.clamp(MIN_TTS_SPEED, MAX_TTS_SPEED);
+    config.tts_volume = config.tts_volume.clamp(MIN_TTS_VOLUME, MAX_TTS_VOLUME);
     config.tts_threads = config.tts_threads.max(1);
 }

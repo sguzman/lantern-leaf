@@ -25,6 +25,8 @@ pub struct AppConfig {
     pub tts_model_path: String,
     #[serde(default = "crate::config::defaults::default_tts_speed")]
     pub tts_speed: f32,
+    #[serde(default = "crate::config::defaults::default_tts_volume")]
+    pub tts_volume: f32,
     #[serde(default = "crate::config::defaults::default_tts_espeak_path")]
     pub tts_espeak_path: String,
     #[serde(default = "crate::config::defaults::default_tts_threads")]
@@ -63,6 +65,7 @@ impl Default for AppConfig {
             letter_spacing: 0,
             tts_model_path: crate::config::defaults::default_tts_model(),
             tts_speed: crate::config::defaults::default_tts_speed(),
+            tts_volume: crate::config::defaults::default_tts_volume(),
             tts_espeak_path: crate::config::defaults::default_tts_espeak_path(),
             tts_threads: crate::config::defaults::default_tts_threads(),
             show_tts: crate::config::defaults::default_show_tts(),

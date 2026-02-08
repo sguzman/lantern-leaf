@@ -18,6 +18,10 @@ pub(crate) fn default_tts_speed() -> f32 {
     2.5
 }
 
+pub(crate) fn default_tts_volume() -> f32 {
+    1.0
+}
+
 pub(crate) fn default_tts_espeak_path() -> String {
     "/usr/share".to_string()
 }

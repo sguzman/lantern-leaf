@@ -1,5 +1,5 @@
 use super::Effect;
-use super::super::state::{App, MAX_TTS_SPEED, MIN_TTS_SPEED};
+use super::super::state::{App, MAX_TTS_SPEED, MAX_TTS_VOLUME, MIN_TTS_SPEED, MIN_TTS_VOLUME};
 use crate::text_utils::split_sentences;
 use iced::widget::scrollable::RelativeOffset;
 use iced::Task;
@@ -80,6 +80,16 @@ impl App {
             effects.push(Effect::AutoScrollToCurrent);
             effects.push(Effect::SaveBookmark);
         }
+        effects.push(Effect::SaveConfig);
+    }
+
+    pub(super) fn handle_set_tts_volume(&mut self, volume: f32, effects: &mut Vec<Effect>) {
+        let clamped = volume.clamp(MIN_TTS_VOLUME, MAX_TTS_VOLUME);
+        self.config.tts_volume = clamped;
+        if let Some(playback) = &self.tts.playback {
+            playback.set_volume(clamped);
+        }
+        info!(volume = self.config.tts_volume, "Adjusted TTS volume");
         effects.push(Effect::SaveConfig);
     }
 
@@ -304,6 +314,7 @@ impl App {
                 Duration::from_secs_f32(self.config.pause_after_sentence),
                 self.config.tts_speed,
             ) {
+                playback.set_volume(self.config.tts_volume);
                 let played = playback.sentence_durations();
                 self.tts.track = if played.len() == file_paths.len() {
                     file_paths

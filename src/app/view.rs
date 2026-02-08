@@ -1,5 +1,8 @@
 use super::messages::{Component, Message};
-use super::state::{App, MAX_LETTER_SPACING, MAX_MARGIN, MAX_WORD_SPACING, MIN_TTS_SPEED};
+use super::state::{
+    App, MAX_LETTER_SPACING, MAX_MARGIN, MAX_TTS_VOLUME, MAX_WORD_SPACING, MIN_TTS_SPEED,
+    MIN_TTS_VOLUME,
+};
 use crate::config::HighlightColor;
 use crate::pagination::{MAX_FONT_SIZE, MAX_LINES_PER_PAGE, MIN_FONT_SIZE, MIN_LINES_PER_PAGE};
 use crate::text_utils::split_sentences;
@@ -61,16 +64,43 @@ impl App {
         .align_y(Vertical::Center)
         .width(Length::Fill);
 
-        let font_label = text(format!("Font size: {}", self.config.font_size));
-        let font_slider = slider(
-            MIN_FONT_SIZE as f32..=MAX_FONT_SIZE as f32,
-            self.config.font_size as f32,
-            |value| Message::FontSizeChanged(value.round() as u32),
-        );
-
-        let font_controls = row![font_label, font_slider]
-            .spacing(10)
-            .align_y(Vertical::Center);
+        let font_controls = row![
+            column![
+                text(format!("Font: {}", self.config.font_size)),
+                slider(
+                    MIN_FONT_SIZE as f32..=MAX_FONT_SIZE as f32,
+                    self.config.font_size as f32,
+                    |value| Message::FontSizeChanged(value.round() as u32),
+                )
+            ]
+            .spacing(4)
+            .width(Length::FillPortion(1)),
+            column![
+                text(format!("Speed: {:.2}x", self.config.tts_speed)),
+                slider(
+                    MIN_TTS_SPEED..=super::state::MAX_TTS_SPEED,
+                    self.config.tts_speed,
+                    Message::SetTtsSpeed,
+                )
+                .step(0.05)
+            ]
+            .spacing(4)
+            .width(Length::FillPortion(1)),
+            column![
+                text(format!("Volume: {:.0}%", self.config.tts_volume * 100.0)),
+                slider(
+                    MIN_TTS_VOLUME..=MAX_TTS_VOLUME,
+                    self.config.tts_volume,
+                    Message::SetTtsVolume,
+                )
+                .step(0.01)
+            ]
+            .spacing(4)
+            .width(Length::FillPortion(1)),
+        ]
+        .spacing(12)
+        .align_y(Vertical::Center)
+        .width(Length::Fill);
 
         let fallback_page_content = self.formatted_page_content();
         let display_sentences = self.display_sentences_for_current_page();
@@ -367,13 +397,6 @@ impl App {
             button("Play From Highlight")
         };
 
-        let speed_slider = slider(
-            MIN_TTS_SPEED..=super::state::MAX_TTS_SPEED,
-            self.config.tts_speed,
-            Message::SetTtsSpeed,
-        )
-        .step(0.05);
-
         let controls = row![
             button("⏮").on_press(Message::SeekBackward),
             play_button,
@@ -381,8 +404,6 @@ impl App {
             play_from_start,
             play_from_cursor,
             jump_button,
-            text(format!("Speed: {:.2}x", self.config.tts_speed)),
-            speed_slider,
         ]
         .spacing(10)
         .align_y(Vertical::Center);
