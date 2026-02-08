@@ -6,8 +6,22 @@ use iced::widget::scrollable::RelativeOffset;
 use tracing::info;
 
 impl App {
-    pub(super) fn handle_scrolled(&mut self, offset: RelativeOffset, effects: &mut Vec<Effect>) {
+    pub(super) fn handle_scrolled(
+        &mut self,
+        offset: RelativeOffset,
+        viewport_height: f32,
+        content_height: f32,
+        effects: &mut Vec<Effect>,
+    ) {
         let sanitized = Self::sanitize_offset(offset);
+        self.bookmark.viewport_fraction = if viewport_height.is_finite()
+            && content_height.is_finite()
+            && content_height > 0.0
+        {
+            (viewport_height / content_height).clamp(0.05, 1.0)
+        } else {
+            0.25
+        };
         if sanitized != self.bookmark.last_scroll_offset {
             self.bookmark.last_scroll_offset = sanitized;
             effects.push(Effect::SaveBookmark);
@@ -102,20 +116,15 @@ impl App {
 
         let viewport_fraction = self.estimated_viewport_fraction();
         let y = if self.config.center_spoken_sentence {
-            // Shift by about half a viewport to keep the active sentence near center.
+            // Center mode keeps the active sentence near middle of the viewport.
             (base - 0.5 * viewport_fraction).clamp(0.0, 1.0)
         } else {
-            base
+            // Track mode follows the sentence without trying to center it.
+            // Keep a small lead so the highlight does not sit on the very top edge.
+            (base - 0.15 * viewport_fraction).clamp(0.0, 1.0)
         };
 
         Some(RelativeOffset { x: 0.0, y })
-    }
-
-    pub(crate) fn should_scroll_to_target(&self, target: RelativeOffset) -> bool {
-        let current = Self::sanitize_offset(self.bookmark.last_scroll_offset);
-        let viewport_fraction = self.estimated_viewport_fraction();
-        let dead_zone = (viewport_fraction * 0.25).clamp(0.03, 0.12);
-        (target.y - current.y).abs() > dead_zone
     }
 
     fn sentence_progress_for_page(
@@ -128,15 +137,21 @@ impl App {
             .pages
             .get(self.reader.current_page)
             .map(String::as_str)?;
-        let sentences = split_sentences(page.to_string());
-        if sentences.is_empty() || sentences.len() != total_sentences {
+        let sentences = if self.tts.last_sentences.len() == total_sentences
+            && !self.tts.last_sentences.is_empty()
+        {
+            self.tts.last_sentences.clone()
+        } else {
+            split_sentences(page.to_string())
+        };
+        if sentences.is_empty() {
             return None;
         }
 
         let idx = sentence_idx.min(sentences.len().saturating_sub(1));
         let sentence_lengths: Vec<usize> = sentences
             .iter()
-            .map(|s| s.chars().filter(|ch| !ch.is_whitespace()).count().max(1))
+            .map(|s| s.chars().count().max(1))
             .collect();
         let total_weight: usize = sentence_lengths.iter().sum();
         if total_weight == 0 {
@@ -149,18 +164,9 @@ impl App {
     }
 
     fn estimated_viewport_fraction(&self) -> f32 {
-        let page_chars = self
-            .reader
-            .pages
-            .get(self.reader.current_page)
-            .map(|page| page.chars().count())
-            .unwrap_or(1)
-            .max(1);
-        let estimated_visible_chars = self
-            .config
-            .lines_per_page
-            .saturating_mul(60)
-            .max(1);
-        (estimated_visible_chars as f32 / page_chars as f32).clamp(0.08, 0.9)
+        if self.bookmark.viewport_fraction.is_finite() && self.bookmark.viewport_fraction > 0.0 {
+            return self.bookmark.viewport_fraction.clamp(0.08, 0.45);
+        }
+        0.25
     }
 }

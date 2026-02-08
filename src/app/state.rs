@@ -61,6 +61,7 @@ pub struct TtsState {
 /// Bookmark and scroll tracking model.
 pub struct BookmarkState {
     pub(super) last_scroll_offset: RelativeOffset,
+    pub(super) viewport_fraction: f32,
 }
 
 /// Core application state composed of sub-models.
@@ -196,6 +197,7 @@ impl App {
             },
             bookmark: BookmarkState {
                 last_scroll_offset: RelativeOffset::START,
+                viewport_fraction: 0.25,
             },
             epub_path,
             tts: TtsState {

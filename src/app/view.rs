@@ -140,7 +140,11 @@ impl App {
                     self.config.margin_horizontal,
                 ]),
         )
-        .on_scroll(|viewport| Message::Scrolled(viewport.relative_offset()))
+        .on_scroll(|viewport| Message::Scrolled {
+            offset: viewport.relative_offset(),
+            viewport_height: viewport.bounds().height,
+            content_height: viewport.content_bounds().height,
+        })
         .id(super::state::TEXT_SCROLL_ID.clone())
         .height(Length::FillPortion(1));
 

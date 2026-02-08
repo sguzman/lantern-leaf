@@ -33,7 +33,11 @@ pub enum Message {
     SetTtsSpeed(f32),
     SeekForward,
     SeekBackward,
-    Scrolled(RelativeOffset),
+    Scrolled {
+        offset: RelativeOffset,
+        viewport_height: f32,
+        content_height: f32,
+    },
     TtsPrepared {
         page: usize,
         start_idx: usize,
