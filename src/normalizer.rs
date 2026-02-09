@@ -56,6 +56,8 @@ struct NormalizerConfig {
     require_alphanumeric: bool,
     replacements: BTreeMap<String, String>,
     drop_tokens: Vec<String>,
+    acronyms: AcronymConfig,
+    pronunciation: PronunciationConfig,
 }
 
 impl Default for NormalizerConfig {
@@ -78,6 +80,8 @@ impl Default for NormalizerConfig {
             require_alphanumeric: true,
             replacements,
             drop_tokens: Vec::new(),
+            acronyms: AcronymConfig::default(),
+            pronunciation: PronunciationConfig::default(),
         }
     }
 }
@@ -88,6 +92,80 @@ enum NormalizationMode {
     #[default]
     Page,
     Sentence,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+struct AcronymConfig {
+    enabled: bool,
+    tokens: Vec<String>,
+    letter_separator: String,
+    digit_separator: String,
+    letter_sounds: BTreeMap<String, String>,
+}
+
+impl Default for AcronymConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            tokens: vec![
+                "CSS".to_string(),
+                "HTML".to_string(),
+                "HTTP".to_string(),
+                "HTTPS".to_string(),
+                "URL".to_string(),
+                "API".to_string(),
+                "CPU".to_string(),
+                "GPU".to_string(),
+                "JSON".to_string(),
+                "SQL".to_string(),
+                "XML".to_string(),
+                "TTS".to_string(),
+                "XTTS".to_string(),
+                "LLM".to_string(),
+            ],
+            letter_separator: " ".to_string(),
+            digit_separator: " point ".to_string(),
+            letter_sounds: default_letter_sounds(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+struct PronunciationConfig {
+    year_mode: YearMode,
+    number_separator: String,
+    insert_and: bool,
+    enable_brand_map: bool,
+    brand_map: BTreeMap<String, String>,
+}
+
+impl Default for PronunciationConfig {
+    fn default() -> Self {
+        let mut brand_map = BTreeMap::new();
+        brand_map.insert("MySQL".to_string(), "My S Q L".to_string());
+        brand_map.insert("Mysql".to_string(), "My S Q L".to_string());
+        brand_map.insert("SQLite".to_string(), "S Q Lite".to_string());
+        brand_map.insert("SQLITE".to_string(), "S Q Lite".to_string());
+        brand_map.insert("PostCSS".to_string(), "Post C S S".to_string());
+
+        Self {
+            year_mode: YearMode::American,
+            number_separator: " ".to_string(),
+            insert_and: false,
+            enable_brand_map: true,
+            brand_map,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+enum YearMode {
+    #[default]
+    American,
+    None,
 }
 
 #[derive(Debug, Clone)]
@@ -237,6 +315,20 @@ impl TextNormalizer {
             }
         }
 
+        if self.config.pronunciation.enable_brand_map
+            && !self.config.pronunciation.brand_map.is_empty()
+        {
+            text = apply_brand_map(&text, &self.config.pronunciation.brand_map);
+        }
+
+        if self.config.pronunciation.year_mode != YearMode::None {
+            text = apply_year_pronunciation(&text, &self.config.pronunciation);
+        }
+
+        if self.config.acronyms.enabled && !self.config.acronyms.tokens.is_empty() {
+            text = apply_acronym_expansion(&text, &self.config.acronyms);
+        }
+
         if self.config.collapse_whitespace {
             text = RE_HORIZONTAL_WS.replace_all(&text, " ").to_string();
         }
@@ -272,4 +364,172 @@ impl Default for TextNormalizer {
             config: NormalizerConfig::default(),
         }
     }
+}
+
+fn default_letter_sounds() -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    for ch in 'A'..='Z' {
+        map.insert(ch.to_string(), ch.to_string());
+    }
+    for (digit, word) in [
+        ('0', "zero"),
+        ('1', "one"),
+        ('2', "two"),
+        ('3', "three"),
+        ('4', "four"),
+        ('5', "five"),
+        ('6', "six"),
+        ('7', "seven"),
+        ('8', "eight"),
+        ('9', "nine"),
+    ] {
+        map.insert(digit.to_string(), word.to_string());
+    }
+    map
+}
+
+fn apply_brand_map(text: &str, brand_map: &BTreeMap<String, String>) -> String {
+    let mut out = text.to_string();
+    let mut entries: Vec<_> = brand_map.iter().collect();
+    entries.sort_by_key(|(token, _)| Reverse(token.len()));
+
+    for (token, replacement) in entries {
+        let pattern = Regex::new(&format!(r"(?i)\b{}\b", regex::escape(token))).unwrap();
+        out = pattern.replace_all(&out, replacement.as_str()).to_string();
+    }
+
+    out
+}
+
+fn apply_year_pronunciation(text: &str, cfg: &PronunciationConfig) -> String {
+    let re = Regex::new(r"\b(1\d{3}|20\d{2})\b").unwrap();
+    re.replace_all(text, |caps: &regex::Captures| {
+        let year = caps[1].parse::<usize>().unwrap_or(0);
+        year_to_words(year, cfg)
+    })
+    .to_string()
+}
+
+fn year_to_words(year: usize, cfg: &PronunciationConfig) -> String {
+    if year < 1000 || year > 2099 {
+        return year.to_string();
+    }
+
+    let ones = [
+        "", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    ];
+    let teens = [
+        "ten",
+        "eleven",
+        "twelve",
+        "thirteen",
+        "fourteen",
+        "fifteen",
+        "sixteen",
+        "seventeen",
+        "eighteen",
+        "nineteen",
+    ];
+    let tens = [
+        "", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+    ];
+
+    let thousands = year / 1000;
+    let hundreds = (year / 100) % 10;
+    let remainder = year % 100;
+
+    let mut parts = Vec::new();
+    if thousands > 0 {
+        parts.push(format!("{} thousand", ones[thousands]));
+    }
+    if hundreds > 0 {
+        parts.push(format!("{} hundred", ones[hundreds]));
+    }
+
+    if remainder > 0 {
+        let remainder_str = if remainder < 10 {
+            ones[remainder].to_string()
+        } else if remainder < 20 {
+            teens[remainder - 10].to_string()
+        } else {
+            let mut s = tens[remainder / 10].to_string();
+            if remainder % 10 > 0 {
+                s.push(' ');
+                s.push_str(ones[remainder % 10]);
+            }
+            s
+        };
+
+        if hundreds > 0 && cfg.insert_and {
+            parts.push(format!("and {remainder_str}"));
+        } else {
+            parts.push(remainder_str);
+        }
+    }
+
+    parts.join(&cfg.number_separator)
+}
+
+fn apply_acronym_expansion(text: &str, cfg: &AcronymConfig) -> String {
+    let mut out = text.to_string();
+
+    for token in &cfg.tokens {
+        let pattern = format!(
+            r"(?i)\b{}(?P<digits>\d+(?:\.\d+)*)?\b",
+            regex::escape(token)
+        );
+        let re = Regex::new(&pattern).unwrap();
+        out = re
+            .replace_all(&out, |caps: &regex::Captures| {
+                let letters = caps[0]
+                    .chars()
+                    .filter(|ch| ch.is_ascii_alphabetic())
+                    .map(|ch| {
+                        let key = ch.to_ascii_uppercase().to_string();
+                        cfg.letter_sounds.get(&key).cloned().unwrap_or_else(|| key)
+                    })
+                    .collect::<Vec<_>>();
+
+                let mut spelled = letters.join(&cfg.letter_separator);
+                if let Some(digits) = caps.name("digits") {
+                    let digits = digits.as_str().trim();
+                    if !digits.is_empty() {
+                        let spoken_digits = digits
+                            .split('.')
+                            .map(|group| {
+                                group
+                                    .chars()
+                                    .filter(|ch| ch.is_ascii_digit())
+                                    .map(|ch| {
+                                        cfg.letter_sounds
+                                            .get(&ch.to_string())
+                                            .cloned()
+                                            .unwrap_or_else(|| ch.to_string())
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(&cfg.letter_separator)
+                            })
+                            .filter(|group| !group.is_empty())
+                            .collect::<Vec<_>>()
+                            .join(&cfg.digit_separator);
+
+                        if !spoken_digits.is_empty() {
+                            if !spelled.is_empty() {
+                                spelled.push(' ');
+                            }
+                            spelled.push_str(&spoken_digits);
+                        }
+                    }
+                }
+
+                if spelled.is_empty() {
+                    caps[0].to_string()
+                } else {
+                    spelled
+                }
+            })
+            .to_string();
+    }
+
+    out
 }

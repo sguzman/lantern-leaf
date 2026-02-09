@@ -2,7 +2,7 @@
 # Master switch for text cleaning before TTS generation.
 enabled = true
 
-# "page" keeps page-level processing and then maps each display sentence to
+# "page" keeps page-level processing and maps each display sentence to
 # either cleaned speech text or silence.
 mode = "page"
 
@@ -27,6 +27,64 @@ require_alphanumeric = true
 # Optional literal tokens to remove entirely.
 drop_tokens = []
 
-# Pronunciation / symbol cleanup. '#' defaults to silence (instead of "sharp").
+# Symbol/word replacements.
 [normalization.replacements]
 "#" = " "
+
+[normalization.acronyms]
+enabled = true
+tokens = ["CSS", "HTML", "HTTP", "HTTPS", "URL", "API", "CPU", "GPU", "JSON", "SQL", "XML", "TTS", "XTTS", "LLM"]
+letter_separator = " "
+digit_separator = " point "
+
+# Optional: override pronunciation of individual letters/digits.
+[normalization.acronyms.letter_sounds]
+A = "A"
+B = "B"
+C = "C"
+D = "D"
+E = "E"
+F = "F"
+G = "G"
+H = "H"
+I = "I"
+J = "J"
+K = "K"
+L = "L"
+M = "M"
+N = "N"
+O = "O"
+P = "P"
+Q = "Q"
+R = "R"
+S = "S"
+T = "T"
+U = "U"
+V = "V"
+W = "W"
+X = "X"
+Y = "Y"
+Z = "Z"
+0 = "zero"
+1 = "one"
+2 = "two"
+3 = "three"
+4 = "four"
+5 = "five"
+6 = "six"
+7 = "seven"
+8 = "eight"
+9 = "nine"
+
+[normalization.pronunciation]
+year_mode = "american"
+number_separator = " "
+insert_and = false
+enable_brand_map = true
+
+[normalization.pronunciation.brand_map]
+MySQL = "My S Q L"
+Mysql = "My S Q L"
+SQLite = "S Q Lite"
+SQLITE = "S Q Lite"
+PostCSS = "Post C S S"

@@ -5,11 +5,14 @@
 //! Keeping it isolated makes it easy to swap out or enhance parsing later
 //! (e.g., extracting a table of contents or preserving styling).
 
+use crate::cache::hash_dir;
 use anyhow::{Context, Result};
 use epub::doc::EpubDoc;
+use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::UNIX_EPOCH;
 use tracing::{debug, info, warn};
 
 /// Load an EPUB from disk and return its text content as a single string.
@@ -65,7 +68,7 @@ pub fn load_epub_text(path: &Path) -> Result<String> {
                     combined.push_str("\n\n");
                 }
                 // Use a lightweight HTML-to-text pass to remove most markup; fall back to raw chapter on errors.
-                // Use a very large width so we do not bake in hard line breaks—let the UI handle wrapping.
+                // Use a very large width so we do not bake in hard line breaks; let the UI handle wrapping.
                 let plain = match html2text::from_read(chapter.as_bytes(), 10_000) {
                     Ok(clean) => clean,
                     Err(err) => {
@@ -132,10 +135,21 @@ fn load_with_pandoc(path: &Path) -> Result<String> {
         path = %path.display(),
         "Converting source to plain text with pandoc"
     );
+
+    let signature = source_signature(path)?;
+    if let Some(cached) = try_read_pandoc_cache(path, &signature)? {
+        info!(path = %path.display(), "Using cached pandoc plain-text conversion");
+        return Ok(cached);
+    }
+
     let output = Command::new("pandoc")
         .arg(path)
         .arg("--to")
         .arg("plain")
+        .arg("--wrap=none")
+        .arg("--columns=100000")
+        .arg("--strip-comments")
+        .arg("--eol=lf")
         .output()
         .with_context(|| format!("Failed to start pandoc for {}", path.display()))?;
 
@@ -155,10 +169,99 @@ fn load_with_pandoc(path: &Path) -> Result<String> {
     } else {
         text
     };
+
+    if let Err(err) = write_pandoc_cache(path, &signature, &text) {
+        warn!(path = %path.display(), "Failed to cache pandoc text output: {err}");
+    }
+
     info!(
         path = %path.display(),
         total_chars = text.len(),
         "Finished pandoc conversion"
     );
     Ok(text)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PandocCacheMeta {
+    source_len: u64,
+    source_modified_unix_secs: Option<u64>,
+}
+
+fn source_signature(path: &Path) -> Result<PandocCacheMeta> {
+    let meta = fs::metadata(path)
+        .with_context(|| format!("Failed to read source metadata for {}", path.display()))?;
+
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs());
+
+    Ok(PandocCacheMeta {
+        source_len: meta.len(),
+        source_modified_unix_secs: modified,
+    })
+}
+
+fn pandoc_cache_paths(path: &Path) -> (PathBuf, PathBuf) {
+    let dir = hash_dir(path);
+    (
+        dir.join("source-plain.txt"),
+        dir.join("source-plain.meta.toml"),
+    )
+}
+
+fn try_read_pandoc_cache(path: &Path, signature: &PandocCacheMeta) -> Result<Option<String>> {
+    let (text_path, meta_path) = pandoc_cache_paths(path);
+
+    let meta_str = match fs::read_to_string(&meta_path) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+
+    let cached_meta: PandocCacheMeta = match toml::from_str(&meta_str) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+
+    if cached_meta.source_len != signature.source_len
+        || cached_meta.source_modified_unix_secs != signature.source_modified_unix_secs
+    {
+        return Ok(None);
+    }
+
+    let text = fs::read_to_string(&text_path).with_context(|| {
+        format!(
+            "Failed to read pandoc cache text at {}",
+            text_path.display()
+        )
+    })?;
+    Ok(Some(text))
+}
+
+fn write_pandoc_cache(path: &Path, signature: &PandocCacheMeta, text: &str) -> Result<()> {
+    let (text_path, meta_path) = pandoc_cache_paths(path);
+    if let Some(parent) = text_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create cache dir {}", parent.display()))?;
+    }
+
+    fs::write(&text_path, text).with_context(|| {
+        format!(
+            "Failed to write pandoc cache text at {}",
+            text_path.display()
+        )
+    })?;
+
+    let meta_toml =
+        toml::to_string(signature).context("Failed to serialize pandoc cache metadata")?;
+    fs::write(&meta_path, meta_toml).with_context(|| {
+        format!(
+            "Failed to write pandoc cache metadata at {}",
+            meta_path.display()
+        )
+    })?;
+
+    Ok(())
 }
