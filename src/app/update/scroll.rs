@@ -2,7 +2,6 @@ use super::super::state::App;
 use super::Effect;
 use crate::cache::{Bookmark, save_bookmark};
 use crate::config::FontFamily;
-use crate::text_utils::split_sentences;
 use iced::widget::scrollable::RelativeOffset;
 use tracing::info;
 
@@ -37,14 +36,12 @@ impl App {
         } else {
             0.0
         };
-        self.bookmark.viewport_fraction = if viewport_height.is_finite()
-            && content_height.is_finite()
-            && content_height > 0.0
-        {
-            (viewport_height / content_height).clamp(0.05, 1.0)
-        } else {
-            0.25
-        };
+        self.bookmark.viewport_fraction =
+            if viewport_height.is_finite() && content_height.is_finite() && content_height > 0.0 {
+                (viewport_height / content_height).clamp(0.05, 1.0)
+            } else {
+                0.25
+            };
 
         if sanitized != self.bookmark.last_scroll_offset {
             self.bookmark.last_scroll_offset = sanitized;
@@ -52,7 +49,9 @@ impl App {
         }
 
         if let Some(idx) = self.bookmark.pending_sentence_snap.take() {
-            if let Some(offset) = self.scroll_offset_for_sentence(idx, self.tts.last_sentences.len()) {
+            if let Some(offset) =
+                self.scroll_offset_for_sentence(idx, self.tts.last_sentences.len())
+            {
                 let offset = Self::sanitize_offset(offset);
                 if offset != self.bookmark.last_scroll_offset {
                     self.bookmark.last_scroll_offset = offset;
@@ -122,14 +121,7 @@ impl App {
     }
 
     fn current_sentences(&self) -> Vec<String> {
-        split_sentences(
-            self.reader
-                .pages
-                .get(self.reader.current_page)
-                .map(String::as_str)
-                .unwrap_or("")
-                .to_string(),
-        )
+        self.raw_sentences_for_page(self.reader.current_page)
     }
 
     pub(crate) fn scroll_offset_for_sentence(
@@ -175,17 +167,13 @@ impl App {
         sentence_idx: usize,
         total_sentences: usize,
     ) -> Option<f32> {
-        let page = self
-            .reader
-            .pages
-            .get(self.reader.current_page)
-            .map(String::as_str)?;
+        self.reader.pages.get(self.reader.current_page)?;
         let sentences = if self.tts.last_sentences.len() == total_sentences
             && !self.tts.last_sentences.is_empty()
         {
             self.tts.last_sentences.clone()
         } else {
-            split_sentences(page.to_string())
+            self.raw_sentences_for_page(self.reader.current_page)
         };
         if sentences.is_empty() {
             return None;
@@ -252,7 +240,8 @@ impl App {
         if self.bookmark.viewport_height > 0.0
             && self.bookmark.content_height > self.bookmark.viewport_height
         {
-            return (self.bookmark.viewport_height / self.bookmark.content_height).clamp(0.05, 0.95);
+            return (self.bookmark.viewport_height / self.bookmark.content_height)
+                .clamp(0.05, 0.95);
         }
         if self.bookmark.viewport_fraction.is_finite() && self.bookmark.viewport_fraction > 0.0 {
             return self.bookmark.viewport_fraction.clamp(0.05, 0.95);
@@ -265,7 +254,10 @@ impl App {
             self.bookmark.viewport_width > 0.0,
             self.bookmark.content_width > 0.0,
         ) {
-            (true, true) => self.bookmark.viewport_width.min(self.bookmark.content_width),
+            (true, true) => self
+                .bookmark
+                .viewport_width
+                .min(self.bookmark.content_width),
             (true, false) => self.bookmark.viewport_width,
             (false, true) => self.bookmark.content_width,
             (false, false) => 1.0,

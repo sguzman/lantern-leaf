@@ -1,5 +1,5 @@
-use super::Effect;
 use super::super::state::App;
+use super::Effect;
 use crate::pagination::{MAX_LINES_PER_PAGE, MIN_LINES_PER_PAGE};
 use crate::text_utils::split_sentences;
 use iced::widget::scrollable::RelativeOffset;
@@ -16,23 +16,23 @@ impl App {
         }
     }
 
-    pub(super) fn handle_lines_per_page_changed(
-        &mut self,
-        lines: u32,
-        effects: &mut Vec<Effect>,
-    ) {
+    pub(super) fn handle_lines_per_page_changed(&mut self, lines: u32, effects: &mut Vec<Effect>) {
         let clamped = lines.clamp(MIN_LINES_PER_PAGE as u32, MAX_LINES_PER_PAGE as u32) as usize;
         if clamped != self.config.lines_per_page {
             let anchor = self
                 .reader
                 .pages
                 .get(self.reader.current_page)
-                .and_then(|p| split_sentences(p.clone()).into_iter().next());
+                .and_then(|p| split_sentences(p).into_iter().next());
             let before = self.reader.current_page;
             self.config.lines_per_page = clamped;
             self.repaginate();
             if let Some(sentence) = anchor {
-                if let Some(idx) = self.reader.pages.iter().position(|page| page.contains(&sentence))
+                if let Some(idx) = self
+                    .reader
+                    .pages
+                    .iter()
+                    .position(|page| page.contains(&sentence))
                 {
                     self.reader.current_page = idx;
                 }

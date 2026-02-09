@@ -1,17 +1,33 @@
-use super::Effect;
 use super::super::messages::Message;
 use super::super::state::{App, TEXT_SCROLL_ID};
+use super::Effect;
+use iced::Event;
+use iced::event;
 use iced::time;
 use iced::{Subscription, Task};
 use std::time::Duration;
 
 impl App {
     pub fn subscription(app: &App) -> Subscription<Message> {
+        let mut subscriptions: Vec<Subscription<Message>> = vec![
+            iced::window::resize_events().map(|(_id, size)| Message::WindowResized {
+                width: size.width,
+                height: size.height,
+            }),
+            event::listen_with(|event, _status, _id| match event {
+                Event::Window(iced::window::Event::Moved(position)) => Some(Message::WindowMoved {
+                    x: position.x,
+                    y: position.y,
+                }),
+                _ => None,
+            }),
+        ];
+
         if app.tts.running {
-            time::every(Duration::from_millis(50)).map(Message::Tick)
-        } else {
-            Subscription::none()
+            subscriptions.push(time::every(Duration::from_millis(50)).map(Message::Tick));
         }
+
+        Subscription::batch(subscriptions)
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -82,6 +98,12 @@ impl App {
             Message::SeekForward => self.handle_seek_forward(&mut effects),
             Message::SeekBackward => self.handle_seek_backward(&mut effects),
             Message::SentenceClicked(idx) => self.handle_sentence_clicked(idx, &mut effects),
+            Message::WindowResized { width, height } => {
+                self.handle_window_resized(width, height, &mut effects);
+            }
+            Message::WindowMoved { x, y } => {
+                self.handle_window_moved(x, y, &mut effects);
+            }
             Message::Scrolled {
                 offset,
                 viewport_width,
@@ -136,10 +158,7 @@ impl App {
                         self.scroll_offset_for_sentence(idx, self.tts.last_sentences.len())
                     {
                         self.bookmark.last_scroll_offset = offset;
-                        return iced::widget::scrollable::snap_to(
-                            TEXT_SCROLL_ID.clone(),
-                            offset,
-                        );
+                        return iced::widget::scrollable::snap_to(TEXT_SCROLL_ID.clone(), offset);
                     }
                 }
                 Task::none()

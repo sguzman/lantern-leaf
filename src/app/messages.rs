@@ -35,6 +35,14 @@ pub enum Message {
     SeekForward,
     SeekBackward,
     SentenceClicked(usize),
+    WindowResized {
+        width: f32,
+        height: f32,
+    },
+    WindowMoved {
+        x: f32,
+        y: f32,
+    },
     Scrolled {
         offset: RelativeOffset,
         viewport_width: f32,

@@ -122,7 +122,8 @@ impl TtsEngine {
         let mut pending: Vec<(usize, PathBuf, mpsc::Receiver<Result<()>>)> = Vec::new();
 
         for (offset, sentence) in sentences.into_iter().skip(start_idx).enumerate() {
-            let path = cache_path(&cache_root, &self.model_path, &sentence);
+            let normalized = normalize_sentence(&sentence);
+            let path = cache_path(&cache_root, &self.model_path, &normalized);
             if path.exists() {
                 let dur = sentence_duration(&path);
                 collected[offset] = Some((path, dur));
@@ -137,7 +138,7 @@ impl TtsEngine {
             }
 
             let (result_tx, result_rx) = mpsc::channel();
-            pool.dispatch(sentence, path.clone(), result_tx)?;
+            pool.dispatch(normalized, path.clone(), result_tx)?;
             pending.push((offset, path, result_rx));
         }
 
@@ -157,10 +158,8 @@ impl TtsEngine {
             }
         }
 
-        let collected: Vec<(PathBuf, std::time::Duration)> = collected
-            .into_iter()
-            .flatten()
-            .collect();
+        let collected: Vec<(PathBuf, std::time::Duration)> =
+            collected.into_iter().flatten().collect();
         debug!(count = collected.len(), "Prepared TTS batch");
         Ok(collected)
     }
@@ -229,6 +228,25 @@ fn cache_path(base: &Path, model_path: &Path, sentence: &str) -> PathBuf {
     base.join(format!("tts-{hash}.wav"))
 }
 
+fn normalize_sentence(sentence: &str) -> String {
+    let mut out = String::with_capacity(sentence.len());
+    let mut prev_ws = false;
+
+    for ch in sentence.trim().chars() {
+        if ch.is_whitespace() {
+            if !prev_ws {
+                out.push(' ');
+                prev_ws = true;
+            }
+        } else {
+            out.push(ch);
+            prev_ws = false;
+        }
+    }
+
+    out
+}
+
 /// Piper expects the parent directory that contains `espeak-ng-data/phonindex`.
 /// Users often point directly at `.../espeak-ng-data`; trim that to avoid
 /// duplicated segments like `/espeak-ng-data/espeak-ng-data/phonindex`.
@@ -262,12 +280,7 @@ fn sentence_duration(path: &Path) -> std::time::Duration {
         .unwrap_or(std::time::Duration::from_secs(1))
 }
 
-fn time_stretch(
-    samples: &[f32],
-    sample_rate: u32,
-    channels: u16,
-    speed: f32,
-) -> Result<Vec<f32>> {
+fn time_stretch(samples: &[f32], sample_rate: u32, channels: u16, speed: f32) -> Result<Vec<f32>> {
     if (speed - 1.0).abs() <= f32::EPSILON {
         return Ok(samples.to_vec());
     }
@@ -446,7 +459,10 @@ fn spawn_worker(model_path: &Path, espeak_root: &Path) -> Result<std::process::C
         .context("Starting TTS worker process")
 }
 
-fn send_request<T: Serialize>(stdin: &mut BufWriter<std::process::ChildStdin>, request: &T) -> Result<()> {
+fn send_request<T: Serialize>(
+    stdin: &mut BufWriter<std::process::ChildStdin>,
+    request: &T,
+) -> Result<()> {
     let payload = serde_json::to_string(request).context("Encoding worker request")?;
     stdin.write_all(payload.as_bytes())?;
     stdin.write_all(b"\n")?;

@@ -1,8 +1,7 @@
-use super::Effect;
 use super::super::state::{App, MAX_TTS_SPEED, MAX_TTS_VOLUME, MIN_TTS_SPEED, MIN_TTS_VOLUME};
-use crate::text_utils::split_sentences;
-use iced::widget::scrollable::RelativeOffset;
+use super::Effect;
 use iced::Task;
+use iced::widget::scrollable::RelativeOffset;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
@@ -179,16 +178,9 @@ impl App {
             effects.push(Effect::SaveBookmark);
         } else if self.reader.current_page > 0 {
             self.reader.current_page -= 1;
-            let last_idx = split_sentences(
-                self.reader
-                    .pages
-                    .get(self.reader.current_page)
-                    .map(String::as_str)
-                    .unwrap_or("")
-                    .to_string(),
-            )
-            .len()
-            .saturating_sub(1);
+            let last_idx = self
+                .sentence_count_for_page(self.reader.current_page)
+                .saturating_sub(1);
             info!("Seeking backward into previous page");
             effects.push(Effect::StartTts {
                 page: self.reader.current_page,
@@ -318,10 +310,7 @@ impl App {
                 playback.set_volume(self.config.tts_volume);
                 let played = playback.sentence_durations();
                 self.tts.track = if played.len() == file_paths.len() {
-                    file_paths
-                        .into_iter()
-                        .zip(played.iter().copied())
-                        .collect()
+                    file_paths.into_iter().zip(played.iter().copied()).collect()
                 } else {
                     files.clone()
                 };
@@ -329,12 +318,11 @@ impl App {
                 self.tts.sentence_offset =
                     start_idx.min(self.tts.last_sentences.len().saturating_sub(1));
                 self.tts.current_sentence_idx = Some(self.tts.sentence_offset);
-                self.tts.sources_per_sentence =
-                    if self.config.pause_after_sentence > f32::EPSILON {
-                        2
-                    } else {
-                        1
-                    };
+                self.tts.sources_per_sentence = if self.config.pause_after_sentence > f32::EPSILON {
+                    2
+                } else {
+                    1
+                };
                 self.tts.total_sources = self.tts.track.len() * self.tts.sources_per_sentence;
                 self.tts.elapsed = Duration::ZERO;
                 self.tts.started_at = Some(Instant::now());
@@ -364,14 +352,7 @@ impl App {
         self.tts.elapsed = Duration::ZERO;
         self.tts.started_at = None;
 
-        let sentences = split_sentences(
-            self.reader
-                .pages
-                .get(page)
-                .map(String::as_str)
-                .unwrap_or("")
-                .to_string(),
-        );
+        let sentences = self.raw_sentences_for_page(page);
         self.tts.last_sentences = sentences.clone();
         if sentences.is_empty() {
             self.tts.current_sentence_idx = None;

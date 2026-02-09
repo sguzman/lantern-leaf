@@ -7,6 +7,8 @@ pub(super) struct ConfigTables {
     #[serde(default)]
     appearance: AppearanceConfig,
     #[serde(default)]
+    window: WindowConfig,
+    #[serde(default)]
     reading_behavior: ReadingBehaviorConfig,
     #[serde(default)]
     ui: UiConfig,
@@ -29,6 +31,10 @@ impl From<ConfigTables> for AppConfig {
             lines_per_page: tables.appearance.lines_per_page,
             margin_horizontal: tables.appearance.margin_horizontal,
             margin_vertical: tables.appearance.margin_vertical,
+            window_width: tables.window.width,
+            window_height: tables.window.height,
+            window_pos_x: tables.window.x,
+            window_pos_y: tables.window.y,
             day_highlight: tables.appearance.day_highlight,
             night_highlight: tables.appearance.night_highlight,
             pause_after_sentence: tables.reading_behavior.pause_after_sentence,
@@ -62,6 +68,12 @@ impl From<&AppConfig> for ConfigTables {
                 margin_vertical: config.margin_vertical,
                 day_highlight: config.day_highlight,
                 night_highlight: config.night_highlight,
+            },
+            window: WindowConfig {
+                width: config.window_width,
+                height: config.window_height,
+                x: config.window_pos_x,
+                y: config.window_pos_y,
             },
             reading_behavior: ReadingBehaviorConfig {
                 pause_after_sentence: config.pause_after_sentence,
@@ -129,6 +141,29 @@ impl Default for AppearanceConfig {
             margin_vertical: defaults::default_margin(),
             day_highlight: defaults::default_day_highlight(),
             night_highlight: defaults::default_night_highlight(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+struct WindowConfig {
+    #[serde(default = "defaults::default_window_width")]
+    width: f32,
+    #[serde(default = "defaults::default_window_height")]
+    height: f32,
+    #[serde(default)]
+    x: Option<f32>,
+    #[serde(default)]
+    y: Option<f32>,
+}
+
+impl Default for WindowConfig {
+    fn default() -> Self {
+        WindowConfig {
+            width: defaults::default_window_width(),
+            height: defaults::default_window_height(),
+            x: None,
+            y: None,
         }
     }
 }

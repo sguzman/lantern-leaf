@@ -6,7 +6,7 @@
 //! `page` field plus optional `sentence_idx`, `sentence_text`, and `scroll_y`
 //! for resuming inside the page.
 
-use crate::config::{parse_config, serialize_config, AppConfig};
+use crate::config::{AppConfig, parse_config, serialize_config};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;

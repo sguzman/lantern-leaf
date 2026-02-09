@@ -10,6 +10,14 @@ pub(crate) fn default_margin() -> u16 {
     12
 }
 
+pub(crate) fn default_window_width() -> f32 {
+    1024.0
+}
+
+pub(crate) fn default_window_height() -> f32 {
+    768.0
+}
+
 pub(crate) fn default_tts_model() -> String {
     "/usr/share/piper-voices/en/en_US/ryan/high/en_US-ryan-high.onnx".to_string()
 }

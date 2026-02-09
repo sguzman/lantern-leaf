@@ -1,6 +1,6 @@
-use crate::cache::{save_epub_config, Bookmark};
+use crate::cache::{Bookmark, save_epub_config};
 use crate::config::{AppConfig, FontFamily, FontWeight, HighlightColor, ThemeMode};
-use crate::pagination::{paginate, MAX_LINES_PER_PAGE, MIN_LINES_PER_PAGE};
+use crate::pagination::{MAX_LINES_PER_PAGE, MIN_LINES_PER_PAGE, paginate};
 use crate::text_utils::split_sentences;
 use crate::tts::{TtsEngine, TtsPlayback};
 use iced::font::{Family, Weight};
@@ -43,6 +43,8 @@ pub(crate) const FONT_WEIGHTS: [FontWeight; 3] =
 pub struct ReaderState {
     pub(super) full_text: String,
     pub(super) pages: Vec<String>,
+    pub(super) page_sentences: Vec<Vec<String>>,
+    pub(super) page_sentence_counts: Vec<usize>,
     pub(super) current_page: usize,
 }
 
@@ -98,6 +100,14 @@ impl App {
         if self.reader.current_page >= self.reader.pages.len() {
             self.reader.current_page = self.reader.pages.len() - 1;
         }
+        self.reader.page_sentences = self
+            .reader
+            .pages
+            .iter()
+            .map(|page| split_sentences(page))
+            .collect();
+        self.reader.page_sentence_counts =
+            self.reader.page_sentences.iter().map(Vec::len).collect();
         tracing::debug!(
             pages = self.reader.pages.len(),
             font_size = self.config.font_size,
@@ -174,18 +184,32 @@ impl App {
     }
 
     pub(super) fn raw_sentences_for_page(&self, page: usize) -> Vec<String> {
-        split_sentences(
-            self.reader
-                .pages
-                .get(page)
-                .map(String::as_str)
-                .unwrap_or("")
-                .to_string(),
-        )
+        self.reader
+            .page_sentences
+            .get(page)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub(super) fn display_sentences_for_current_page(&self) -> Vec<String> {
-        split_sentences(self.formatted_page_content())
+        if self.config.word_spacing == 0 && self.config.letter_spacing == 0 {
+            return self.raw_sentences_for_page(self.reader.current_page);
+        }
+        split_sentences(&self.formatted_page_content())
+    }
+
+    pub(super) fn sentence_count_for_page(&self, page: usize) -> usize {
+        self.reader
+            .page_sentence_counts
+            .get(page)
+            .copied()
+            .unwrap_or_else(|| {
+                self.reader
+                    .pages
+                    .get(page)
+                    .map(|p| split_sentences(p).len())
+                    .unwrap_or(0)
+            })
     }
 
     pub(super) fn highlight_color(&self) -> Color {
@@ -216,6 +240,8 @@ impl App {
         let mut app = App {
             reader: ReaderState {
                 pages: Vec::new(),
+                page_sentences: Vec::new(),
+                page_sentence_counts: Vec::new(),
                 full_text: text,
                 current_page: 0,
             },
@@ -266,17 +292,15 @@ impl App {
                     y: scroll_y,
                 };
 
-                if let Some(page) = app.reader.pages.get(app.reader.current_page) {
-                    app.tts.last_sentences = split_sentences(page.clone());
-                    let restored_idx = bookmark
-                        .sentence_text
-                        .as_ref()
-                        .and_then(|target| app.tts.last_sentences.iter().position(|s| s == target))
-                        .or(bookmark.sentence_idx)
-                        .map(|idx| idx.min(app.tts.last_sentences.len().saturating_sub(1)));
-                    app.tts.current_sentence_idx = restored_idx;
-                    app.bookmark.pending_sentence_snap = restored_idx;
-                }
+                app.tts.last_sentences = app.raw_sentences_for_page(app.reader.current_page);
+                let restored_idx = bookmark
+                    .sentence_text
+                    .as_ref()
+                    .and_then(|target| app.tts.last_sentences.iter().position(|s| s == target))
+                    .or(bookmark.sentence_idx)
+                    .map(|idx| idx.min(app.tts.last_sentences.len().saturating_sub(1)));
+                app.tts.current_sentence_idx = restored_idx;
+                app.bookmark.pending_sentence_snap = restored_idx;
 
                 if let Some(idx) = app.tts.current_sentence_idx {
                     // Prefer persisted scroll for initial layout, then do a one-time
@@ -351,6 +375,10 @@ fn clamp_config(config: &mut AppConfig) {
     config.line_spacing = config.line_spacing.clamp(0.8, 2.5);
     config.margin_horizontal = config.margin_horizontal.min(MAX_MARGIN);
     config.margin_vertical = config.margin_vertical.min(MAX_MARGIN);
+    config.window_width = config.window_width.clamp(320.0, 7680.0);
+    config.window_height = config.window_height.clamp(240.0, 4320.0);
+    config.window_pos_x = config.window_pos_x.filter(|v| v.is_finite());
+    config.window_pos_y = config.window_pos_y.filter(|v| v.is_finite());
     config.word_spacing = config.word_spacing.min(MAX_WORD_SPACING);
     config.letter_spacing = config.letter_spacing.min(MAX_LETTER_SPACING);
     config.lines_per_page = config

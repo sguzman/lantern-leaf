@@ -5,7 +5,6 @@ use super::state::{
 };
 use crate::config::HighlightColor;
 use crate::pagination::{MAX_FONT_SIZE, MAX_LINES_PER_PAGE, MIN_FONT_SIZE, MIN_LINES_PER_PAGE};
-use crate::text_utils::split_sentences;
 use iced::alignment::Horizontal;
 use iced::alignment::Vertical;
 use iced::widget::text::{LineHeight, Wrapping};
@@ -105,8 +104,13 @@ impl App {
         .width(Length::Fill);
 
         let fallback_page_content = self.formatted_page_content();
-        let display_sentences = self.display_sentences_for_current_page();
         let raw_sentences = self.raw_sentences_for_page(self.reader.current_page);
+        let display_sentences = if self.config.word_spacing == 0 && self.config.letter_spacing == 0
+        {
+            raw_sentences.clone()
+        } else {
+            self.display_sentences_for_current_page()
+        };
 
         let text_view_content: Element<'_, Message> = if display_sentences.is_empty() {
             text(fallback_page_content)
@@ -160,10 +164,7 @@ impl App {
         let text_view = scrollable(
             container(text_view_content)
                 .width(Length::Fill)
-                .padding([
-                    self.config.margin_vertical,
-                    self.config.margin_horizontal,
-                ]),
+                .padding([self.config.margin_vertical, self.config.margin_horizontal]),
         )
         .on_scroll(|viewport| Message::Scrolled {
             offset: viewport.relative_offset(),
@@ -196,27 +197,21 @@ impl App {
 
 impl App {
     fn audio_progress_label(&self) -> String {
-        let total_sentences = self
-            .reader
-            .pages
-            .iter()
-            .map(|page| split_sentences(page.clone()).len())
-            .sum::<usize>();
+        let total_sentences = self.reader.page_sentence_counts.iter().sum::<usize>();
         if total_sentences == 0 {
             return "TTS 0.0%".to_string();
         }
 
         let current_idx = self.tts.current_sentence_idx.unwrap_or(0);
-        let mut before = 0usize;
-        for (idx, page) in self.reader.pages.iter().enumerate() {
-            let count = split_sentences(page.clone()).len();
-            if idx < self.reader.current_page {
-                before += count;
-            } else {
-                break;
-            }
-        }
-        let global_idx = before.saturating_add(current_idx).min(total_sentences.saturating_sub(1));
+        let before: usize = self
+            .reader
+            .page_sentence_counts
+            .iter()
+            .take(self.reader.current_page)
+            .sum();
+        let global_idx = before
+            .saturating_add(current_idx)
+            .min(total_sentences.saturating_sub(1));
         let percent = (global_idx as f32 + 1.0) / total_sentences as f32 * 100.0;
         format!("TTS {:.1}%", percent)
     }
@@ -329,13 +324,19 @@ impl App {
             .spacing(8)
             .align_y(Vertical::Center),
             row![
-                text(format!("Horizontal margin: {} px", self.config.margin_horizontal)),
+                text(format!(
+                    "Horizontal margin: {} px",
+                    self.config.margin_horizontal
+                )),
                 margin_slider
             ]
             .spacing(8)
             .align_y(Vertical::Center),
             row![
-                text(format!("Vertical margin: {} px", self.config.margin_vertical)),
+                text(format!(
+                    "Vertical margin: {} px",
+                    self.config.margin_vertical
+                )),
                 margin_vertical_slider
             ]
             .spacing(8)
@@ -356,11 +357,9 @@ impl App {
             self.color_row("Day highlight", self.config.day_highlight, |c, v| {
                 Message::DayHighlightChanged(c, v)
             }),
-            self.color_row(
-                "Night highlight",
-                self.config.night_highlight,
-                |c, v| { Message::NightHighlightChanged(c, v) }
-            ),
+            self.color_row("Night highlight", self.config.night_highlight, |c, v| {
+                Message::NightHighlightChanged(c, v)
+            }),
         ]
         .spacing(12)
         .width(Length::Fixed(280.0));
@@ -398,16 +397,8 @@ impl App {
         } else {
             button("Play From Highlight")
         };
-        let page_eta = self.page_eta_label();
-        let book_eta = self.book_eta_label();
-        let eta_trackers = row![
-            column![text("Page Remaining"), text(page_eta)].spacing(2),
-            column![text("Book Remaining"), text(book_eta)].spacing(2),
-        ]
-        .spacing(16)
-        .align_y(Vertical::Center);
-
-        let controls = row![
+        let available_width = self.estimated_controls_width();
+        let mut controls = row![
             button("⏮").on_press(Message::SeekBackward),
             play_button,
             button("⏭").on_press(Message::SeekForward),
@@ -415,11 +406,13 @@ impl App {
             play_from_cursor,
             jump_button,
             horizontal_space(),
-            eta_trackers,
         ]
         .spacing(10)
         .align_y(Vertical::Center)
         .width(Length::Fill);
+        if available_width >= 920.0 {
+            controls = controls.push(self.eta_trackers_view(available_width));
+        }
 
         container(
             column![text("TTS Controls"), controls]
@@ -438,23 +431,23 @@ impl App {
         let average_sentence = self.estimated_avg_sentence_duration();
         let mut remaining_after_page = 0usize;
         for page_idx in (self.reader.current_page + 1)..self.reader.pages.len() {
-            remaining_after_page += self.raw_sentences_for_page(page_idx).len();
+            remaining_after_page += self.sentence_count_for_page(page_idx);
         }
-        let book_remaining =
-            page_remaining + Duration::from_secs_f64(average_sentence.as_secs_f64() * remaining_after_page as f64);
+        let book_remaining = page_remaining
+            + Duration::from_secs_f64(average_sentence.as_secs_f64() * remaining_after_page as f64);
         Self::format_duration_dhms(book_remaining)
     }
 
     fn estimate_remaining_page_duration(&self) -> Duration {
-        let sentences = self.raw_sentences_for_page(self.reader.current_page);
-        if sentences.is_empty() {
+        let sentence_count = self.sentence_count_for_page(self.reader.current_page);
+        if sentence_count == 0 {
             return Duration::ZERO;
         }
         let current_idx = self
             .tts
             .current_sentence_idx
             .unwrap_or(0)
-            .min(sentences.len().saturating_sub(1));
+            .min(sentence_count.saturating_sub(1));
 
         if !self.tts.track.is_empty() && current_idx >= self.tts.sentence_offset {
             let start = current_idx - self.tts.sentence_offset;
@@ -463,14 +456,15 @@ impl App {
                     .iter()
                     .fold(Duration::ZERO, |acc, (_, d)| acc + *d);
                 let pause = Duration::from_secs_f32(self.config.pause_after_sentence.max(0.0));
-                let pause_remaining =
-                    Duration::from_secs_f64(pause.as_secs_f64() * (self.tts.track.len() - start) as f64);
+                let pause_remaining = Duration::from_secs_f64(
+                    pause.as_secs_f64() * (self.tts.track.len() - start) as f64,
+                );
                 return speech_remaining + pause_remaining;
             }
         }
 
         let avg_sentence = self.estimated_avg_sentence_duration();
-        let remaining = sentences.len().saturating_sub(current_idx);
+        let remaining = sentence_count.saturating_sub(current_idx);
         Duration::from_secs_f64(avg_sentence.as_secs_f64() * remaining as f64)
     }
 
@@ -486,7 +480,12 @@ impl App {
             return Duration::from_secs_f64(avg_speech + pause.as_secs_f64());
         }
 
-        let sentences = self.raw_sentences_for_page(self.reader.current_page);
+        let sentences = self
+            .reader
+            .page_sentences
+            .get(self.reader.current_page)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         if !sentences.is_empty() {
             let total_chars: usize = sentences.iter().map(|s| s.chars().count()).sum();
             let avg_chars = total_chars as f64 / sentences.len() as f64;
@@ -495,6 +494,42 @@ impl App {
         }
 
         Duration::from_secs_f64((2.5 / self.config.tts_speed.max(0.1)) as f64 + pause.as_secs_f64())
+    }
+
+    fn eta_trackers_view(&self, available_width: f32) -> Element<'_, Message> {
+        let page_eta = self.page_eta_label();
+        let book_eta = self.book_eta_label();
+
+        if available_width < 1_120.0 {
+            return row![
+                text(format!("Page {page_eta}")).size(13.0),
+                text(format!("Book {book_eta}")).size(13.0)
+            ]
+            .spacing(10)
+            .align_y(Vertical::Center)
+            .into();
+        }
+
+        row![
+            column![text("Page Remaining").size(13.0), text(page_eta).size(13.0)].spacing(2),
+            column![text("Book Remaining").size(13.0), text(book_eta).size(13.0)].spacing(2),
+        ]
+        .spacing(16)
+        .align_y(Vertical::Center)
+        .into()
+    }
+
+    fn estimated_controls_width(&self) -> f32 {
+        let mut width = if self.bookmark.viewport_width > 0.0 {
+            self.bookmark.viewport_width
+        } else {
+            self.config.window_width
+        };
+        if self.config.show_settings {
+            // Settings panel is fixed width plus layout padding/spacers.
+            width = (width - 320.0).max(0.0);
+        }
+        width.max(0.0)
     }
 
     fn format_duration_dhms(duration: Duration) -> String {

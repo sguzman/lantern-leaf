@@ -1,7 +1,7 @@
 //! Text splitting helpers for TTS alignment.
 
 /// Very lightweight sentence splitter based on punctuation.
-pub fn split_sentences(text: String) -> Vec<String> {
+pub fn split_sentences(text: &str) -> Vec<String> {
     let mut sentences = Vec::new();
     let mut current = String::new();
 

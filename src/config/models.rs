@@ -13,6 +13,14 @@ pub struct AppConfig {
     pub margin_horizontal: u16,
     #[serde(default = "crate::config::defaults::default_margin")]
     pub margin_vertical: u16,
+    #[serde(default = "crate::config::defaults::default_window_width")]
+    pub window_width: f32,
+    #[serde(default = "crate::config::defaults::default_window_height")]
+    pub window_height: f32,
+    #[serde(default)]
+    pub window_pos_x: Option<f32>,
+    #[serde(default)]
+    pub window_pos_y: Option<f32>,
     #[serde(default)]
     pub font_family: FontFamily,
     #[serde(default)]
@@ -59,6 +67,10 @@ impl Default for AppConfig {
             line_spacing: crate::config::defaults::default_line_spacing(),
             margin_horizontal: crate::config::defaults::default_margin(),
             margin_vertical: crate::config::defaults::default_margin(),
+            window_width: crate::config::defaults::default_window_width(),
+            window_height: crate::config::defaults::default_window_height(),
+            window_pos_x: None,
+            window_pos_y: None,
             font_family: FontFamily::Sans,
             font_weight: FontWeight::Normal,
             word_spacing: 0,

@@ -76,7 +76,7 @@ fn parse_args() -> Result<PathBuf> {
     let mut args = env::args().skip(1);
     let path = args
         .next()
-        .ok_or_else(|| anyhow!("Usage: epub-viewer <path-to-epub>"))?;
+        .ok_or_else(|| anyhow!("Usage: epub-viewer <path-to-book>"))?;
 
     let path = PathBuf::from(path);
     if !path.exists() {

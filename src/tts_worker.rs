@@ -1,6 +1,6 @@
 use hound::WavSpec;
-use piper_rs::synth::PiperSpeechSynthesizer;
 use piper_rs::from_config_path;
+use piper_rs::synth::PiperSpeechSynthesizer;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::io::{BufRead, BufReader, Write};
@@ -51,10 +51,8 @@ fn run_worker() -> anyhow::Result<()> {
         }
     }
 
-    let model_path =
-        model_path.ok_or_else(|| anyhow::anyhow!("Missing --model argument"))?;
-    let espeak_root =
-        espeak_root.ok_or_else(|| anyhow::anyhow!("Missing --espeak argument"))?;
+    let model_path = model_path.ok_or_else(|| anyhow::anyhow!("Missing --model argument"))?;
+    let espeak_root = espeak_root.ok_or_else(|| anyhow::anyhow!("Missing --espeak argument"))?;
 
     if env::var_os("PIPER_ESPEAKNG_DATA_DIRECTORY").is_none() {
         // Safe because the worker runs in a dedicated process before threads are spawned.

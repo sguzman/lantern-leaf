@@ -7,11 +7,28 @@
 
 use anyhow::{Context, Result};
 use epub::doc::EpubDoc;
+use std::fs;
 use std::path::Path;
 use tracing::{debug, info, warn};
 
 /// Load an EPUB from disk and return its text content as a single string.
 pub fn load_epub_text(path: &Path) -> Result<String> {
+    if is_plain_text(path) {
+        info!(path = %path.display(), "Loading plain text content");
+        let data = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read text file at {}", path.display()))?;
+        let text = if data.trim().is_empty() {
+            "No textual content found in this file.".to_string()
+        } else {
+            data
+        };
+        info!(
+            total_chars = text.len(),
+            "Finished loading plain text content"
+        );
+        return Ok(text);
+    }
+
     info!(path = %path.display(), "Loading EPUB content");
     let mut doc =
         EpubDoc::new(path).with_context(|| format!("Failed to open EPUB at {}", path.display()))?;
@@ -60,4 +77,13 @@ pub fn load_epub_text(path: &Path) -> Result<String> {
         "Finished loading EPUB content"
     );
     Ok(combined)
+}
+
+fn is_plain_text(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase()),
+        Some(ext) if ext == "txt" || ext == "md" || ext == "markdown"
+    )
 }

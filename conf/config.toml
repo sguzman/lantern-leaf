@@ -12,6 +12,10 @@ margin_vertical = 0
 day_highlight = { r = 0.2, g = 0.4, b = 0.7, a = 0.15 }
 night_highlight = { r = 0.8, g = 0.8, b = 0.5, a = 0.2 }
 
+[window]
+width = 1024
+height = 768
+
 [reading_behavior]
 pause_after_sentence = 0.2
 auto_scroll_tts = true
