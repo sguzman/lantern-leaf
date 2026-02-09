@@ -87,3 +87,23 @@ pub(crate) fn default_auto_scroll_tts() -> bool {
 pub(crate) fn default_center_spoken_sentence() -> bool {
     true
 }
+
+pub(crate) fn default_key_toggle_play_pause() -> String {
+    "space".to_string()
+}
+
+pub(crate) fn default_key_safe_quit() -> String {
+    "q".to_string()
+}
+
+pub(crate) fn default_key_next_sentence() -> String {
+    "f".to_string()
+}
+
+pub(crate) fn default_key_prev_sentence() -> String {
+    "s".to_string()
+}
+
+pub(crate) fn default_key_repeat_sentence() -> String {
+    "r".to_string()
+}

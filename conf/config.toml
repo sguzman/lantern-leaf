@@ -37,3 +37,10 @@ tts_volume = 1.0
 tts_threads = 4
 # Progress log cadence while generating a batch of uncached TTS audio.
 tts_progress_log_interval_secs = 5.0
+
+[keybindings]
+toggle_play_pause = "space"
+safe_quit = "q"
+next_sentence = "f"
+prev_sentence = "s"
+repeat_sentence = "r"

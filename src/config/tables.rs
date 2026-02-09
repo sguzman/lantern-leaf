@@ -16,6 +16,8 @@ pub(super) struct ConfigTables {
     logging: LoggingConfig,
     #[serde(default)]
     tts: TtsConfig,
+    #[serde(default)]
+    keybindings: KeybindingsConfig,
 }
 
 impl From<ConfigTables> for AppConfig {
@@ -40,6 +42,11 @@ impl From<ConfigTables> for AppConfig {
             pause_after_sentence: tables.reading_behavior.pause_after_sentence,
             auto_scroll_tts: tables.reading_behavior.auto_scroll_tts,
             center_spoken_sentence: tables.reading_behavior.center_spoken_sentence,
+            key_toggle_play_pause: tables.keybindings.toggle_play_pause,
+            key_safe_quit: tables.keybindings.safe_quit,
+            key_next_sentence: tables.keybindings.next_sentence,
+            key_prev_sentence: tables.keybindings.prev_sentence,
+            key_repeat_sentence: tables.keybindings.repeat_sentence,
             show_tts: tables.ui.show_tts,
             show_settings: tables.ui.show_settings,
             log_level: tables.logging.log_level,
@@ -95,6 +102,13 @@ impl From<&AppConfig> for ConfigTables {
                 tts_volume: config.tts_volume,
                 tts_threads: config.tts_threads,
                 tts_progress_log_interval_secs: config.tts_progress_log_interval_secs,
+            },
+            keybindings: KeybindingsConfig {
+                toggle_play_pause: config.key_toggle_play_pause.clone(),
+                safe_quit: config.key_safe_quit.clone(),
+                next_sentence: config.key_next_sentence.clone(),
+                prev_sentence: config.key_prev_sentence.clone(),
+                repeat_sentence: config.key_repeat_sentence.clone(),
             },
         }
     }
@@ -246,6 +260,32 @@ impl Default for TtsConfig {
             tts_volume: defaults::default_tts_volume(),
             tts_threads: defaults::default_tts_threads(),
             tts_progress_log_interval_secs: defaults::default_tts_progress_log_interval_secs(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+struct KeybindingsConfig {
+    #[serde(default = "defaults::default_key_toggle_play_pause")]
+    toggle_play_pause: String,
+    #[serde(default = "defaults::default_key_safe_quit")]
+    safe_quit: String,
+    #[serde(default = "defaults::default_key_next_sentence")]
+    next_sentence: String,
+    #[serde(default = "defaults::default_key_prev_sentence")]
+    prev_sentence: String,
+    #[serde(default = "defaults::default_key_repeat_sentence")]
+    repeat_sentence: String,
+}
+
+impl Default for KeybindingsConfig {
+    fn default() -> Self {
+        KeybindingsConfig {
+            toggle_play_pause: defaults::default_key_toggle_play_pause(),
+            safe_quit: defaults::default_key_safe_quit(),
+            next_sentence: defaults::default_key_next_sentence(),
+            prev_sentence: defaults::default_key_prev_sentence(),
+            repeat_sentence: defaults::default_key_repeat_sentence(),
         }
     }
 }

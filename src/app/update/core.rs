@@ -5,6 +5,7 @@ use iced::Event;
 use iced::event;
 use iced::keyboard::{self, Key, Modifiers, key};
 use iced::time;
+use iced::window;
 use iced::{Subscription, Task};
 use std::time::Duration;
 
@@ -15,23 +16,7 @@ impl App {
                 width: size.width,
                 height: size.height,
             }),
-            event::listen_with(|event, status, _id| {
-                if status == event::Status::Captured {
-                    return None;
-                }
-                match event {
-                    Event::Window(iced::window::Event::Moved(position)) => {
-                        Some(Message::WindowMoved {
-                            x: position.x,
-                            y: position.y,
-                        })
-                    }
-                    Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                        Self::shortcut_message_for_key(key, modifiers)
-                    }
-                    _ => None,
-                }
-            }),
+            event::listen_with(runtime_event_to_message),
         ];
 
         if app.tts.running {
@@ -119,6 +104,11 @@ impl App {
             Message::WindowMoved { x, y } => {
                 self.handle_window_moved(x, y, &mut effects);
             }
+            Message::KeyPressed { key, modifiers } => {
+                if let Some(shortcut) = self.shortcut_message_for_key(key, modifiers) {
+                    effects.extend(self.reduce(shortcut));
+                }
+            }
             Message::Scrolled {
                 offset,
                 viewport_width,
@@ -189,21 +179,65 @@ impl App {
         }
     }
 
-    fn shortcut_message_for_key(key: Key, modifiers: Modifiers) -> Option<Message> {
+    fn shortcut_message_for_key(&self, key: Key, modifiers: Modifiers) -> Option<Message> {
         if modifiers.control() || modifiers.alt() || modifiers.logo() {
             return None;
         }
 
-        match key.as_ref() {
-            Key::Named(key::Named::Space) => Some(Message::TogglePlayPause),
-            Key::Character(ch) => match ch.to_ascii_lowercase().as_str() {
-                "q" => Some(Message::SafeQuit),
-                "f" => Some(Message::SeekForward),
-                "s" => Some(Message::SeekBackward),
-                "r" => Some(Message::RepeatCurrentSentence),
-                _ => None,
-            },
-            _ => None,
+        let pressed = match key.as_ref() {
+            Key::Named(key::Named::Space) => "space".to_string(),
+            Key::Character(ch) => ch.to_ascii_lowercase(),
+            _ => return None,
+        };
+
+        let toggle_play_pause =
+            Self::normalize_shortcut_token(&self.config.key_toggle_play_pause, "space");
+        let safe_quit = Self::normalize_shortcut_token(&self.config.key_safe_quit, "q");
+        let next_sentence = Self::normalize_shortcut_token(&self.config.key_next_sentence, "f");
+        let prev_sentence = Self::normalize_shortcut_token(&self.config.key_prev_sentence, "s");
+        let repeat_sentence = Self::normalize_shortcut_token(&self.config.key_repeat_sentence, "r");
+
+        if pressed == toggle_play_pause {
+            Some(Message::TogglePlayPause)
+        } else if pressed == safe_quit {
+            Some(Message::SafeQuit)
+        } else if pressed == next_sentence {
+            Some(Message::SeekForward)
+        } else if pressed == prev_sentence {
+            Some(Message::SeekBackward)
+        } else if pressed == repeat_sentence {
+            Some(Message::RepeatCurrentSentence)
+        } else {
+            None
         }
+    }
+
+    fn normalize_shortcut_token(raw: &str, fallback: &str) -> String {
+        let normalized = raw.trim().to_ascii_lowercase();
+        match normalized.as_str() {
+            "" => fallback.to_string(),
+            "spacebar" => "space".to_string(),
+            _ => normalized,
+        }
+    }
+}
+
+fn runtime_event_to_message(
+    event: Event,
+    status: event::Status,
+    _window_id: window::Id,
+) -> Option<Message> {
+    if status == event::Status::Captured {
+        return None;
+    }
+    match event {
+        Event::Window(iced::window::Event::Moved(position)) => Some(Message::WindowMoved {
+            x: position.x,
+            y: position.y,
+        }),
+        Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+            Some(Message::KeyPressed { key, modifiers })
+        }
+        _ => None,
     }
 }

@@ -1,4 +1,5 @@
 use crate::config::{FontFamily, FontWeight};
+use iced::keyboard::{Key, Modifiers};
 use iced::widget::scrollable::RelativeOffset;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -46,6 +47,10 @@ pub enum Message {
     WindowMoved {
         x: f32,
         y: f32,
+    },
+    KeyPressed {
+        key: Key,
+        modifiers: Modifiers,
     },
     Scrolled {
         offset: RelativeOffset,

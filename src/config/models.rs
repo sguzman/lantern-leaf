@@ -59,6 +59,16 @@ pub struct AppConfig {
     pub auto_scroll_tts: bool,
     #[serde(default = "crate::config::defaults::default_center_spoken_sentence")]
     pub center_spoken_sentence: bool,
+    #[serde(default = "crate::config::defaults::default_key_toggle_play_pause")]
+    pub key_toggle_play_pause: String,
+    #[serde(default = "crate::config::defaults::default_key_safe_quit")]
+    pub key_safe_quit: String,
+    #[serde(default = "crate::config::defaults::default_key_next_sentence")]
+    pub key_next_sentence: String,
+    #[serde(default = "crate::config::defaults::default_key_prev_sentence")]
+    pub key_prev_sentence: String,
+    #[serde(default = "crate::config::defaults::default_key_repeat_sentence")]
+    pub key_repeat_sentence: String,
 }
 
 impl Default for AppConfig {
@@ -93,6 +103,11 @@ impl Default for AppConfig {
             pause_after_sentence: crate::config::defaults::default_pause_after_sentence(),
             auto_scroll_tts: crate::config::defaults::default_auto_scroll_tts(),
             center_spoken_sentence: crate::config::defaults::default_center_spoken_sentence(),
+            key_toggle_play_pause: crate::config::defaults::default_key_toggle_play_pause(),
+            key_safe_quit: crate::config::defaults::default_key_safe_quit(),
+            key_next_sentence: crate::config::defaults::default_key_next_sentence(),
+            key_prev_sentence: crate::config::defaults::default_key_prev_sentence(),
+            key_repeat_sentence: crate::config::defaults::default_key_repeat_sentence(),
         }
     }
 }

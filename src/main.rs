@@ -51,6 +51,12 @@ fn run(reload_handle: &ReloadHandle) -> Result<()> {
         overrides.tts_threads = base_config.tts_threads;
         // Always honor base progress logging cadence for batch generation.
         overrides.tts_progress_log_interval_secs = base_config.tts_progress_log_interval_secs;
+        // Always honor base keybinding configuration.
+        overrides.key_toggle_play_pause = base_config.key_toggle_play_pause.clone();
+        overrides.key_safe_quit = base_config.key_safe_quit.clone();
+        overrides.key_next_sentence = base_config.key_next_sentence.clone();
+        overrides.key_prev_sentence = base_config.key_prev_sentence.clone();
+        overrides.key_repeat_sentence = base_config.key_repeat_sentence.clone();
         config = overrides;
     }
     set_log_level(reload_handle, config.log_level.as_filter_str());

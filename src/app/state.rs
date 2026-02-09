@@ -491,6 +491,16 @@ pub(crate) fn apply_component(
 
 fn clamp_config(config: &mut AppConfig) {
     use crate::pagination::{MAX_FONT_SIZE, MIN_FONT_SIZE};
+
+    fn normalize_key_binding(value: &mut String, fallback: String) {
+        let normalized = value.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
+            *value = fallback;
+        } else {
+            *value = normalized;
+        }
+    }
+
     config.font_size = config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
     config.line_spacing = config.line_spacing.clamp(0.8, 2.5);
     config.margin_horizontal = config.margin_horizontal.min(MAX_MARGIN);
@@ -509,4 +519,9 @@ fn clamp_config(config: &mut AppConfig) {
     config.tts_volume = config.tts_volume.clamp(MIN_TTS_VOLUME, MAX_TTS_VOLUME);
     config.tts_threads = config.tts_threads.max(1);
     config.tts_progress_log_interval_secs = config.tts_progress_log_interval_secs.clamp(0.1, 60.0);
+    normalize_key_binding(&mut config.key_toggle_play_pause, "space".to_string());
+    normalize_key_binding(&mut config.key_safe_quit, "q".to_string());
+    normalize_key_binding(&mut config.key_next_sentence, "f".to_string());
+    normalize_key_binding(&mut config.key_prev_sentence, "s".to_string());
+    normalize_key_binding(&mut config.key_repeat_sentence, "r".to_string());
 }
