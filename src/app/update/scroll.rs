@@ -143,10 +143,12 @@ impl App {
 
         let desired_top = if self.config.center_spoken_sentence {
             // Center mode: keep the active sentence around viewport center.
-            progress.middle - 0.5 * viewport_fraction
+            let center_target = if model.is_text_only { 0.40 } else { 0.50 };
+            progress.middle - center_target * viewport_fraction
         } else {
             // Tracking mode: keep the sentence near the upper third for better forward context.
-            progress.start - 0.30 * viewport_fraction
+            let track_target = if model.is_text_only { 0.22 } else { 0.42 };
+            progress.start - track_target * viewport_fraction
         };
 
         // `snap_to` expects offset over the scrollable range (content - viewport),
@@ -195,6 +197,7 @@ impl App {
                 target_idx,
                 // Text-only renders each sentence separated by a blank line.
                 extra_gap_lines: 1.0,
+                is_text_only: true,
             });
         }
 
@@ -207,6 +210,7 @@ impl App {
             sentences,
             target_idx,
             extra_gap_lines: 0.0,
+            is_text_only: false,
         })
     }
 
@@ -355,6 +359,7 @@ struct ScrollTargetModel {
     sentences: Vec<String>,
     target_idx: usize,
     extra_gap_lines: f32,
+    is_text_only: bool,
 }
 
 #[derive(Clone, Copy)]
