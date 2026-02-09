@@ -301,7 +301,7 @@ impl App {
     fn audio_progress_label(&self) -> String {
         let total_sentences = self.reader.page_sentence_counts.iter().sum::<usize>();
         if total_sentences == 0 {
-            return "TTS 0.0%".to_string();
+            return "TTS 0%".to_string();
         }
 
         let current_idx = self.tts.current_sentence_idx.unwrap_or(0);
@@ -315,7 +315,22 @@ impl App {
             .saturating_add(current_idx)
             .min(total_sentences.saturating_sub(1));
         let percent = (global_idx as f32 + 1.0) / total_sentences as f32 * 100.0;
-        format!("TTS {:.1}%", percent)
+        format!("TTS {}%", Self::format_percent_up_to_two_decimals(percent))
+    }
+
+    fn format_percent_up_to_two_decimals(value: f32) -> String {
+        let mut formatted = format!("{value:.2}");
+        while formatted.ends_with('0') {
+            formatted.pop();
+        }
+        if formatted.ends_with('.') {
+            formatted.pop();
+        }
+        if formatted.is_empty() {
+            "0".to_string()
+        } else {
+            formatted
+        }
     }
 
     fn color_row<'a>(
