@@ -275,12 +275,7 @@ impl App {
                     app.tts.current_sentence_idx = restored_idx;
                 }
 
-                if app.bookmark.last_scroll_offset.y > 0.0 {
-                    init_task = iced::widget::scrollable::snap_to(
-                        TEXT_SCROLL_ID.clone(),
-                        app.bookmark.last_scroll_offset,
-                    );
-                } else if let Some(idx) = app.tts.current_sentence_idx {
+                if let Some(idx) = app.tts.current_sentence_idx {
                     if let Some(offset) =
                         app.scroll_offset_for_sentence(idx, app.tts.last_sentences.len())
                     {
@@ -288,6 +283,11 @@ impl App {
                         init_task =
                             iced::widget::scrollable::snap_to(TEXT_SCROLL_ID.clone(), offset);
                     }
+                } else if app.bookmark.last_scroll_offset.y > 0.0 {
+                    init_task = iced::widget::scrollable::snap_to(
+                        TEXT_SCROLL_ID.clone(),
+                        app.bookmark.last_scroll_offset,
+                    );
                 }
                 tracing::info!(
                     page = app.reader.current_page + 1,
