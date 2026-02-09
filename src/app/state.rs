@@ -70,6 +70,7 @@ pub struct BookmarkState {
     pub(super) viewport_height: f32,
     pub(super) content_width: f32,
     pub(super) content_height: f32,
+    pub(super) pending_sentence_snap: Option<usize>,
 }
 
 /// Core application state composed of sub-models.
@@ -225,6 +226,7 @@ impl App {
                 viewport_height: 0.0,
                 content_width: 0.0,
                 content_height: 0.0,
+                pending_sentence_snap: None,
             },
             epub_path,
             tts: TtsState {
@@ -273,10 +275,18 @@ impl App {
                         .or(bookmark.sentence_idx)
                         .map(|idx| idx.min(app.tts.last_sentences.len().saturating_sub(1)));
                     app.tts.current_sentence_idx = restored_idx;
+                    app.bookmark.pending_sentence_snap = restored_idx;
                 }
 
                 if let Some(idx) = app.tts.current_sentence_idx {
-                    if let Some(offset) =
+                    // Prefer persisted scroll for initial layout, then do a one-time
+                    // geometry-aware sentence snap after the first viewport update.
+                    if app.bookmark.last_scroll_offset.y > 0.0 {
+                        init_task = iced::widget::scrollable::snap_to(
+                            TEXT_SCROLL_ID.clone(),
+                            app.bookmark.last_scroll_offset,
+                        );
+                    } else if let Some(offset) =
                         app.scroll_offset_for_sentence(idx, app.tts.last_sentences.len())
                     {
                         app.bookmark.last_scroll_offset = offset;

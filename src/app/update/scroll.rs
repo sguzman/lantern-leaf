@@ -50,6 +50,17 @@ impl App {
             self.bookmark.last_scroll_offset = sanitized;
             effects.push(Effect::SaveBookmark);
         }
+
+        if let Some(idx) = self.bookmark.pending_sentence_snap.take() {
+            if let Some(offset) = self.scroll_offset_for_sentence(idx, self.tts.last_sentences.len()) {
+                let offset = Self::sanitize_offset(offset);
+                if offset != self.bookmark.last_scroll_offset {
+                    self.bookmark.last_scroll_offset = offset;
+                    effects.push(Effect::ScrollTo(offset));
+                    effects.push(Effect::SaveBookmark);
+                }
+            }
+        }
     }
 
     pub(super) fn handle_jump_to_current_audio(&mut self, effects: &mut Vec<Effect>) {

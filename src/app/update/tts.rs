@@ -100,10 +100,11 @@ impl App {
             self.tts.running = true;
             self.tts.started_at = Some(Instant::now());
         } else {
-            info!("Starting TTS playback from current page");
+            let start_idx = self.tts.current_sentence_idx.unwrap_or(0);
+            info!(start_idx, "Starting TTS playback from cursor");
             effects.push(Effect::StartTts {
                 page: self.reader.current_page,
-                sentence_idx: 0,
+                sentence_idx: start_idx,
             });
             effects.push(Effect::AutoScrollToCurrent);
             effects.push(Effect::SaveBookmark);
