@@ -10,9 +10,11 @@ use iced::alignment::Horizontal;
 use iced::alignment::Vertical;
 use iced::widget::text::{LineHeight, Wrapping};
 use iced::widget::{
-    Column, Row, button, checkbox, column, container, pick_list, row, scrollable, slider, text,
+    Column, Row, button, checkbox, column, container, horizontal_space, pick_list, row, scrollable,
+    slider, text,
 };
 use iced::{Element, Length};
+use std::time::Duration;
 
 impl App {
     pub fn view(&self) -> Element<'_, Message> {
@@ -396,6 +398,14 @@ impl App {
         } else {
             button("Play From Highlight")
         };
+        let page_eta = self.page_eta_label();
+        let book_eta = self.book_eta_label();
+        let eta_trackers = row![
+            column![text("Page Remaining"), text(page_eta)].spacing(2),
+            column![text("Book Remaining"), text(book_eta)].spacing(2),
+        ]
+        .spacing(16)
+        .align_y(Vertical::Center);
 
         let controls = row![
             button("⏮").on_press(Message::SeekBackward),
@@ -404,9 +414,12 @@ impl App {
             play_from_start,
             play_from_cursor,
             jump_button,
+            horizontal_space(),
+            eta_trackers,
         ]
         .spacing(10)
-        .align_y(Vertical::Center);
+        .align_y(Vertical::Center)
+        .width(Length::Fill);
 
         container(
             column![text("TTS Controls"), controls]
@@ -414,5 +427,82 @@ impl App {
                 .padding(8),
         )
         .into()
+    }
+
+    fn page_eta_label(&self) -> String {
+        Self::format_duration_dhms(self.estimate_remaining_page_duration())
+    }
+
+    fn book_eta_label(&self) -> String {
+        let page_remaining = self.estimate_remaining_page_duration();
+        let average_sentence = self.estimated_avg_sentence_duration();
+        let mut remaining_after_page = 0usize;
+        for page_idx in (self.reader.current_page + 1)..self.reader.pages.len() {
+            remaining_after_page += self.raw_sentences_for_page(page_idx).len();
+        }
+        let book_remaining =
+            page_remaining + Duration::from_secs_f64(average_sentence.as_secs_f64() * remaining_after_page as f64);
+        Self::format_duration_dhms(book_remaining)
+    }
+
+    fn estimate_remaining_page_duration(&self) -> Duration {
+        let sentences = self.raw_sentences_for_page(self.reader.current_page);
+        if sentences.is_empty() {
+            return Duration::ZERO;
+        }
+        let current_idx = self
+            .tts
+            .current_sentence_idx
+            .unwrap_or(0)
+            .min(sentences.len().saturating_sub(1));
+
+        if !self.tts.track.is_empty() && current_idx >= self.tts.sentence_offset {
+            let start = current_idx - self.tts.sentence_offset;
+            if start < self.tts.track.len() {
+                let speech_remaining = self.tts.track[start..]
+                    .iter()
+                    .fold(Duration::ZERO, |acc, (_, d)| acc + *d);
+                let pause = Duration::from_secs_f32(self.config.pause_after_sentence.max(0.0));
+                let pause_remaining =
+                    Duration::from_secs_f64(pause.as_secs_f64() * (self.tts.track.len() - start) as f64);
+                return speech_remaining + pause_remaining;
+            }
+        }
+
+        let avg_sentence = self.estimated_avg_sentence_duration();
+        let remaining = sentences.len().saturating_sub(current_idx);
+        Duration::from_secs_f64(avg_sentence.as_secs_f64() * remaining as f64)
+    }
+
+    fn estimated_avg_sentence_duration(&self) -> Duration {
+        let pause = Duration::from_secs_f32(self.config.pause_after_sentence.max(0.0));
+        if !self.tts.track.is_empty() {
+            let speech_total = self
+                .tts
+                .track
+                .iter()
+                .fold(Duration::ZERO, |acc, (_, d)| acc + *d);
+            let avg_speech = speech_total.as_secs_f64() / self.tts.track.len() as f64;
+            return Duration::from_secs_f64(avg_speech + pause.as_secs_f64());
+        }
+
+        let sentences = self.raw_sentences_for_page(self.reader.current_page);
+        if !sentences.is_empty() {
+            let total_chars: usize = sentences.iter().map(|s| s.chars().count()).sum();
+            let avg_chars = total_chars as f64 / sentences.len() as f64;
+            let speech_secs = (avg_chars / 14.0) / self.config.tts_speed.max(0.1) as f64;
+            return Duration::from_secs_f64((speech_secs + pause.as_secs_f64()).max(0.1));
+        }
+
+        Duration::from_secs_f64((2.5 / self.config.tts_speed.max(0.1)) as f64 + pause.as_secs_f64())
+    }
+
+    fn format_duration_dhms(duration: Duration) -> String {
+        let total_secs = duration.as_secs();
+        let days = total_secs / 86_400;
+        let hours = (total_secs % 86_400) / 3_600;
+        let minutes = (total_secs % 3_600) / 60;
+        let seconds = total_secs % 60;
+        format!("{days}d {hours:02}h {minutes:02}m {seconds:02}s")
     }
 }
