@@ -143,7 +143,7 @@ impl App {
 
         let desired_top = if self.config.center_spoken_sentence {
             // Center mode: keep the active sentence around viewport center.
-            let center_target = if model.is_text_only { 0.35 } else { 0.50 };
+            let center_target = if model.is_text_only { 0.50 } else { 0.50 };
             progress.middle - center_target * viewport_fraction
         } else {
             // Tracking mode: keep the sentence near the upper third for better forward context.
@@ -179,8 +179,18 @@ impl App {
 
         let before_weight: f32 = sentence_weights.iter().take(idx).sum();
         let sentence_weight = sentence_weights[idx].max(f32::EPSILON);
-        let start = (before_weight / total_weight).clamp(0.0, 1.0);
-        let middle = ((before_weight + sentence_weight * 0.5) / total_weight).clamp(0.0, 1.0);
+        let mut start = (before_weight / total_weight).clamp(0.0, 1.0);
+        let mut middle = ((before_weight + sentence_weight * 0.5) / total_weight).clamp(0.0, 1.0);
+
+        // Pretty-text tends to accumulate downward drift over long passages with pure
+        // weighted progress. Slightly compressing progress reduces that drift while
+        // preserving sentence-to-sentence movement and keeping margin/font sensitivity.
+        if !model.is_text_only {
+            const PRETTY_PROGRESS_GAMMA: f32 = 1.05;
+            start = start.powf(PRETTY_PROGRESS_GAMMA);
+            middle = middle.powf(PRETTY_PROGRESS_GAMMA);
+        }
+
         Some(SentenceProgress { start, middle })
     }
 
