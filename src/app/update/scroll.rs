@@ -143,12 +143,15 @@ impl App {
 
         let desired_top = if self.config.center_spoken_sentence {
             // Center mode: keep the active sentence around viewport center.
-            let center_target = if model.is_text_only { 0.40 } else { 0.50 };
+            let center_target = if model.is_text_only { 0.35 } else { 0.50 };
             progress.middle - center_target * viewport_fraction
         } else {
             // Tracking mode: keep the sentence near the upper third for better forward context.
-            let track_target = if model.is_text_only { 0.22 } else { 0.42 };
-            progress.start - track_target * viewport_fraction
+            if model.is_text_only {
+                progress.middle - 0.35 * viewport_fraction
+            } else {
+                progress.start - 0.42 * viewport_fraction
+            }
         };
 
         // `snap_to` expects offset over the scrollable range (content - viewport),
@@ -311,15 +314,11 @@ impl App {
     }
 
     fn estimated_text_width(&self) -> f32 {
-        let base_width = match (
+        let viewport_or_fallback = match (
             self.bookmark.viewport_width > 0.0,
             self.bookmark.content_width > 0.0,
         ) {
-            (true, true) => self
-                .bookmark
-                .viewport_width
-                .min(self.bookmark.content_width),
-            (true, false) => self.bookmark.viewport_width,
+            (true, _) => self.bookmark.viewport_width,
             (false, true) => self.bookmark.content_width,
             (false, false) => {
                 let mut fallback = self.config.window_width.max(1.0);
@@ -330,8 +329,23 @@ impl App {
             }
         };
 
-        let margin_total = (self.config.margin_horizontal as f32 * 2.0).min(base_width * 0.9);
-        (base_width - margin_total).max(1.0)
+        let content_width = self.bookmark.content_width.max(0.0);
+        let mut width = viewport_or_fallback.max(1.0);
+        if content_width > 0.0 {
+            width = width.min(content_width.max(1.0));
+        }
+
+        // `content_width` may already include margin/padding effects depending on widget internals.
+        // Only subtract configured margins when content and viewport widths are effectively equal.
+        let should_subtract_margins = self.bookmark.viewport_width <= 0.0
+            || content_width <= 0.0
+            || (self.bookmark.viewport_width - content_width).abs() <= 24.0;
+        if should_subtract_margins {
+            let margin_total = (self.config.margin_horizontal as f32 * 2.0).min(width * 0.9);
+            width = (width - margin_total).max(1.0);
+        }
+
+        width
     }
 
     fn estimated_glyph_width_px(&self) -> f32 {
