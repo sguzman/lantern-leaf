@@ -3,6 +3,7 @@ use super::super::state::{App, TEXT_SCROLL_ID};
 use super::Effect;
 use iced::Event;
 use iced::event;
+use iced::keyboard::{self, Key, Modifiers, key};
 use iced::time;
 use iced::{Subscription, Task};
 use std::time::Duration;
@@ -14,12 +15,22 @@ impl App {
                 width: size.width,
                 height: size.height,
             }),
-            event::listen_with(|event, _status, _id| match event {
-                Event::Window(iced::window::Event::Moved(position)) => Some(Message::WindowMoved {
-                    x: position.x,
-                    y: position.y,
-                }),
-                _ => None,
+            event::listen_with(|event, status, _id| {
+                if status == event::Status::Captured {
+                    return None;
+                }
+                match event {
+                    Event::Window(iced::window::Event::Moved(position)) => {
+                        Some(Message::WindowMoved {
+                            x: position.x,
+                            y: position.y,
+                        })
+                    }
+                    Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                        Self::shortcut_message_for_key(key, modifiers)
+                    }
+                    _ => None,
+                }
             }),
         ];
 
@@ -90,6 +101,9 @@ impl App {
             }
             Message::ToggleTtsControls => self.handle_toggle_tts_controls(&mut effects),
             Message::JumpToCurrentAudio => self.handle_jump_to_current_audio(&mut effects),
+            Message::TogglePlayPause => self.handle_toggle_play_pause(&mut effects),
+            Message::RepeatCurrentSentence => self.handle_repeat_current_sentence(&mut effects),
+            Message::SafeQuit => effects.push(Effect::QuitSafely),
             Message::Play => self.handle_play(&mut effects),
             Message::PlayFromPageStart => self.handle_play_from_page_start(&mut effects),
             Message::PlayFromCursor(idx) => self.handle_play_from_cursor(idx, &mut effects),
@@ -166,6 +180,30 @@ impl App {
                 }
                 Task::none()
             }
+            Effect::QuitSafely => {
+                self.save_epub_config();
+                self.persist_bookmark();
+                self.stop_playback();
+                iced::exit()
+            }
+        }
+    }
+
+    fn shortcut_message_for_key(key: Key, modifiers: Modifiers) -> Option<Message> {
+        if modifiers.control() || modifiers.alt() || modifiers.logo() {
+            return None;
+        }
+
+        match key.as_ref() {
+            Key::Named(key::Named::Space) => Some(Message::TogglePlayPause),
+            Key::Character(ch) => match ch.to_ascii_lowercase().as_str() {
+                "q" => Some(Message::SafeQuit),
+                "f" => Some(Message::SeekForward),
+                "s" => Some(Message::SeekBackward),
+                "r" => Some(Message::RepeatCurrentSentence),
+                _ => None,
+            },
+            _ => None,
         }
     }
 }

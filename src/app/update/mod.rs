@@ -14,4 +14,5 @@ pub(super) enum Effect {
     StopTts,
     ScrollTo(RelativeOffset),
     AutoScrollToCurrent,
+    QuitSafely,
 }

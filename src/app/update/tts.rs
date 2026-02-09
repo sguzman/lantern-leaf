@@ -110,6 +110,20 @@ impl App {
         }
     }
 
+    pub(super) fn handle_toggle_play_pause(&mut self, effects: &mut Vec<Effect>) {
+        let currently_playing = self
+            .tts
+            .playback
+            .as_ref()
+            .map(|p| !p.is_paused())
+            .unwrap_or(false);
+        if currently_playing {
+            self.handle_pause(effects);
+        } else {
+            self.handle_play(effects);
+        }
+    }
+
     pub(super) fn handle_play_from_page_start(&mut self, effects: &mut Vec<Effect>) {
         info!("Playing page from start");
         effects.push(Effect::StartTts {
@@ -126,6 +140,11 @@ impl App {
 
     pub(super) fn handle_sentence_clicked(&mut self, idx: usize, effects: &mut Vec<Effect>) {
         self.begin_play_from_sentence(idx, effects, "Sentence clicked; playing from sentence");
+    }
+
+    pub(super) fn handle_repeat_current_sentence(&mut self, effects: &mut Vec<Effect>) {
+        let idx = self.tts.current_sentence_idx.unwrap_or(0);
+        self.begin_play_from_sentence(idx, effects, "Repeating current sentence");
     }
 
     pub(super) fn handle_pause(&mut self, _effects: &mut Vec<Effect>) {
