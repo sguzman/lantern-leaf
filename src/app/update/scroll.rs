@@ -388,3 +388,159 @@ struct SentenceProgress {
     start: f32,
     middle: f32,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AppConfig;
+    use crate::epub_loader::{BookImage, LoadedBook};
+    use std::path::PathBuf;
+
+    fn sample_text(sentence_count: usize) -> String {
+        (0..sentence_count)
+            .map(|i| {
+                format!(
+                    "Sentence {i} contains enough words to exercise wrapping and scroll calculations."
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn build_test_app(sentence_count: usize, image_count: usize) -> App {
+        let images = (0..image_count)
+            .map(|i| BookImage {
+                path: PathBuf::from(format!("/tmp/fake-scroll-image-{i}.png")),
+                label: format!("Image {i}"),
+            })
+            .collect::<Vec<_>>();
+
+        let book = LoadedBook {
+            text: sample_text(sentence_count),
+            images,
+        };
+
+        let mut config = AppConfig::default();
+        config.show_settings = false;
+        config.window_width = 1280.0;
+        config.window_height = 900.0;
+        config.margin_horizontal = 20;
+        config.margin_vertical = 12;
+        config.lines_per_page = 200;
+        config.font_size = 16;
+        config.auto_scroll_tts = true;
+
+        let epub_path = PathBuf::from(format!(
+            "/tmp/ebup-scroll-test-{}-{}.epub",
+            std::process::id(),
+            sentence_count
+        ));
+        let (mut app, _task) = App::bootstrap(book, config, epub_path, None);
+
+        app.reader.current_page = 0;
+        app.bookmark.viewport_width = 920.0;
+        app.bookmark.viewport_height = 640.0;
+        app.bookmark.content_width = 920.0;
+        app.bookmark.content_height = 3600.0 + image_count as f32 * 300.0;
+        app.bookmark.viewport_fraction =
+            (app.bookmark.viewport_height / app.bookmark.content_height).clamp(0.05, 0.95);
+        app
+    }
+
+    #[test]
+    fn text_only_center_differs_from_auto_scroll() {
+        let mut app = build_test_app(140, 0);
+        app.text_only_mode = true;
+
+        let sentences = app.raw_sentences_for_page(app.reader.current_page);
+        let display_to_audio = (0..sentences.len()).map(Some).collect();
+        app.text_only_preview = Some(super::super::super::state::TextOnlyPreview {
+            page: app.reader.current_page,
+            audio_sentences: sentences,
+            display_to_audio,
+        });
+
+        let idx = 40usize;
+        app.config.center_spoken_sentence = false;
+        let y_scroll = app
+            .scroll_offset_for_sentence(idx)
+            .expect("scroll offset in text-only auto-scroll")
+            .y;
+
+        app.config.center_spoken_sentence = true;
+        let y_center = app
+            .scroll_offset_for_sentence(idx)
+            .expect("scroll offset in text-only auto-center")
+            .y;
+
+        assert!(
+            (y_scroll - y_center).abs() > 0.03,
+            "text-only center and auto-scroll should not collapse to the same offset"
+        );
+    }
+
+    #[test]
+    fn pretty_jump_targets_are_monotonic() {
+        let app = build_test_app(180, 0);
+        let mut previous = -1.0f32;
+
+        for idx in (0..80).step_by(4) {
+            let y = app
+                .scroll_offset_for_sentence(idx)
+                .expect("jump target for sentence")
+                .y;
+            assert!(
+                y + 1e-6 >= previous,
+                "scroll target should be monotonic for increasing sentence idx"
+            );
+            previous = y;
+        }
+    }
+
+    #[test]
+    fn pretty_offsets_remain_stable_when_margin_changes() {
+        let mut app = build_test_app(180, 0);
+        let idx = 60usize;
+
+        app.config.margin_horizontal = 0;
+        let y_min_margin = app
+            .scroll_offset_for_sentence(idx)
+            .expect("scroll offset with min margin")
+            .y;
+
+        app.config.margin_horizontal = 100;
+        let y_max_margin = app
+            .scroll_offset_for_sentence(idx)
+            .expect("scroll offset with max margin")
+            .y;
+
+        assert!(
+            (y_max_margin - y_min_margin).abs() < 0.35,
+            "changing horizontal margin should not produce catastrophic scroll jumps"
+        );
+    }
+
+    #[test]
+    fn pretty_images_reduce_text_target_fraction() {
+        let mut app_without_images = build_test_app(180, 0);
+        let mut app_with_images = build_test_app(180, 4);
+        let idx = 70usize;
+
+        app_without_images.config.center_spoken_sentence = false;
+        app_with_images.config.center_spoken_sentence = false;
+
+        let y_without = app_without_images
+            .scroll_offset_for_sentence(idx)
+            .expect("scroll offset without images")
+            .y;
+        let y_with = app_with_images
+            .scroll_offset_for_sentence(idx)
+            .expect("scroll offset with images")
+            .y;
+
+        assert!(
+            y_with <= y_without,
+            "image-tail compensation should avoid pushing text targets further down"
+        );
+    }
+}
