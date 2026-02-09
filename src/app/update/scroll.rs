@@ -124,7 +124,7 @@ impl App {
     pub(crate) fn scroll_offset_for_sentence(&self, sentence_idx: usize) -> Option<RelativeOffset> {
         let model = self.scroll_target_model(sentence_idx)?;
 
-        let progress = self.sentence_progress_for_model(&model).unwrap_or_else(|| {
+        let mut progress = self.sentence_progress_for_model(&model).unwrap_or_else(|| {
             let clamped_idx = model
                 .target_idx
                 .min(model.sentences.len().saturating_sub(1)) as f32;
@@ -136,6 +136,19 @@ impl App {
             }
         });
 
+        if !self.text_only_mode && self.bookmark.content_height > 0.0 {
+            let image_count = self.current_page_image_count() as f32;
+            if image_count > 0.0 {
+                let extra_tail_px = image_count * Self::estimated_image_block_height_px()
+                    + Self::estimated_image_footer_height_px();
+                let text_fraction = ((self.bookmark.content_height - extra_tail_px)
+                    / self.bookmark.content_height)
+                    .clamp(0.10, 1.0);
+                progress.start *= text_fraction;
+                progress.middle *= text_fraction;
+            }
+        }
+
         let viewport_fraction = self.estimated_viewport_fraction();
         if viewport_fraction >= 0.999 {
             return Some(RelativeOffset::START);
@@ -143,7 +156,9 @@ impl App {
 
         let desired_top = if self.config.center_spoken_sentence {
             // Center mode: keep the active sentence around viewport center.
-            progress.middle - 0.50 * viewport_fraction
+            let sentence_half_span = (progress.middle - progress.start).max(0.0);
+            let center_anchor = progress.start + sentence_half_span.min(0.02);
+            center_anchor - 0.50 * viewport_fraction
         } else {
             // Auto-scroll mode: keep the spoken sentence in view with forward context.
             progress.start - 0.25 * viewport_fraction
@@ -340,6 +355,25 @@ impl App {
         };
 
         font_size * family_scale * weight_scale
+    }
+
+    fn current_page_image_count(&self) -> usize {
+        self.reader
+            .images
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| self.image_assigned_page(*idx) == self.reader.current_page)
+            .count()
+    }
+
+    fn estimated_image_block_height_px() -> f32 {
+        // Label text (~14px), image (240px), internal spacing (6px), external pane spacing (12px).
+        14.0 * 1.3 + 240.0 + 6.0 + 12.0
+    }
+
+    fn estimated_image_footer_height_px() -> f32 {
+        // Footer text (~13px) plus one pane spacing step.
+        13.0 * 1.3 + 12.0
     }
 }
 
