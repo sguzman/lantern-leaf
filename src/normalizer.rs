@@ -69,7 +69,7 @@ impl Default for NormalizerConfig {
 
         Self {
             enabled: true,
-            mode: NormalizationMode::Page,
+            mode: NormalizationMode::Sentence,
             collapse_whitespace: true,
             remove_space_before_punctuation: true,
             strip_inline_code: true,
@@ -209,6 +209,18 @@ impl TextNormalizer {
         page_idx: usize,
         display_sentences: &[String],
     ) -> PageNormalization {
+        if self.config.mode == NormalizationMode::Sentence {
+            return self.plan_page_cached_sentence_mode(epub_path, display_sentences);
+        }
+        self.plan_page_cached_page_mode(epub_path, page_idx, display_sentences)
+    }
+
+    fn plan_page_cached_page_mode(
+        &self,
+        epub_path: &Path,
+        page_idx: usize,
+        display_sentences: &[String],
+    ) -> PageNormalization {
         let source_hash = hash_sentences(display_sentences);
         let config_hash = self.config_hash();
         let cache_path =
@@ -249,6 +261,41 @@ impl TextNormalizer {
             }
         }
         plan
+    }
+
+    fn plan_page_cached_sentence_mode(
+        &self,
+        epub_path: &Path,
+        display_sentences: &[String],
+    ) -> PageNormalization {
+        if display_sentences.is_empty() {
+            return PageNormalization {
+                audio_sentences: Vec::new(),
+                display_to_audio: Vec::new(),
+                audio_to_display: Vec::new(),
+            };
+        }
+
+        let config_hash = self.config_hash();
+        let mut audio_sentences = Vec::with_capacity(display_sentences.len());
+        let mut display_to_audio = vec![None; display_sentences.len()];
+        let mut audio_to_display = Vec::new();
+
+        for (display_idx, sentence) in display_sentences.iter().enumerate() {
+            if let Some(cleaned) = self.normalize_sentence_cached(epub_path, &config_hash, sentence)
+            {
+                let audio_idx = audio_sentences.len();
+                audio_sentences.push(cleaned);
+                display_to_audio[display_idx] = Some(audio_idx);
+                audio_to_display.push(display_idx);
+            }
+        }
+
+        PageNormalization {
+            audio_sentences,
+            display_to_audio,
+            audio_to_display,
+        }
     }
 
     pub fn plan_page(&self, display_sentences: &[String]) -> PageNormalization {
@@ -423,6 +470,57 @@ impl TextNormalizer {
     ) -> PathBuf {
         let file_name = format!("p{}-{}-{}.toml", page_idx, source_hash, config_hash);
         normalized_dir(epub_path).join(file_name)
+    }
+
+    fn normalized_sentence_cache_path(
+        &self,
+        epub_path: &Path,
+        sentence_hash: &str,
+        config_hash: &str,
+    ) -> PathBuf {
+        let file_name = format!("s-{}-{}.toml", sentence_hash, config_hash);
+        normalized_dir(epub_path).join(file_name)
+    }
+
+    fn normalize_sentence_cached(
+        &self,
+        epub_path: &Path,
+        config_hash: &str,
+        sentence: &str,
+    ) -> Option<String> {
+        let source_hash = hash_sentence(sentence);
+        let cache_path = self.normalized_sentence_cache_path(epub_path, &source_hash, config_hash);
+
+        if let Ok(contents) = fs::read_to_string(&cache_path) {
+            if let Ok(cached) = toml::from_str::<NormalizedSentenceCache>(&contents) {
+                return cached.normalized;
+            }
+        }
+
+        let cleaned = self.clean_text_core(sentence);
+        let normalized = self.finalize_sentence(&cleaned);
+        let cached = NormalizedSentenceCache {
+            normalized: normalized.clone(),
+        };
+
+        if let Some(parent) = cache_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        match toml::to_string(&cached) {
+            Ok(serialized) => {
+                if let Err(err) = fs::write(&cache_path, serialized) {
+                    tracing::warn!(
+                        path = %cache_path.display(),
+                        "Failed to write normalized sentence cache: {err}"
+                    );
+                }
+            }
+            Err(err) => {
+                tracing::warn!("Failed to serialize normalized sentence cache: {err}");
+            }
+        }
+
+        normalized
     }
 }
 
@@ -636,4 +734,72 @@ fn hash_sentences(sentences: &[String]) -> String {
         hasher.update([0u8]);
     }
     format!("{:x}", hasher.finalize())
+}
+
+fn hash_sentence(sentence: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(sentence.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct NormalizedSentenceCache {
+    normalized: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn sentence_mode_cache_reused_across_page_indices() {
+        let normalizer = TextNormalizer::default();
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let epub_path = std::env::temp_dir().join(format!("ebup-normalizer-{nonce}.epub"));
+        let cache_root = normalized_dir(&epub_path);
+        let _ = fs::remove_dir_all(&cache_root);
+
+        let page_a = vec![
+            "Alpha sentence.".to_string(),
+            "Beta sentence.".to_string(),
+        ];
+        let page_b = vec![
+            "Beta sentence.".to_string(),
+            "Gamma sentence.".to_string(),
+        ];
+
+        let _ = normalizer.plan_page_cached(&epub_path, 0, &page_a);
+        let files_after_first: Vec<String> = fs::read_dir(&cache_root)
+            .expect("cache dir should exist")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .collect();
+        let first_sentence_files = files_after_first
+            .iter()
+            .filter(|name| name.starts_with("s-"))
+            .count();
+        assert_eq!(first_sentence_files, 2);
+
+        let _ = normalizer.plan_page_cached(&epub_path, 99, &page_b);
+        let files_after_second: Vec<String> = fs::read_dir(&cache_root)
+            .expect("cache dir should exist")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .collect();
+        let second_sentence_files = files_after_second
+            .iter()
+            .filter(|name| name.starts_with("s-"))
+            .count();
+        assert_eq!(second_sentence_files, 3);
+        assert!(
+            !files_after_second.iter().any(|name| name.starts_with("p")),
+            "sentence mode should not create page-level normalization cache files"
+        );
+
+        let _ = fs::remove_dir_all(&cache_root);
+    }
 }

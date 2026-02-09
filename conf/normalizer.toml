@@ -2,9 +2,8 @@
 # Master switch for text cleaning before TTS generation.
 enabled = true
 
-# "page" keeps page-level processing and maps each display sentence to
-# either cleaned speech text or silence.
-mode = "page"
+# "sentence" keeps normalization/cache stable as pages and visual settings change.
+mode = "sentence"
 
 # Whitespace cleanup.
 collapse_whitespace = true
