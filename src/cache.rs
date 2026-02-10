@@ -8,9 +8,12 @@
 
 use crate::config::{AppConfig, parse_config, serialize_config};
 use epub::doc::EpubDoc;
+use image::codecs::jpeg::JpegEncoder;
+use image::imageops::FilterType;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Cursor;
 use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -44,6 +47,7 @@ pub struct Bookmark {
 pub struct RecentBook {
     pub source_path: PathBuf,
     pub display_title: String,
+    pub thumbnail_path: Option<PathBuf>,
     pub last_opened_unix_secs: u64,
 }
 
@@ -208,9 +212,11 @@ pub fn list_recent_books(limit: usize) -> Vec<RecentBook> {
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
             let display_title = infer_recent_title(&source_path);
+            let thumbnail_path = infer_recent_thumbnail(&source_path);
             Some(RecentBook {
                 source_path,
                 display_title,
+                thumbnail_path,
                 last_opened_unix_secs,
             })
         })
@@ -258,6 +264,42 @@ fn infer_recent_title(source_path: &Path) -> String {
                 .unwrap_or("book")
         })
         .to_string()
+}
+
+fn infer_recent_thumbnail(source_path: &Path) -> Option<PathBuf> {
+    if !source_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("epub"))
+        .unwrap_or(false)
+    {
+        return None;
+    }
+
+    let thumb_path = hash_dir(source_path).join("thumbs").join("cover-thumb.jpg");
+    if thumb_path.exists() {
+        return Some(thumb_path);
+    }
+
+    let mut doc = EpubDoc::new(source_path).ok()?;
+    let (cover, _mime) = doc.get_cover()?;
+    write_thumbnail_file(&thumb_path, &cover).ok()?;
+    Some(thumb_path)
+}
+
+fn write_thumbnail_file(path: &Path, raw_image: &[u8]) -> Result<(), String> {
+    let image = image::load_from_memory(raw_image).map_err(|err| err.to_string())?;
+    let thumb = image.resize(68, 100, FilterType::Triangle);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    let mut encoded = Vec::new();
+    let mut encoder = JpegEncoder::new_with_quality(Cursor::new(&mut encoded), 80);
+    encoder
+        .encode_image(&thumb)
+        .map_err(|err| err.to_string())?;
+    fs::write(path, encoded).map_err(|err| err.to_string())?;
+    Ok(())
 }
 
 pub fn load_epub_config(epub_path: &Path) -> Option<AppConfig> {

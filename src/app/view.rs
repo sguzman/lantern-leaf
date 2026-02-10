@@ -490,7 +490,20 @@ impl App {
             entries = entries.push(text("No recent books found in cache.").size(13.0));
         } else {
             for book in self.recent.books.iter().take(80) {
+                let thumb_cell: Element<'_, Message> = if let Some(path) = &book.thumbnail_path {
+                    image(path.clone())
+                        .width(Length::Fixed(34.0))
+                        .height(Length::Fixed(48.0))
+                        .content_fit(ContentFit::Contain)
+                        .into()
+                } else {
+                    text("x")
+                        .width(Length::Fixed(34.0))
+                        .align_x(Horizontal::Center)
+                        .into()
+                };
                 let row = row![
+                    container(thumb_cell).width(Length::Fixed(42.0)),
                     column![
                         text(Self::truncate_text(&book.display_title, 36)).size(13.0),
                         text(book.source_path.to_string_lossy()).size(11.0),

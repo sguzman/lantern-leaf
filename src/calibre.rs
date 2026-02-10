@@ -1,17 +1,25 @@
 use anyhow::{Context, Result, anyhow};
+use image::codecs::jpeg::JpegEncoder;
+use image::imageops::FilterType;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::warn;
+use tracing::{debug, warn};
 
 const DEFAULT_CALIBRE_CONFIG_PATH: &str = "conf/calibre.toml";
 const CALIBRE_CACHE_PATH: &str = ".cache/calibre-books.toml";
 const CALIBRE_CACHE_REV: &str = "calibre-cache-v1";
 const CALIBRE_DOWNLOAD_DIR: &str = ".cache/calibre-downloads";
+const CALIBRE_THUMB_DIR: &str = ".cache/calibre-thumbs";
+const THUMB_WIDTH: u32 = 68;
+const THUMB_HEIGHT: u32 = 100;
+const THUMB_PREFETCH_LIMIT: usize = 400;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -191,12 +199,17 @@ pub fn load_books(config: &CalibreConfig, force_refresh: bool) -> Result<Vec<Cal
 
     let signature = cache_signature(config);
     if !force_refresh {
-        if let Some(cached) = try_load_cache(config, &signature)? {
+        if let Some(mut cached) = try_load_cache(config, &signature)? {
+            let changed = hydrate_book_thumbnails(config, &mut cached, THUMB_PREFETCH_LIMIT);
+            if changed {
+                let _ = write_cache(&signature, &cached);
+            }
             return Ok(cached);
         }
     }
 
-    let books = fetch_books(config)?;
+    let mut books = fetch_books(config)?;
+    let _ = hydrate_book_thumbnails(config, &mut books, THUMB_PREFETCH_LIMIT);
     write_cache(&signature, &books)?;
     Ok(books)
 }
@@ -314,9 +327,7 @@ fn fetch_books(config: &CalibreConfig) -> Result<Vec<CalibreBook>> {
             authors,
             year,
             file_size_bytes,
-            cover_thumbnail: path
-                .as_ref()
-                .and_then(|resolved| resolve_cover_thumbnail(resolved.parent())),
+            cover_thumbnail: None,
             path,
         });
     }
@@ -698,17 +709,169 @@ fn parse_book_id_from_dir_name(path: &Path) -> Option<u64> {
     name[start + 1..name.len() - 1].trim().parse::<u64>().ok()
 }
 
-fn resolve_cover_thumbnail(book_dir: Option<&Path>) -> Option<PathBuf> {
-    let Some(dir) = book_dir else {
-        return None;
-    };
+fn hydrate_book_thumbnails(
+    config: &CalibreConfig,
+    books: &mut [CalibreBook],
+    limit: usize,
+) -> bool {
+    let mut changed = false;
+    let prefetch_count = books.len().min(limit);
+    for book in books.iter_mut().take(prefetch_count) {
+        let current = book.cover_thumbnail.clone();
+        let next = ensure_book_thumbnail(config, book.id, book.path.as_deref());
+        if next != current {
+            book.cover_thumbnail = next;
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn ensure_book_thumbnail(
+    config: &CalibreConfig,
+    book_id: u64,
+    source_path: Option<&Path>,
+) -> Option<PathBuf> {
+    let thumb_path = calibre_thumbnail_path(config, book_id);
+    if thumb_path.exists() {
+        return Some(thumb_path);
+    }
+
+    if let Some(dir) = source_path.and_then(Path::parent)
+        && let Some(local_cover) = resolve_local_cover_file(dir)
+        && let Ok(bytes) = fs::read(&local_cover)
+        && write_thumbnail_file(&thumb_path, &bytes).is_ok()
+    {
+        return Some(thumb_path);
+    }
+
+    if let Some(bytes) = fetch_thumbnail_from_server(config, book_id)
+        && write_thumbnail_file(&thumb_path, &bytes).is_ok()
+    {
+        return Some(thumb_path);
+    }
+
+    None
+}
+
+fn resolve_local_cover_file(book_dir: &Path) -> Option<PathBuf> {
     for name in ["cover.jpg", "cover.jpeg", "cover.png", "cover.webp"] {
-        let candidate = dir.join(name);
+        let candidate = book_dir.join(name);
         if candidate.exists() {
             return Some(candidate);
         }
     }
     None
+}
+
+fn fetch_thumbnail_from_server(config: &CalibreConfig, book_id: u64) -> Option<Vec<u8>> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(6))
+        .build()
+        .ok()?;
+    let username = effective_username(config);
+    let password = effective_password(config);
+    let endpoints = [
+        format!("get/thumb/{book_id}"),
+        format!("get/cover/{book_id}"),
+    ];
+
+    for base in cover_server_urls(config) {
+        for endpoint in &endpoints {
+            let url = format!("{base}/{endpoint}");
+            let mut request = client.get(&url);
+            if let Some(user) = username.as_ref() {
+                request = request.basic_auth(user, password.clone());
+            }
+
+            let Ok(response) = request.send() else {
+                continue;
+            };
+            if response.status() != StatusCode::OK {
+                continue;
+            }
+            let Ok(bytes) = response.bytes() else {
+                continue;
+            };
+            if bytes.is_empty() {
+                continue;
+            }
+            return Some(bytes.to_vec());
+        }
+    }
+
+    None
+}
+
+fn calibre_thumbnail_path(config: &CalibreConfig, book_id: u64) -> PathBuf {
+    let key = thumbnail_scope_key(config);
+    Path::new(CALIBRE_THUMB_DIR)
+        .join(key)
+        .join(format!("{book_id}.jpg"))
+}
+
+fn thumbnail_scope_key(config: &CalibreConfig) -> String {
+    let mut hasher = Sha256::new();
+    if let Some(url) = sanitized_library_url(config) {
+        hasher.update(url.as_bytes());
+    }
+    if let Some(path) = config.state_path.as_ref().or(config.library_path.as_ref()) {
+        hasher.update(path.to_string_lossy().as_bytes());
+    }
+    for url in sanitized_server_urls(config) {
+        hasher.update(url.as_bytes());
+    }
+    let digest = format!("{:x}", hasher.finalize());
+    digest.chars().take(16).collect()
+}
+
+fn cover_server_urls(config: &CalibreConfig) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(raw) = sanitized_library_url(config)
+        && let Some(base) = normalize_server_base_url(&raw)
+    {
+        out.push(base);
+    }
+    for raw in sanitized_server_urls(config) {
+        if let Some(base) = normalize_server_base_url(&raw)
+            && !out.iter().any(|known| known == &base)
+        {
+            out.push(base);
+        }
+    }
+    out
+}
+
+fn normalize_server_base_url(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        return None;
+    }
+    let no_fragment = trimmed.split('#').next()?.split('?').next()?.trim();
+    let normalized = no_fragment.trim_end_matches('/').to_string();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+fn write_thumbnail_file(path: &Path, raw_image: &[u8]) -> Result<()> {
+    let image = image::load_from_memory(raw_image).context("decoding thumbnail image")?;
+    let thumb = image.resize(THUMB_WIDTH, THUMB_HEIGHT, FilterType::Triangle);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create thumbnail dir {}", parent.display()))?;
+    }
+    let mut encoded = Vec::new();
+    let mut encoder = JpegEncoder::new_with_quality(Cursor::new(&mut encoded), 80);
+    encoder
+        .encode_image(&thumb)
+        .context("encoding thumbnail as jpeg")?;
+    fs::write(path, encoded)
+        .with_context(|| format!("failed to write thumbnail {}", path.display()))?;
+    debug!(path = %path.display(), "cached calibre thumbnail");
+    Ok(())
 }
 
 fn try_load_cache(config: &CalibreConfig, signature: &str) -> Result<Option<Vec<CalibreBook>>> {
