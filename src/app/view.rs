@@ -677,9 +677,9 @@ impl App {
         width: Length,
     ) -> Element<'_, Message> {
         let arrow = if self.calibre.sort_column == column {
-            if self.calibre.sort_desc { "↓" } else { "↑" }
+            if self.calibre.sort_desc { "v" } else { "^" }
         } else {
-            "↕"
+            "^v"
         };
         button(text(format!("{label} {arrow}")).align_x(Horizontal::Left))
             .on_press(Message::SortCalibreBy(column))
@@ -864,9 +864,9 @@ impl App {
         };
         let available_width = self.estimated_controls_width();
         let mut controls = row![
-            button("⏮").on_press(Message::SeekBackward),
+            button("Prev Sent").on_press(Message::SeekBackward),
             play_button,
-            button("⏭").on_press(Message::SeekForward),
+            button("Next Sent").on_press(Message::SeekForward),
             play_from_start,
             play_from_cursor,
             jump_button,
