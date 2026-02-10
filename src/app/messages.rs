@@ -1,4 +1,4 @@
-use crate::calibre::CalibreBook;
+use crate::calibre::{CalibreBook, CalibreColumn};
 use crate::config::{FontFamily, FontWeight};
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::scrollable::RelativeOffset;
@@ -24,6 +24,7 @@ pub enum Message {
     OpenPathInputChanged(String),
     OpenPathRequested,
     RefreshCalibreBooks,
+    SortCalibreBy(CalibreColumn),
     CalibreBooksLoaded {
         books: Vec<CalibreBook>,
         error: Option<String>,

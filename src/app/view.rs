@@ -537,17 +537,31 @@ impl App {
                 row![text("Cover").width(Length::Fixed(42.0))].spacing(8);
             for column in &columns {
                 header = match column {
-                    CalibreColumn::Title => {
-                        header.push(text("Title").width(Length::FillPortion(4)))
-                    }
-                    CalibreColumn::Extension => {
-                        header.push(text("Ext").width(Length::FillPortion(1)))
-                    }
-                    CalibreColumn::Author => {
-                        header.push(text("Author").width(Length::FillPortion(3)))
-                    }
-                    CalibreColumn::Year => header.push(text("Year").width(Length::FillPortion(1))),
-                    CalibreColumn::Size => header.push(text("Size").width(Length::FillPortion(1))),
+                    CalibreColumn::Title => header.push(self.calibre_header_button(
+                        CalibreColumn::Title,
+                        "Title",
+                        Length::FillPortion(4),
+                    )),
+                    CalibreColumn::Extension => header.push(self.calibre_header_button(
+                        CalibreColumn::Extension,
+                        "Ext",
+                        Length::FillPortion(1),
+                    )),
+                    CalibreColumn::Author => header.push(self.calibre_header_button(
+                        CalibreColumn::Author,
+                        "Author",
+                        Length::FillPortion(3),
+                    )),
+                    CalibreColumn::Year => header.push(self.calibre_header_button(
+                        CalibreColumn::Year,
+                        "Year",
+                        Length::FillPortion(1),
+                    )),
+                    CalibreColumn::Size => header.push(self.calibre_header_button(
+                        CalibreColumn::Size,
+                        "Size",
+                        Length::FillPortion(1),
+                    )),
                 };
             }
             header = header.push(text("").width(Length::Shrink));
@@ -654,6 +668,23 @@ impl App {
         } else {
             format!("{value:.1} {}", UNITS[unit_idx])
         }
+    }
+
+    fn calibre_header_button(
+        &self,
+        column: CalibreColumn,
+        label: &str,
+        width: Length,
+    ) -> Element<'_, Message> {
+        let arrow = if self.calibre.sort_column == column {
+            if self.calibre.sort_desc { "↓" } else { "↑" }
+        } else {
+            "↕"
+        };
+        button(text(format!("{label} {arrow}")).align_x(Horizontal::Left))
+            .on_press(Message::SortCalibreBy(column))
+            .width(width)
+            .into()
     }
 
     pub(super) fn settings_panel(&self) -> Element<'_, Message> {

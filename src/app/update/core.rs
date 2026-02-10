@@ -1,12 +1,14 @@
 use super::super::messages::Message;
 use super::super::state::{App, TEXT_SCROLL_ID};
 use super::Effect;
+use crate::calibre::{CalibreBook, CalibreColumn};
 use iced::Event;
 use iced::event;
 use iced::keyboard::{self, Key, Modifiers, key};
 use iced::time;
 use iced::window;
 use iced::{Subscription, Task};
+use std::cmp::Ordering;
 use std::process::Command;
 use std::time::Duration;
 use tracing::warn;
@@ -57,6 +59,7 @@ impl App {
             Message::OpenPathInputChanged(path) => self.handle_open_path_input_changed(path),
             Message::OpenPathRequested => self.handle_open_path_requested(&mut effects),
             Message::RefreshCalibreBooks => self.handle_refresh_calibre_books(&mut effects),
+            Message::SortCalibreBy(column) => self.handle_sort_calibre_by(column),
             Message::CalibreBooksLoaded { books, error } => {
                 self.handle_calibre_books_loaded(books, error)
             }
@@ -414,11 +417,61 @@ impl App {
         self.calibre.loading = false;
         self.calibre.error = error;
         self.calibre.books = books;
+        self.sort_calibre_books();
     }
 
     fn handle_open_calibre_book(&mut self, path: std::path::PathBuf, effects: &mut Vec<Effect>) {
         effects.push(Effect::LaunchBook(path));
     }
+
+    fn handle_sort_calibre_by(&mut self, column: CalibreColumn) {
+        if self.calibre.sort_column == column {
+            self.calibre.sort_desc = !self.calibre.sort_desc;
+        } else {
+            self.calibre.sort_column = column;
+            self.calibre.sort_desc = false;
+        }
+        self.sort_calibre_books();
+    }
+
+    fn sort_calibre_books(&mut self) {
+        let column = self.calibre.sort_column;
+        let desc = self.calibre.sort_desc;
+        self.calibre.books.sort_by(|a, b| {
+            let mut ord = compare_calibre_books(a, b, column);
+            if desc {
+                ord = ord.reverse();
+            }
+            ord
+        });
+    }
+}
+
+fn compare_calibre_books(a: &CalibreBook, b: &CalibreBook, column: CalibreColumn) -> Ordering {
+    let primary = match column {
+        CalibreColumn::Title => a
+            .title
+            .to_ascii_lowercase()
+            .cmp(&b.title.to_ascii_lowercase()),
+        CalibreColumn::Extension => a
+            .extension
+            .to_ascii_lowercase()
+            .cmp(&b.extension.to_ascii_lowercase()),
+        CalibreColumn::Author => a
+            .authors
+            .to_ascii_lowercase()
+            .cmp(&b.authors.to_ascii_lowercase()),
+        CalibreColumn::Year => a.year.cmp(&b.year),
+        CalibreColumn::Size => a.file_size_bytes.cmp(&b.file_size_bytes),
+    };
+
+    primary
+        .then_with(|| {
+            a.title
+                .to_ascii_lowercase()
+                .cmp(&b.title.to_ascii_lowercase())
+        })
+        .then_with(|| a.id.cmp(&b.id))
 }
 
 fn runtime_event_to_message(

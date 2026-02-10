@@ -1,5 +1,5 @@
 use crate::cache::{Bookmark, RecentBook, list_recent_books, save_epub_config};
-use crate::calibre::{CalibreBook, CalibreConfig};
+use crate::calibre::{CalibreBook, CalibreColumn, CalibreConfig};
 use crate::config::{AppConfig, FontFamily, FontWeight, HighlightColor, ThemeMode};
 use crate::epub_loader::{BookImage, LoadedBook};
 use crate::normalizer::TextNormalizer;
@@ -115,6 +115,8 @@ pub struct CalibreState {
     pub(super) error: Option<String>,
     pub(super) books: Vec<CalibreBook>,
     pub(super) config: CalibreConfig,
+    pub(super) sort_column: CalibreColumn,
+    pub(super) sort_desc: bool,
 }
 
 /// Core application state composed of sub-models.
@@ -527,6 +529,8 @@ impl App {
                 error: None,
                 books: Vec::new(),
                 config: CalibreConfig::load_default(),
+                sort_column: CalibreColumn::Title,
+                sort_desc: false,
             },
             open_path_input: String::new(),
         };
@@ -658,6 +662,8 @@ impl App {
                 error: None,
                 books: Vec::new(),
                 config: CalibreConfig::load_default(),
+                sort_column: CalibreColumn::Title,
+                sort_desc: false,
             },
             open_path_input: String::new(),
         };
