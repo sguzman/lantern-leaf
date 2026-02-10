@@ -1,19 +1,31 @@
 //! Simple cache to remember the last opened page per EPUB file, along with
 //! finer-grained resume data (sentence + scroll position).
 //!
-//! Files are stored under `.cache/` using a hash of the EPUB path as the
-//! filename to avoid filesystem issues. The format is a tiny TOML file with a
-//! `page` field plus optional `sentence_idx`, `sentence_text`, and `scroll_y`
-//! for resuming inside the page.
+//! Files are stored under `.cache/` using a hash of the source file contents
+//! as the directory name so path aliases do not fragment the cache. The format
+//! is a tiny TOML file with a `page` field plus optional `sentence_idx`,
+//! `sentence_text`, and `scroll_y` for resuming inside the page.
 
 use crate::config::{AppConfig, parse_config, serialize_config};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::UNIX_EPOCH;
 use tracing::{debug, warn};
 
 pub const CACHE_DIR: &str = ".cache";
+static CONTENT_DIGEST_CACHE: OnceLock<Mutex<HashMap<PathBuf, SourceDigestEntry>>> = OnceLock::new();
+
+#[derive(Clone)]
+struct SourceDigestEntry {
+    len: u64,
+    modified_unix_secs: u64,
+    digest: String,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Bookmark {
@@ -89,10 +101,59 @@ struct CacheEntry {
 }
 
 pub fn hash_dir(epub_path: &Path) -> PathBuf {
-    let mut hasher = Sha256::new();
-    hasher.update(epub_path.as_os_str().to_string_lossy().as_bytes());
-    let hash = format!("{:x}", hasher.finalize());
+    let hash = source_content_hash(epub_path).unwrap_or_else(|| {
+        // Fallback for unreadable paths keeps cache functions non-fatal.
+        let mut hasher = Sha256::new();
+        hasher.update(epub_path.as_os_str().to_string_lossy().as_bytes());
+        format!("{:x}", hasher.finalize())
+    });
     Path::new(CACHE_DIR).join(hash)
+}
+
+fn source_content_hash(path: &Path) -> Option<String> {
+    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let metadata = fs::metadata(&canonical).ok()?;
+    let len = metadata.len();
+    let modified_unix_secs = metadata
+        .modified()
+        .ok()
+        .and_then(|ts| ts.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let cache = CONTENT_DIGEST_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(guard) = cache.lock() {
+        if let Some(entry) = guard.get(&canonical) {
+            if entry.len == len && entry.modified_unix_secs == modified_unix_secs {
+                return Some(entry.digest.clone());
+            }
+        }
+    }
+
+    let mut file = fs::File::open(&canonical).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0_u8; 1024 * 1024];
+    loop {
+        let read = file.read(&mut buf).ok()?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buf[..read]);
+    }
+    let digest = format!("{:x}", hasher.finalize());
+
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(
+            canonical,
+            SourceDigestEntry {
+                len,
+                modified_unix_secs,
+                digest: digest.clone(),
+            },
+        );
+    }
+
+    Some(digest)
 }
 
 fn bookmark_path(epub_path: &Path) -> PathBuf {
