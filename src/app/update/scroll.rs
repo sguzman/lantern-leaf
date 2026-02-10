@@ -5,6 +5,7 @@ use super::super::state::{
 };
 use super::Effect;
 use crate::cache::{Bookmark, save_bookmark};
+use crate::config::FontFamily;
 use iced::widget::scrollable::RelativeOffset;
 use tracing::info;
 
@@ -170,30 +171,92 @@ impl App {
             return None;
         }
 
-        let idx = model
+        let target_idx = model
             .target_idx
             .min(model.sentences.len().saturating_sub(1));
-        let sentence_units: Vec<f32> = model
-            .sentences
-            .iter()
-            .enumerate()
-            .map(|(i, sentence)| {
-                let mut units = sentence.chars().count().max(1) as f32;
-                if model.separator_chars > 0 && i + 1 < model.sentences.len() {
-                    units += model.separator_chars as f32;
+        let available_width = self.estimated_text_width();
+        if available_width <= f32::EPSILON {
+            return None;
+        }
+        let glyph_width = self.estimated_glyph_width_px().max(1.0);
+        let max_units_per_line = (available_width / glyph_width).max(8.0);
+
+        let mut line = 0.0f32;
+        let mut line_units = 0.0f32;
+        let mut target_start_line = 0.0f32;
+        let mut target_middle_line = 0.0f32;
+        let mut target_seen = false;
+
+        for (idx, sentence) in model.sentences.iter().enumerate() {
+            let target_sentence = idx == target_idx;
+            let sentence_total_units = sentence
+                .chars()
+                .filter(|ch| *ch != '\n')
+                .map(|ch| self.char_width_units(ch))
+                .sum::<f32>()
+                .max(1.0);
+            let mut seen_units = 0.0f32;
+
+            if target_sentence {
+                target_start_line = Self::line_position(line, line_units, max_units_per_line);
+                target_middle_line = target_start_line;
+                target_seen = true;
+            }
+
+            for ch in sentence.chars() {
+                if ch == '\n' {
+                    line += 1.0;
+                    line_units = 0.0;
+                    if target_sentence
+                        && target_middle_line <= target_start_line
+                        && seen_units >= sentence_total_units * 0.5
+                    {
+                        target_middle_line =
+                            Self::line_position(line, line_units, max_units_per_line);
+                    }
+                    continue;
                 }
-                units
-            })
-            .collect();
-        let total_units: f32 = sentence_units.iter().sum();
-        if total_units <= f32::EPSILON {
+
+                let units = self.char_width_units(ch);
+                if line_units > 0.0 && line_units + units > max_units_per_line {
+                    line += 1.0;
+                    line_units = 0.0;
+                }
+                line_units += units;
+
+                if target_sentence {
+                    seen_units += units;
+                    if seen_units >= sentence_total_units * 0.5 {
+                        target_middle_line =
+                            Self::line_position(line, line_units, max_units_per_line);
+                    }
+                }
+            }
+
+            if idx + 1 < model.sentences.len() {
+                for ch in model.sentence_separator.chars() {
+                    if ch == '\n' {
+                        line += 1.0;
+                        line_units = 0.0;
+                        continue;
+                    }
+                    let units = self.char_width_units(ch);
+                    if line_units > 0.0 && line_units + units > max_units_per_line {
+                        line += 1.0;
+                        line_units = 0.0;
+                    }
+                    line_units += units;
+                }
+            }
+        }
+
+        if !target_seen {
             return None;
         }
 
-        let before_units: f32 = sentence_units.iter().take(idx).sum();
-        let current_units = sentence_units[idx].max(f32::EPSILON);
-        let start = (before_units / total_units).clamp(0.0, 1.0);
-        let middle = ((before_units + current_units * 0.5) / total_units).clamp(0.0, 1.0);
+        let total_lines = (line + 1.0).max(1.0);
+        let start = (target_start_line / total_lines).clamp(0.0, 1.0);
+        let middle = (target_middle_line / total_lines).clamp(start, 1.0);
 
         Some(SentenceProgress { start, middle })
     }
@@ -212,8 +275,7 @@ impl App {
             return Some(ScrollTargetModel {
                 sentences: preview.audio_sentences.clone(),
                 target_idx,
-                // Text-only renders each sentence separated by "\n\n".
-                separator_chars: 2,
+                sentence_separator: "\n\n",
             });
         }
 
@@ -225,7 +287,7 @@ impl App {
         Some(ScrollTargetModel {
             sentences,
             target_idx,
-            separator_chars: 0,
+            sentence_separator: "",
         })
     }
 
@@ -291,6 +353,57 @@ impl App {
         (top_padding, text_height)
     }
 
+    fn estimated_text_width(&self) -> f32 {
+        let mut width = if self.bookmark.viewport_width > 0.0 {
+            self.bookmark.viewport_width
+        } else {
+            let mut fallback = self.config.window_width.max(1.0);
+            if self.config.show_settings {
+                fallback = (fallback - 320.0).max(1.0);
+            }
+            fallback
+        };
+        let margin_total = (self.config.margin_horizontal as f32 * 2.0).min(width * 0.9);
+        width = (width - margin_total).max(1.0);
+        width
+    }
+
+    fn estimated_glyph_width_px(&self) -> f32 {
+        let font_size = self.config.font_size.max(1) as f32;
+        let family_scale = match self.config.font_family {
+            FontFamily::Monospace | FontFamily::Courier | FontFamily::FiraCode => 0.64,
+            FontFamily::Serif => 0.56,
+            FontFamily::Lexend | FontFamily::NotoSans => 0.54,
+            FontFamily::AtkinsonHyperlegible
+            | FontFamily::AtkinsonHyperlegibleNext
+            | FontFamily::LexicaUltralegible => 0.57,
+            _ => 0.55,
+        };
+        let weight_scale = match self.config.font_weight {
+            crate::config::FontWeight::Light => 0.98,
+            crate::config::FontWeight::Normal => 1.0,
+            crate::config::FontWeight::Bold => 1.03,
+        };
+
+        font_size * family_scale * weight_scale
+    }
+
+    fn char_width_units(&self, ch: char) -> f32 {
+        if ch.is_whitespace() {
+            0.45 + self.config.word_spacing as f32 * 0.45
+        } else if ch.is_ascii_punctuation() {
+            0.55 + self.config.letter_spacing as f32 * 0.10
+        } else if ch.is_ascii() {
+            1.0 + self.config.letter_spacing as f32 * 0.35
+        } else {
+            1.8 + self.config.letter_spacing as f32 * 0.20
+        }
+    }
+
+    fn line_position(line: f32, line_units: f32, max_units_per_line: f32) -> f32 {
+        line + (line_units / max_units_per_line).clamp(0.0, 1.0)
+    }
+
     fn current_page_image_count(&self) -> usize {
         self.reader
             .images
@@ -319,7 +432,7 @@ impl App {
 struct ScrollTargetModel {
     sentences: Vec<String>,
     target_idx: usize,
-    separator_chars: usize,
+    sentence_separator: &'static str,
 }
 
 #[derive(Clone, Copy)]
@@ -482,6 +595,31 @@ mod tests {
         assert!(
             y_with <= y_without,
             "image-tail compensation should avoid pushing text targets further down"
+        );
+    }
+
+    #[test]
+    fn jump_target_remains_reasonably_stable_with_line_spacing_changes() {
+        let mut app = build_test_app(220, 0);
+        let idx = 140usize;
+
+        app.config.line_spacing = 1.0;
+        app.bookmark.content_height = 3600.0;
+        let y_dense = app
+            .scroll_offset_for_sentence(idx)
+            .expect("offset with dense line spacing")
+            .y;
+
+        app.config.line_spacing = 2.0;
+        app.bookmark.content_height = 7200.0;
+        let y_spaced = app
+            .scroll_offset_for_sentence(idx)
+            .expect("offset with larger line spacing")
+            .y;
+
+        assert!(
+            (y_spaced - y_dense).abs() < 0.12,
+            "changing line spacing should not severely move jump/auto-scroll targets"
         );
     }
 }
