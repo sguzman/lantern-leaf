@@ -73,7 +73,7 @@ impl App {
 
         let available_width = self.controls_layout_width();
         let controls_spacing = 10.0;
-        let controls_budget = (available_width - 56.0).max(0.0);
+        let controls_budget = (available_width - 12.0).max(0.0);
         let mut used_controls_width = Self::estimate_button_width_px("Previous")
             + Self::estimate_button_width_px("Next")
             + Self::estimate_button_width_px(theme_label)
@@ -1068,7 +1068,7 @@ impl App {
         };
         let available_width = self.controls_layout_width();
         let controls_spacing = 10.0;
-        let controls_budget = (available_width - 56.0).max(0.0);
+        let controls_budget = (available_width - 12.0).max(0.0);
         let mut used_controls_width = Self::estimate_button_width_px(play_label);
         let mut add_optional = |label: &str| -> bool {
             let extra = controls_spacing + Self::estimate_button_width_px(label);
@@ -1228,19 +1228,13 @@ impl App {
     }
 
     fn estimated_controls_width(&self) -> f32 {
-        let window_width = self.config.window_width.max(320.0);
-        let measured = if self.bookmark.viewport_width > 0.0 {
-            self.bookmark.viewport_width
-        } else {
-            window_width
-        };
-        // Prevent stale cached viewport widths from overestimating space after a resize.
-        let mut width = measured.min(window_width);
+        let mut width = self.config.window_width.max(320.0);
         if self.config.show_settings {
-            // Settings panel is fixed width plus layout padding/spacers.
-            width = (width - 320.0).max(0.0);
+            // Settings panel is fixed width (280) plus row spacing (16).
+            width = (width - 296.0).max(0.0);
         }
-        width.max(0.0)
+        // Reader content applies 16px horizontal padding on each side.
+        (width - 32.0).max(0.0)
     }
 
     fn controls_layout_width(&self) -> f32 {
@@ -1253,9 +1247,9 @@ impl App {
     }
 
     fn estimate_button_width_px(label: &str) -> f32 {
-        // Slightly aggressive estimate to omit before any label is forced to wrap.
+        // Approximate intrinsic width for default text size plus button padding.
         let chars = label.chars().count() as f32;
-        (chars * 8.8) + 42.0
+        (chars * 7.6) + 28.0
     }
 
     fn estimate_status_text_width_px(value: &str) -> f32 {
