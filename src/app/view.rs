@@ -517,6 +517,49 @@ impl App {
             let columns = self.calibre.config.sanitized_columns();
             let header_font_size = (self.config.font_size as f32 - 1.0).max(10.0);
             let row_font_size = (self.config.font_size as f32 - 2.0).max(9.0);
+            let needle = self.calibre.search_query.trim().to_ascii_lowercase();
+            let filtered_books: Vec<&crate::calibre::CalibreBook> = if needle.is_empty() {
+                self.calibre.books.iter().collect()
+            } else {
+                self.calibre
+                    .books
+                    .iter()
+                    .filter(|book| {
+                        let title = book.title.to_ascii_lowercase();
+                        let authors = book.authors.to_ascii_lowercase();
+                        let extension = book.extension.to_ascii_lowercase();
+                        let year = book.year.map(|y| y.to_string()).unwrap_or_default();
+                        let id = book.id.to_string();
+                        title.contains(&needle)
+                            || authors.contains(&needle)
+                            || extension.contains(&needle)
+                            || year.contains(&needle)
+                            || id.contains(&needle)
+                    })
+                    .collect()
+            };
+            let filtered_count = filtered_books.len();
+
+            body = body.push(
+                row![
+                    text_input(
+                        "Search calibre books (title, author, ext, year, id)",
+                        &self.calibre.search_query
+                    )
+                    .on_input(Message::CalibreSearchQueryChanged)
+                    .padding(8)
+                    .size(row_font_size)
+                    .width(Length::Fill),
+                    text(format!(
+                        "{}/{}",
+                        filtered_books.len(),
+                        self.calibre.books.len()
+                    ))
+                    .size(row_font_size),
+                ]
+                .spacing(8)
+                .align_y(Vertical::Center),
+            );
 
             let mut header: Row<'_, Message> = row![
                 text("Cover")
@@ -569,7 +612,7 @@ impl App {
             body = body.push(header);
 
             let mut rows: Column<'_, Message> = column![].spacing(4).width(Length::Fill);
-            for book in self.calibre.books.iter().take(400) {
+            for book in filtered_books.into_iter().take(400) {
                 let year = book
                     .year
                     .map(|v| v.to_string())
@@ -633,7 +676,11 @@ impl App {
                 rows = rows.push(line);
             }
 
-            body = body.push(scrollable(rows).height(Length::Fill));
+            if filtered_count == 0 {
+                body = body.push(text("No calibre books match your search.").size(row_font_size));
+            } else {
+                body = body.push(scrollable(rows).height(Length::Fill));
+            }
         }
 
         let panel = column![

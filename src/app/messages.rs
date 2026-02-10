@@ -24,6 +24,7 @@ pub enum Message {
     OpenPathInputChanged(String),
     OpenPathRequested,
     RefreshCalibreBooks,
+    CalibreSearchQueryChanged(String),
     SortCalibreBy(CalibreColumn),
     CalibreBooksLoaded {
         books: Vec<CalibreBook>,

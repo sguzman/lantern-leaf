@@ -59,6 +59,9 @@ impl App {
             Message::OpenPathInputChanged(path) => self.handle_open_path_input_changed(path),
             Message::OpenPathRequested => self.handle_open_path_requested(&mut effects),
             Message::RefreshCalibreBooks => self.handle_refresh_calibre_books(&mut effects),
+            Message::CalibreSearchQueryChanged(query) => {
+                self.handle_calibre_search_query_changed(query)
+            }
             Message::SortCalibreBy(column) => self.handle_sort_calibre_by(column),
             Message::CalibreBooksLoaded { books, error } => {
                 self.handle_calibre_books_loaded(books, error)
@@ -437,6 +440,10 @@ impl App {
         effects.push(Effect::LoadCalibreBooks {
             force_refresh: true,
         });
+    }
+
+    fn handle_calibre_search_query_changed(&mut self, query: String) {
+        self.calibre.search_query = query;
     }
 
     fn handle_calibre_books_loaded(
