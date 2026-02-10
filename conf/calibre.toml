@@ -11,7 +11,7 @@ state_path = ""
 calibredb_bin = "calibredb"
 
 # Legacy/extra server URL list (optional).
-server_urls = ["http://127.0.0.1:8080", "http://localhost:8080"]
+server_urls = ["http://127.0.0.1:8081", "http://localhost:8081"]
 server_username = ""
 server_password = ""
 

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -205,6 +205,10 @@ fn fetch_books(config: &CalibreConfig) -> Result<Vec<CalibreBook>> {
     let allowed_extensions = config.sanitized_extensions();
     let allowed_set: HashSet<String> = allowed_extensions.iter().cloned().collect();
     let library = config.state_path.clone().or(config.library_path.clone());
+    let id_dir_index = library
+        .as_deref()
+        .map(index_library_book_dirs)
+        .unwrap_or_default();
 
     let mut books = Vec::new();
     for row in rows {
@@ -226,7 +230,9 @@ fn fetch_books(config: &CalibreConfig) -> Result<Vec<CalibreBook>> {
             continue;
         };
 
-        let Some(path) = resolve_book_file_path(library.as_deref(), &row, &selected_ext) else {
+        let Some(path) =
+            resolve_book_file_path(library.as_deref(), &id_dir_index, &row, id, &selected_ext)
+        else {
             continue;
         };
         let size_from_fs = fs::metadata(&path).ok().map(|m| m.len());
@@ -286,7 +292,7 @@ fn run_calibredb_list(
     cmd.arg("list")
         .arg("--for-machine")
         .arg("--fields")
-        .arg("id,title,authors,pubdate,formats,size,path");
+        .arg("id,title,authors,pubdate,formats,size");
 
     let output = cmd
         .output()
@@ -482,12 +488,15 @@ fn normalize_format_value(raw: &str) -> String {
 
 fn resolve_book_file_path(
     library: Option<&Path>,
+    id_dir_index: &HashMap<u64, PathBuf>,
     row: &serde_json::Value,
+    book_id: u64,
     extension: &str,
 ) -> Option<PathBuf> {
     let rel_dir = parse_string_field(row, "path");
     let base = match (library, rel_dir.as_deref()) {
         (Some(root), Some(rel)) => root.join(rel),
+        (Some(_), None) => id_dir_index.get(&book_id)?.clone(),
         _ => return None,
     };
     let entries = fs::read_dir(&base).ok()?;
@@ -507,6 +516,43 @@ fn resolve_book_file_path(
         }
     }
     None
+}
+
+fn index_library_book_dirs(root: &Path) -> HashMap<u64, PathBuf> {
+    let mut out = HashMap::new();
+    collect_book_dirs(root, 0, &mut out);
+    out
+}
+
+fn collect_book_dirs(dir: &Path, depth: usize, out: &mut HashMap<u64, PathBuf>) {
+    if depth > 4 {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(ft) = entry.file_type() else {
+            continue;
+        };
+        if !ft.is_dir() {
+            continue;
+        }
+        if let Some(book_id) = parse_book_id_from_dir_name(&path) {
+            out.entry(book_id).or_insert(path.clone());
+        }
+        collect_book_dirs(&path, depth + 1, out);
+    }
+}
+
+fn parse_book_id_from_dir_name(path: &Path) -> Option<u64> {
+    let name = path.file_name()?.to_str()?;
+    let start = name.rfind('(')?;
+    if !name.ends_with(')') || start + 1 >= name.len() - 1 {
+        return None;
+    }
+    name[start + 1..name.len() - 1].trim().parse::<u64>().ok()
 }
 
 fn resolve_cover_thumbnail(book_dir: Option<&Path>) -> Option<PathBuf> {
