@@ -33,55 +33,42 @@ impl App {
         } else {
             "Night Mode"
         };
-        let theme_toggle =
-            button(text(theme_label).wrapping(Wrapping::None)).on_press(Message::ToggleTheme);
-        let settings_toggle = button(
-            text(if self.config.show_settings {
-                "Hide Settings"
-            } else {
-                "Show Settings"
-            })
-            .wrapping(Wrapping::None),
-        )
+        let theme_toggle = Self::control_button(theme_label).on_press(Message::ToggleTheme);
+        let settings_toggle = Self::control_button(if self.config.show_settings {
+            "Hide Settings"
+        } else {
+            "Show Settings"
+        })
         .on_press(Message::ToggleSettings);
-        let search_toggle = button(
-            text(if self.search.visible {
-                "Hide Search"
-            } else {
-                "Search"
-            })
-            .wrapping(Wrapping::None),
-        )
+        let search_toggle = Self::control_button(if self.search.visible {
+            "Hide Search"
+        } else {
+            "Search"
+        })
         .on_press(Message::ToggleSearch);
-        let tts_toggle = button(
-            text(if self.config.show_tts {
-                "Hide TTS"
-            } else {
-                "Show TTS"
-            })
-            .wrapping(Wrapping::None),
-        )
+        let tts_toggle = Self::control_button(if self.config.show_tts {
+            "Hide TTS"
+        } else {
+            "Show TTS"
+        })
         .on_press(Message::ToggleTtsControls);
-        let text_only_toggle = button(
-            text(if self.text_only_mode {
-                "Pretty Text"
-            } else {
-                "Text Only"
-            })
-            .wrapping(Wrapping::None),
-        )
+        let text_only_toggle = Self::control_button(if self.text_only_mode {
+            "Pretty Text"
+        } else {
+            "Text Only"
+        })
         .on_press(Message::ToggleTextOnly);
 
         let prev_button = if self.reader.current_page > 0 {
-            button(text("Previous").wrapping(Wrapping::None)).on_press(Message::PreviousPage)
+            Self::control_button("Previous").on_press(Message::PreviousPage)
         } else {
-            button(text("Previous").wrapping(Wrapping::None))
+            Self::control_button("Previous")
         };
 
         let next_button = if self.reader.current_page + 1 < total_pages {
-            button(text("Next").wrapping(Wrapping::None)).on_press(Message::NextPage)
+            Self::control_button("Next").on_press(Message::NextPage)
         } else {
-            button(text("Next").wrapping(Wrapping::None))
+            Self::control_button("Next")
         };
 
         let available_width = self.controls_layout_width();
@@ -1062,24 +1049,22 @@ impl App {
         };
 
         let play_button = if play_label == "Play" {
-            button(text(play_label).wrapping(Wrapping::None)).on_press(Message::Play)
+            Self::control_button(play_label).on_press(Message::Play)
         } else {
-            button(text(play_label).wrapping(Wrapping::None)).on_press(Message::Pause)
+            Self::control_button(play_label).on_press(Message::Pause)
         };
         let play_from_start =
-            button(text("Play Page").wrapping(Wrapping::None)).on_press(Message::PlayFromPageStart);
+            Self::control_button("Play Page").on_press(Message::PlayFromPageStart);
         let jump_disabled = self.tts.current_sentence_idx.is_none();
         let jump_button = if jump_disabled {
-            button(text("Jump to Audio").wrapping(Wrapping::None))
+            Self::control_button("Jump to Audio")
         } else {
-            button(text("Jump to Audio").wrapping(Wrapping::None))
-                .on_press(Message::JumpToCurrentAudio)
+            Self::control_button("Jump to Audio").on_press(Message::JumpToCurrentAudio)
         };
         let play_from_cursor = if let Some(idx) = self.tts.current_sentence_idx {
-            button(text("Play From Highlight").wrapping(Wrapping::None))
-                .on_press(Message::PlayFromCursor(idx))
+            Self::control_button("Play From Highlight").on_press(Message::PlayFromCursor(idx))
         } else {
-            button(text("Play From Highlight").wrapping(Wrapping::None))
+            Self::control_button("Play From Highlight")
         };
         let available_width = self.controls_layout_width();
         let controls_spacing = 10.0;
@@ -1105,15 +1090,13 @@ impl App {
             .align_y(Vertical::Center)
             .width(Length::Fill);
         if show_prev_sentence {
-            controls = controls.push(
-                button(text("Prev Sent").wrapping(Wrapping::None)).on_press(Message::SeekBackward),
-            );
+            controls =
+                controls.push(Self::control_button("Prev Sent").on_press(Message::SeekBackward));
         }
         controls = controls.push(play_button);
         if show_next_sentence {
-            controls = controls.push(
-                button(text("Next Sent").wrapping(Wrapping::None)).on_press(Message::SeekForward),
-            );
+            controls =
+                controls.push(Self::control_button("Next Sent").on_press(Message::SeekForward));
         }
         if show_play_page {
             controls = controls.push(play_from_start);
@@ -1245,11 +1228,14 @@ impl App {
     }
 
     fn estimated_controls_width(&self) -> f32 {
-        let mut width = if self.bookmark.viewport_width > 0.0 {
+        let window_width = self.config.window_width.max(320.0);
+        let measured = if self.bookmark.viewport_width > 0.0 {
             self.bookmark.viewport_width
         } else {
-            self.config.window_width
+            window_width
         };
+        // Prevent stale cached viewport widths from overestimating space after a resize.
+        let mut width = measured.min(window_width);
         if self.config.show_settings {
             // Settings panel is fixed width plus layout padding/spacers.
             width = (width - 320.0).max(0.0);
@@ -1258,15 +1244,18 @@ impl App {
     }
 
     fn controls_layout_width(&self) -> f32 {
-        let stable_window_width = self.config.window_width.max(320.0);
-        let measured = self.estimated_controls_width();
-        measured.max(stable_window_width)
+        self.estimated_controls_width().max(320.0)
+    }
+
+    fn control_button<'a>(label: &'a str) -> iced::widget::Button<'a, Message> {
+        button(text(label).wrapping(Wrapping::None))
+            .width(Length::Fixed(Self::estimate_button_width_px(label)))
     }
 
     fn estimate_button_width_px(label: &str) -> f32 {
-        // Conservative estimate: character width plus button horizontal padding.
+        // Slightly aggressive estimate to omit before any label is forced to wrap.
         let chars = label.chars().count() as f32;
-        (chars * 8.2) + 34.0
+        (chars * 8.8) + 42.0
     }
 
     fn estimate_status_text_width_px(value: &str) -> f32 {
