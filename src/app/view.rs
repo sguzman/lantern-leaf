@@ -1,9 +1,9 @@
 use super::messages::{Component, Message};
 use super::state::{
     App, IMAGE_BLOCK_SPACING_PX, IMAGE_FOOTER_FONT_SIZE_PX, IMAGE_FOOTER_LINE_HEIGHT,
-    IMAGE_LABEL_FONT_SIZE_PX, IMAGE_LABEL_LINE_HEIGHT, IMAGE_PREVIEW_HEIGHT_PX, MAX_LETTER_SPACING,
-    MAX_MARGIN, MAX_TTS_VOLUME, MAX_WORD_SPACING, MIN_TTS_SPEED, MIN_TTS_VOLUME,
-    PAGE_FLOW_SPACING_PX,
+    IMAGE_LABEL_FONT_SIZE_PX, IMAGE_LABEL_LINE_HEIGHT, IMAGE_PREVIEW_HEIGHT_PX,
+    MAX_HORIZONTAL_MARGIN, MAX_LETTER_SPACING, MAX_TTS_VOLUME, MAX_VERTICAL_MARGIN,
+    MAX_WORD_SPACING, MIN_TTS_SPEED, MIN_TTS_VOLUME, PAGE_FLOW_SPACING_PX,
 };
 use crate::calibre::CalibreColumn;
 use crate::config::HighlightColor;
@@ -796,13 +796,13 @@ impl App {
         .step(1.0);
 
         let margin_slider = slider(
-            0.0..=MAX_MARGIN as f32,
+            0.0..=MAX_HORIZONTAL_MARGIN as f32,
             self.config.margin_horizontal as f32,
             |value| Message::MarginHorizontalChanged(value.round() as u16),
         );
 
         let margin_vertical_slider = slider(
-            0.0..=MAX_MARGIN as f32,
+            0.0..=MAX_VERTICAL_MARGIN as f32,
             self.config.margin_vertical as f32,
             |value| Message::MarginVerticalChanged(value.round() as u16),
         );

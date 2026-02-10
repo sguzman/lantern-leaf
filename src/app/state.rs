@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 use super::messages::{Component, Message};
 
 /// Limits and defaults for reader controls.
-pub(crate) const MAX_MARGIN: u16 = 100;
+pub(crate) const MAX_HORIZONTAL_MARGIN: u16 = 1000;
+pub(crate) const MAX_VERTICAL_MARGIN: u16 = 100;
 pub(crate) const MAX_WORD_SPACING: u32 = 5;
 pub(crate) const MAX_LETTER_SPACING: u32 = 3;
 pub(crate) const MIN_TTS_SPEED: f32 = 0.1;
@@ -834,8 +835,8 @@ fn clamp_config(config: &mut AppConfig) {
 
     config.font_size = config.font_size.clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
     config.line_spacing = config.line_spacing.clamp(0.8, 2.5);
-    config.margin_horizontal = config.margin_horizontal.min(MAX_MARGIN);
-    config.margin_vertical = config.margin_vertical.min(MAX_MARGIN);
+    config.margin_horizontal = config.margin_horizontal.min(MAX_HORIZONTAL_MARGIN);
+    config.margin_vertical = config.margin_vertical.min(MAX_VERTICAL_MARGIN);
     config.window_width = config.window_width.clamp(320.0, 7680.0);
     config.window_height = config.window_height.clamp(240.0, 4320.0);
     config.window_pos_x = config.window_pos_x.filter(|v| v.is_finite());

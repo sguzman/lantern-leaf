@@ -1,5 +1,8 @@
 use super::super::messages::Component;
-use super::super::state::{App, MAX_LETTER_SPACING, MAX_MARGIN, MAX_WORD_SPACING, apply_component};
+use super::super::state::{
+    App, MAX_HORIZONTAL_MARGIN, MAX_LETTER_SPACING, MAX_VERTICAL_MARGIN, MAX_WORD_SPACING,
+    apply_component,
+};
 use super::Effect;
 use crate::pagination::{MAX_FONT_SIZE, MIN_FONT_SIZE};
 use tracing::{debug, info};
@@ -79,7 +82,7 @@ impl App {
         margin: u16,
         effects: &mut Vec<Effect>,
     ) {
-        self.config.margin_horizontal = margin.min(MAX_MARGIN);
+        self.config.margin_horizontal = margin.min(MAX_HORIZONTAL_MARGIN);
         debug!(
             margin_horizontal = self.config.margin_horizontal,
             "Horizontal margin changed"
@@ -92,7 +95,7 @@ impl App {
         margin: u16,
         effects: &mut Vec<Effect>,
     ) {
-        self.config.margin_vertical = margin.min(MAX_MARGIN);
+        self.config.margin_vertical = margin.min(MAX_VERTICAL_MARGIN);
         debug!(
             margin_vertical = self.config.margin_vertical,
             "Vertical margin changed"
