@@ -1,9 +1,9 @@
 [calibre]
 # Enable Calibre browser integration.
-enabled = false
+enabled = true
 
 # Local Calibre library root.
-library_path = "/path/to/Calibre Library"
+library_path = "/drive/calibre/en_nonfiction"
 
 # Calibre CLI binary.
 calibredb_bin = "calibredb"
@@ -15,4 +15,4 @@ allowed_extensions = ["epub", "md", "txt"]
 columns = ["title", "extension", "author", "year", "size"]
 
 # Reuse cached Calibre book list for this many seconds.
-list_cache_ttl_secs = 600
+list_cache_ttl_secs = 6000
