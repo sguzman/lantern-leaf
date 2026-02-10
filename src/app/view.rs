@@ -518,6 +518,9 @@ impl App {
 
     fn calibre_panel(&self) -> Element<'_, Message> {
         let mut body: Column<'_, Message> = column![].spacing(6).width(Length::Fill);
+        const COVER_COL_WIDTH: f32 = 42.0;
+        const ACTION_COL_WIDTH: f32 = 64.0;
+        const TABLE_SPACING: f32 = 8.0;
 
         if !self.calibre.config.enabled {
             body = body.push(
@@ -533,8 +536,13 @@ impl App {
         } else {
             let columns = self.calibre.config.sanitized_columns();
 
-            let mut header: Row<'_, Message> =
-                row![text("Cover").width(Length::Fixed(42.0))].spacing(8);
+            let mut header: Row<'_, Message> = row![
+                text("Cover")
+                    .width(Length::Fixed(COVER_COL_WIDTH))
+                    .align_x(Horizontal::Center)
+            ]
+            .spacing(TABLE_SPACING)
+            .align_y(Vertical::Center);
             for column in &columns {
                 header = match column {
                     CalibreColumn::Title => header.push(self.calibre_header_button(
@@ -564,7 +572,11 @@ impl App {
                     )),
                 };
             }
-            header = header.push(text("").width(Length::Shrink));
+            header = header.push(
+                text("Open")
+                    .width(Length::Fixed(ACTION_COL_WIDTH))
+                    .align_x(Horizontal::Center),
+            );
             body = body.push(header);
 
             let mut rows: Column<'_, Message> = column![].spacing(4).width(Length::Fill);
@@ -577,7 +589,8 @@ impl App {
                     .file_size_bytes
                     .map(Self::format_bytes)
                     .unwrap_or_else(|| "-".to_string());
-                let mut line: Row<'_, Message> = row![].spacing(8).align_y(Vertical::Center);
+                let mut line: Row<'_, Message> =
+                    row![].spacing(TABLE_SPACING).align_y(Vertical::Center);
                 let cover_cell: Element<'_, Message> = if let Some(path) = &book.cover_thumbnail {
                     image(path.clone())
                         .width(Length::Fixed(34.0))
@@ -590,26 +603,34 @@ impl App {
                         .align_x(Horizontal::Center)
                         .into()
                 };
-                line = line.push(cover_cell);
+                line = line.push(container(cover_cell).width(Length::Fixed(COVER_COL_WIDTH)));
                 for column in &columns {
                     line = match column {
                         CalibreColumn::Title => line.push(
-                            text(Self::truncate_text(&book.title, 52))
-                                .width(Length::FillPortion(4)),
+                            text(Self::truncate_text(&book.title, 44))
+                                .width(Length::FillPortion(4))
+                                .wrapping(Wrapping::None),
                         ),
                         CalibreColumn::Extension => line.push(
-                            text(book.extension.to_uppercase()).width(Length::FillPortion(1)),
+                            text(book.extension.to_uppercase())
+                                .width(Length::FillPortion(1))
+                                .wrapping(Wrapping::None),
                         ),
                         CalibreColumn::Author => line.push(
-                            text(Self::truncate_text(&book.authors, 24))
-                                .width(Length::FillPortion(3)),
+                            text(Self::truncate_text(&book.authors, 26))
+                                .width(Length::FillPortion(3))
+                                .wrapping(Wrapping::None),
                         ),
-                        CalibreColumn::Year => {
-                            line.push(text(year.clone()).width(Length::FillPortion(1)))
-                        }
-                        CalibreColumn::Size => {
-                            line.push(text(size.clone()).width(Length::FillPortion(1)))
-                        }
+                        CalibreColumn::Year => line.push(
+                            text(year.clone())
+                                .width(Length::FillPortion(1))
+                                .wrapping(Wrapping::None),
+                        ),
+                        CalibreColumn::Size => line.push(
+                            text(size.clone())
+                                .width(Length::FillPortion(1))
+                                .wrapping(Wrapping::None),
+                        ),
                     };
                 }
                 let open_button = if let Some(path) = &book.path {
@@ -617,7 +638,7 @@ impl App {
                 } else {
                     button("Open")
                 };
-                line = line.push(open_button);
+                line = line.push(open_button.width(Length::Fixed(ACTION_COL_WIDTH)));
                 rows = rows.push(line);
             }
 
@@ -676,12 +697,12 @@ impl App {
         label: &str,
         width: Length,
     ) -> Element<'_, Message> {
-        let arrow = if self.calibre.sort_column == column {
-            if self.calibre.sort_desc { "v" } else { "^" }
+        let sort_hint = if self.calibre.sort_column == column {
+            if self.calibre.sort_desc { " D" } else { " A" }
         } else {
-            "^v"
+            ""
         };
-        button(text(format!("{label} {arrow}")).align_x(Horizontal::Left))
+        button(text(format!("{label}{sort_hint}")).align_x(Horizontal::Left))
             .on_press(Message::SortCalibreBy(column))
             .width(width)
             .into()
