@@ -33,62 +33,83 @@ impl App {
         } else {
             "Night Mode"
         };
-        let theme_toggle = button(theme_label).on_press(Message::ToggleTheme);
-        let settings_toggle = button(if self.config.show_settings {
-            "Hide Settings"
-        } else {
-            "Show Settings"
-        })
+        let theme_toggle =
+            button(text(theme_label).wrapping(Wrapping::None)).on_press(Message::ToggleTheme);
+        let settings_toggle = button(
+            text(if self.config.show_settings {
+                "Hide Settings"
+            } else {
+                "Show Settings"
+            })
+            .wrapping(Wrapping::None),
+        )
         .on_press(Message::ToggleSettings);
-        let search_toggle = button(if self.search.visible {
-            "Hide Search"
-        } else {
-            "Search"
-        })
+        let search_toggle = button(
+            text(if self.search.visible {
+                "Hide Search"
+            } else {
+                "Search"
+            })
+            .wrapping(Wrapping::None),
+        )
         .on_press(Message::ToggleSearch);
-        let tts_toggle = button(if self.config.show_tts {
-            "Hide TTS"
-        } else {
-            "Show TTS"
-        })
+        let tts_toggle = button(
+            text(if self.config.show_tts {
+                "Hide TTS"
+            } else {
+                "Show TTS"
+            })
+            .wrapping(Wrapping::None),
+        )
         .on_press(Message::ToggleTtsControls);
-        let text_only_toggle = button(if self.text_only_mode {
-            "Pretty Text"
-        } else {
-            "Text-Only"
-        })
+        let text_only_toggle = button(
+            text(if self.text_only_mode {
+                "Pretty Text"
+            } else {
+                "Text-Only"
+            })
+            .wrapping(Wrapping::None),
+        )
         .on_press(Message::ToggleTextOnly);
 
         let prev_button = if self.reader.current_page > 0 {
-            button("Previous").on_press(Message::PreviousPage)
+            button(text("Previous").wrapping(Wrapping::None)).on_press(Message::PreviousPage)
         } else {
-            button("Previous")
+            button(text("Previous").wrapping(Wrapping::None))
         };
 
         let next_button = if self.reader.current_page + 1 < total_pages {
-            button("Next").on_press(Message::NextPage)
+            button(text("Next").wrapping(Wrapping::None)).on_press(Message::NextPage)
         } else {
-            button("Next")
+            button(text("Next").wrapping(Wrapping::None))
         };
 
         let available_width = self.estimated_controls_width();
         let show_compact_status = !self.config.show_settings;
+        let show_settings_toggle = available_width >= 520.0;
+        let show_search_toggle = available_width >= 640.0;
+        let show_tts_toggle = available_width >= 760.0;
+        let show_text_only_toggle = available_width >= 860.0;
         let show_page_label = show_compact_status && available_width >= 760.0;
         let show_tts_progress_label = show_compact_status && available_width >= 920.0;
 
-        let mut controls = row![
-            prev_button,
-            next_button,
-            theme_toggle,
-            settings_toggle,
-            search_toggle,
-            tts_toggle,
-            text_only_toggle,
-            horizontal_space(),
-        ]
-        .spacing(10)
-        .align_y(Vertical::Center)
-        .width(Length::Fill);
+        let mut controls = row![prev_button, next_button, theme_toggle]
+            .spacing(10)
+            .align_y(Vertical::Center)
+            .width(Length::Fill);
+        if show_settings_toggle {
+            controls = controls.push(settings_toggle);
+        }
+        if show_search_toggle {
+            controls = controls.push(search_toggle);
+        }
+        if show_tts_toggle {
+            controls = controls.push(tts_toggle);
+        }
+        if show_text_only_toggle {
+            controls = controls.push(text_only_toggle);
+        }
+        controls = controls.push(horizontal_space());
 
         if show_page_label {
             controls = controls.push(text(page_label).width(Length::Shrink));
@@ -1003,35 +1024,56 @@ impl App {
         };
 
         let play_button = if play_label == "Play" {
-            button(play_label).on_press(Message::Play)
+            button(text(play_label).wrapping(Wrapping::None)).on_press(Message::Play)
         } else {
-            button(play_label).on_press(Message::Pause)
+            button(text(play_label).wrapping(Wrapping::None)).on_press(Message::Pause)
         };
-        let play_from_start = button("Play Page").on_press(Message::PlayFromPageStart);
+        let play_from_start =
+            button(text("Play Page").wrapping(Wrapping::None)).on_press(Message::PlayFromPageStart);
         let jump_disabled = self.tts.current_sentence_idx.is_none();
         let jump_button = if jump_disabled {
-            button("Jump to Audio")
+            button(text("Jump to Audio").wrapping(Wrapping::None))
         } else {
-            button("Jump to Audio").on_press(Message::JumpToCurrentAudio)
+            button(text("Jump to Audio").wrapping(Wrapping::None))
+                .on_press(Message::JumpToCurrentAudio)
         };
         let play_from_cursor = if let Some(idx) = self.tts.current_sentence_idx {
-            button("Play From Highlight").on_press(Message::PlayFromCursor(idx))
+            button(text("Play From Highlight").wrapping(Wrapping::None))
+                .on_press(Message::PlayFromCursor(idx))
         } else {
-            button("Play From Highlight")
+            button(text("Play From Highlight").wrapping(Wrapping::None))
         };
         let available_width = self.estimated_controls_width();
-        let mut controls = row![
-            button("Prev Sent").on_press(Message::SeekBackward),
-            play_button,
-            button("Next Sent").on_press(Message::SeekForward),
-            play_from_start,
-            play_from_cursor,
-            jump_button,
-            horizontal_space(),
-        ]
-        .spacing(10)
-        .align_y(Vertical::Center)
-        .width(Length::Fill);
+        let show_sentence_step = available_width >= 520.0;
+        let show_play_page = available_width >= 700.0;
+        let show_play_from_highlight = available_width >= 840.0;
+        let show_jump = available_width >= 980.0;
+
+        let mut controls = row![]
+            .spacing(10)
+            .align_y(Vertical::Center)
+            .width(Length::Fill);
+        if show_sentence_step {
+            controls = controls.push(
+                button(text("Prev Sent").wrapping(Wrapping::None)).on_press(Message::SeekBackward),
+            );
+        }
+        controls = controls.push(play_button);
+        if show_sentence_step {
+            controls = controls.push(
+                button(text("Next Sent").wrapping(Wrapping::None)).on_press(Message::SeekForward),
+            );
+        }
+        if show_play_page {
+            controls = controls.push(play_from_start);
+        }
+        if show_play_from_highlight {
+            controls = controls.push(play_from_cursor);
+        }
+        if show_jump {
+            controls = controls.push(jump_button);
+        }
+        controls = controls.push(horizontal_space());
         if !self.config.show_settings && available_width >= 920.0 {
             controls = controls.push(self.eta_trackers_view(available_width));
         }
