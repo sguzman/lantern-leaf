@@ -475,14 +475,9 @@ impl App {
             entries = entries.push(text("No recent books found in cache.").size(13.0));
         } else {
             for book in self.recent.books.iter().take(80) {
-                let title = book
-                    .source_path
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("book");
                 let row = row![
                     column![
-                        text(Self::truncate_text(title, 36)).size(13.0),
+                        text(Self::truncate_text(&book.display_title, 36)).size(13.0),
                         text(book.source_path.to_string_lossy()).size(11.0),
                     ]
                     .spacing(2)

@@ -7,6 +7,7 @@
 //! `sentence_text`, and `scroll_y` for resuming inside the page.
 
 use crate::config::{AppConfig, parse_config, serialize_config};
+use epub::doc::EpubDoc;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
@@ -42,6 +43,7 @@ pub struct Bookmark {
 #[derive(Debug, Clone)]
 pub struct RecentBook {
     pub source_path: PathBuf,
+    pub display_title: String,
     pub last_opened_unix_secs: u64,
 }
 
@@ -205,8 +207,10 @@ pub fn list_recent_books(limit: usize) -> Vec<RecentBook> {
                 .and_then(|ts| ts.duration_since(UNIX_EPOCH).ok())
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
+            let display_title = infer_recent_title(&source_path);
             Some(RecentBook {
                 source_path,
+                display_title,
                 last_opened_unix_secs,
             })
         })
@@ -226,6 +230,34 @@ pub fn tts_dir(epub_path: &Path) -> PathBuf {
 
 pub fn normalized_dir(epub_path: &Path) -> PathBuf {
     hash_dir(epub_path).join("normalized")
+}
+
+fn infer_recent_title(source_path: &Path) -> String {
+    if source_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("epub"))
+        .unwrap_or(false)
+        && let Ok(doc) = EpubDoc::new(source_path)
+        && let Some(title) = doc.get_title()
+    {
+        let trimmed = title.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+
+    source_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            source_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("book")
+        })
+        .to_string()
 }
 
 pub fn load_epub_config(epub_path: &Path) -> Option<AppConfig> {
