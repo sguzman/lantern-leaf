@@ -17,6 +17,9 @@ static RE_NUMERIC_BRACKET_CITE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\[\s*\d+(?:\s*,\s*\d+)*\s*\]").unwrap());
 static RE_PARENTHETICAL_NUMERIC: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\(\s*\d+(?:\s*,\s*\d+)*\s*\)").unwrap());
+static RE_SUPERSCRIPT_CITE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[⁰¹²³⁴⁵⁶⁷⁸⁹]+").unwrap());
+static RE_WORD_SUFFIX_FOOTNOTE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?P<prefix>\p{L})\d{1,3}\b").unwrap());
 static RE_SQUARE_BRACKET_BLOCK: Lazy<Regex> = Lazy::new(|| Regex::new(r"\[[^\]]*\]").unwrap());
 static RE_CURLY_BRACKET_BLOCK: Lazy<Regex> = Lazy::new(|| Regex::new(r"\{[^}]*\}").unwrap());
 static RE_HORIZONTAL_WS: Lazy<Regex> = Lazy::new(|| Regex::new(r"[ \t\u{00A0}]+").unwrap());
@@ -52,11 +55,14 @@ struct NormalizerConfig {
     strip_markdown_links: bool,
     drop_numeric_bracket_citations: bool,
     drop_parenthetical_numeric_citations: bool,
+    drop_superscript_citations: bool,
+    drop_word_suffix_numeric_footnotes: bool,
     drop_square_bracket_text: bool,
     drop_curly_brace_text: bool,
     min_sentence_chars: usize,
     require_alphanumeric: bool,
     replacements: BTreeMap<String, String>,
+    abbreviations: BTreeMap<String, String>,
     drop_tokens: Vec<String>,
     acronyms: AcronymConfig,
     pronunciation: PronunciationConfig,
@@ -76,11 +82,14 @@ impl Default for NormalizerConfig {
             strip_markdown_links: true,
             drop_numeric_bracket_citations: true,
             drop_parenthetical_numeric_citations: true,
+            drop_superscript_citations: true,
+            drop_word_suffix_numeric_footnotes: true,
             drop_square_bracket_text: true,
             drop_curly_brace_text: true,
             min_sentence_chars: 2,
             require_alphanumeric: true,
             replacements,
+            abbreviations: default_abbreviations(),
             drop_tokens: Vec::new(),
             acronyms: AcronymConfig::default(),
             pronunciation: PronunciationConfig::default(),
@@ -388,12 +397,26 @@ impl TextNormalizer {
             text = RE_PARENTHETICAL_NUMERIC.replace_all(&text, " ").to_string();
         }
 
+        if self.config.drop_superscript_citations {
+            text = RE_SUPERSCRIPT_CITE.replace_all(&text, " ").to_string();
+        }
+
+        if self.config.drop_word_suffix_numeric_footnotes {
+            text = RE_WORD_SUFFIX_FOOTNOTE
+                .replace_all(&text, "$prefix")
+                .to_string();
+        }
+
         if self.config.drop_square_bracket_text {
             text = RE_SQUARE_BRACKET_BLOCK.replace_all(&text, " ").to_string();
         }
 
         if self.config.drop_curly_brace_text {
             text = RE_CURLY_BRACKET_BLOCK.replace_all(&text, " ").to_string();
+        }
+
+        if !self.config.abbreviations.is_empty() {
+            text = apply_abbreviation_map(&text, &self.config.abbreviations);
         }
 
         if !self.config.replacements.is_empty() {
@@ -594,6 +617,41 @@ fn apply_brand_map(text: &str, brand_map: &BTreeMap<String, String>) -> String {
     out
 }
 
+fn default_abbreviations() -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    map.insert("Mr.".to_string(), "Mister".to_string());
+    map.insert("Ms.".to_string(), "Miss".to_string());
+    map.insert("Mrs.".to_string(), "Misses".to_string());
+    map.insert("Mass.".to_string(), "Massachusetts".to_string());
+    map.insert("St.".to_string(), "Saint".to_string());
+    map
+}
+
+fn apply_abbreviation_map(text: &str, abbreviation_map: &BTreeMap<String, String>) -> String {
+    let mut out = text.to_string();
+    let mut entries: Vec<_> = abbreviation_map.iter().collect();
+    entries.sort_by_key(|(token, _)| Reverse(token.len()));
+
+    for (token, replacement) in entries {
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let pattern = if let Some(base) = trimmed.strip_suffix('.') {
+            format!(r"(?i)\b{}\.", regex::escape(base))
+        } else {
+            format!(r"(?i)\b{}\b", regex::escape(trimmed))
+        };
+
+        if let Ok(re) = Regex::new(&pattern) {
+            out = re.replace_all(&out, replacement.as_str()).to_string();
+        }
+    }
+
+    out
+}
+
 fn apply_year_pronunciation(text: &str, cfg: &PronunciationConfig) -> String {
     let re = Regex::new(r"\b(1\d{3}|20\d{2})\b").unwrap();
     re.replace_all(text, |caps: &regex::Captures| {
@@ -751,6 +809,15 @@ struct NormalizedSentenceCache {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn strips_superscript_and_expands_abbreviation() {
+        let normalizer = TextNormalizer::default();
+        let page = vec!["Mr. Hale wrote this².".to_string()];
+        let plan = normalizer.plan_page(&page);
+        assert_eq!(plan.audio_sentences.len(), 1);
+        assert_eq!(plan.audio_sentences[0], "Mister Hale wrote this.");
+    }
 
     #[test]
     fn sentence_mode_cache_reused_across_page_indices() {

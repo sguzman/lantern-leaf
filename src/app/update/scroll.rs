@@ -471,10 +471,12 @@ mod tests {
 
         let sentences = app.raw_sentences_for_page(app.reader.current_page);
         let display_to_audio = (0..sentences.len()).map(Some).collect();
+        let audio_to_display = (0..sentences.len()).collect();
         app.text_only_preview = Some(super::super::super::state::TextOnlyPreview {
             page: app.reader.current_page,
             audio_sentences: sentences,
             display_to_audio,
+            audio_to_display,
         });
 
         let idx = 40usize;

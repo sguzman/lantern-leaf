@@ -1,4 +1,5 @@
-use crate::cache::{Bookmark, save_epub_config};
+use crate::cache::{Bookmark, RecentBook, list_recent_books, save_epub_config};
+use crate::calibre::{CalibreBook, CalibreConfig};
 use crate::config::{AppConfig, FontFamily, FontWeight, HighlightColor, ThemeMode};
 use crate::epub_loader::{BookImage, LoadedBook};
 use crate::normalizer::TextNormalizer;
@@ -9,6 +10,7 @@ use iced::font::{Family, Weight};
 use iced::widget::scrollable::{Id as ScrollId, RelativeOffset};
 use iced::{Color, Font, Task};
 use once_cell::sync::Lazy;
+use regex::Regex;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -91,6 +93,28 @@ pub struct TextOnlyPreview {
     pub(super) page: usize,
     pub(super) audio_sentences: Vec<String>,
     pub(super) display_to_audio: Vec<Option<usize>>,
+    pub(super) audio_to_display: Vec<usize>,
+}
+
+pub struct SearchState {
+    pub(super) visible: bool,
+    pub(super) query: String,
+    pub(super) error: Option<String>,
+    pub(super) matches: Vec<usize>,
+    pub(super) selected_match: usize,
+}
+
+pub struct RecentState {
+    pub(super) visible: bool,
+    pub(super) books: Vec<RecentBook>,
+}
+
+pub struct CalibreState {
+    pub(super) visible: bool,
+    pub(super) loading: bool,
+    pub(super) error: Option<String>,
+    pub(super) books: Vec<CalibreBook>,
+    pub(super) config: CalibreConfig,
 }
 
 /// Core application state composed of sub-models.
@@ -103,6 +127,9 @@ pub struct App {
     pub(super) normalizer: TextNormalizer,
     pub(super) text_only_mode: bool,
     pub(super) text_only_preview: Option<TextOnlyPreview>,
+    pub(super) search: SearchState,
+    pub(super) recent: RecentState,
+    pub(super) calibre: CalibreState,
 }
 
 impl App {
@@ -262,6 +289,25 @@ impl App {
             .and_then(|mapped| *mapped)
     }
 
+    pub(super) fn text_only_display_idx_for_audio_idx(&self, audio_idx: usize) -> Option<usize> {
+        self.text_only_preview_for_current_page()
+            .and_then(|preview| preview.audio_to_display.get(audio_idx).copied())
+    }
+
+    pub(super) fn search_sentences_for_current_page(&self) -> Vec<String> {
+        if self.text_only_mode {
+            return self
+                .text_only_preview_for_current_page()
+                .map(|preview| preview.audio_sentences.clone())
+                .unwrap_or_default();
+        }
+        self.display_sentences_for_current_page()
+    }
+
+    pub(super) fn refresh_recent_books(&mut self) {
+        self.recent.books = list_recent_books(64);
+    }
+
     pub(super) fn ensure_text_only_preview_for_page(&mut self, page: usize) {
         if self
             .text_only_preview
@@ -278,6 +324,7 @@ impl App {
                 page,
                 audio_sentences: vec!["No textual content on this page.".to_string()],
                 display_to_audio: Vec::new(),
+                audio_to_display: Vec::new(),
             }
         } else {
             let plan = self
@@ -290,12 +337,14 @@ impl App {
                         "No speakable text remains on this page after normalization.".to_string(),
                     ],
                     display_to_audio: plan.display_to_audio,
+                    audio_to_display: plan.audio_to_display,
                 }
             } else {
                 TextOnlyPreview {
                     page,
                     audio_sentences: plan.audio_sentences,
                     display_to_audio: plan.display_to_audio,
+                    audio_to_display: plan.audio_to_display,
                 }
             }
         };
@@ -342,6 +391,67 @@ impl App {
 
     pub(super) fn save_epub_config(&self) {
         save_epub_config(&self.epub_path, &self.config);
+    }
+
+    pub(super) fn update_search_matches(&mut self) {
+        let query = self.search.query.trim();
+        if query.is_empty() {
+            self.search.error = None;
+            self.search.matches.clear();
+            self.search.selected_match = 0;
+            return;
+        }
+
+        let regex = match Regex::new(query) {
+            Ok(regex) => regex,
+            Err(err) => {
+                self.search.error = Some(err.to_string());
+                self.search.matches.clear();
+                self.search.selected_match = 0;
+                return;
+            }
+        };
+
+        self.search.error = None;
+        let sentences = self.search_sentences_for_current_page();
+        self.search.matches = sentences
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, sentence)| regex.is_match(sentence).then_some(idx))
+            .collect();
+        if self.search.matches.is_empty() {
+            self.search.selected_match = 0;
+        } else {
+            self.search.selected_match = self
+                .search
+                .selected_match
+                .min(self.search.matches.len().saturating_sub(1));
+        }
+    }
+
+    pub(super) fn display_idx_for_search_sentence_idx(&self, sentence_idx: usize) -> Option<usize> {
+        if self.text_only_mode {
+            self.text_only_display_idx_for_audio_idx(sentence_idx)
+        } else {
+            let count = self.sentence_count_for_page(self.reader.current_page);
+            if count == 0 {
+                None
+            } else {
+                Some(sentence_idx.min(count.saturating_sub(1)))
+            }
+        }
+    }
+
+    pub(super) fn selected_search_sentence_idx(&self) -> Option<usize> {
+        if self.search.matches.is_empty() {
+            None
+        } else {
+            self.search
+                .matches
+                .get(self.search.selected_match)
+                .copied()
+                .or_else(|| self.search.matches.first().copied())
+        }
     }
 
     pub(super) fn bootstrap(
@@ -394,6 +504,24 @@ impl App {
             normalizer: TextNormalizer::load_default(),
             text_only_mode: false,
             text_only_preview: None,
+            search: SearchState {
+                visible: false,
+                query: String::new(),
+                error: None,
+                matches: Vec::new(),
+                selected_match: 0,
+            },
+            recent: RecentState {
+                visible: false,
+                books: list_recent_books(64),
+            },
+            calibre: CalibreState {
+                visible: false,
+                loading: false,
+                error: None,
+                books: Vec::new(),
+                config: CalibreConfig::load_default(),
+            },
         };
 
         app.repaginate();
@@ -459,6 +587,7 @@ impl App {
         );
 
         app.ensure_text_only_preview_for_page(app.reader.current_page);
+        app.update_search_matches();
 
         (app, init_task)
     }
@@ -524,4 +653,5 @@ fn clamp_config(config: &mut AppConfig) {
     normalize_key_binding(&mut config.key_next_sentence, "f".to_string());
     normalize_key_binding(&mut config.key_prev_sentence, "s".to_string());
     normalize_key_binding(&mut config.key_repeat_sentence, "r".to_string());
+    normalize_key_binding(&mut config.key_toggle_search, "ctrl+f".to_string());
 }

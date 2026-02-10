@@ -1,3 +1,4 @@
+use crate::calibre::CalibreBook;
 use crate::config::{FontFamily, FontWeight};
 use iced::keyboard::{Key, Modifiers};
 use iced::widget::scrollable::RelativeOffset;
@@ -12,6 +13,20 @@ pub enum Message {
     FontSizeChanged(u32),
     ToggleTheme,
     ToggleSettings,
+    ToggleSearch,
+    SearchQueryChanged(String),
+    SearchSubmit,
+    SearchNext,
+    SearchPrev,
+    ToggleRecentBooks,
+    OpenRecentBook(PathBuf),
+    ToggleCalibreBrowser,
+    RefreshCalibreBooks,
+    CalibreBooksLoaded {
+        books: Vec<CalibreBook>,
+        error: Option<String>,
+    },
+    OpenCalibreBook(PathBuf),
     ToggleTextOnly,
     FontFamilyChanged(FontFamily),
     FontWeightChanged(FontWeight),

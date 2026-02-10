@@ -8,6 +8,7 @@
 
 mod app;
 mod cache;
+mod calibre;
 mod config;
 mod epub_loader;
 mod normalizer;
@@ -17,7 +18,7 @@ mod tts;
 mod tts_worker;
 
 use crate::app::run_app;
-use crate::cache::{load_bookmark, load_epub_config};
+use crate::cache::{load_bookmark, load_epub_config, remember_source_path};
 use crate::config::load_config;
 use crate::epub_loader::load_book_content;
 use anyhow::{Context, Result, anyhow};
@@ -41,6 +42,7 @@ fn main() {
 
 fn run(reload_handle: &ReloadHandle) -> Result<()> {
     let epub_path = parse_args()?;
+    remember_source_path(&epub_path);
     let base_config = load_config(Path::new("conf/config.toml"));
     let mut config = base_config.clone();
     if let Some(mut overrides) = load_epub_config(&epub_path) {
@@ -57,6 +59,7 @@ fn run(reload_handle: &ReloadHandle) -> Result<()> {
         overrides.key_next_sentence = base_config.key_next_sentence.clone();
         overrides.key_prev_sentence = base_config.key_prev_sentence.clone();
         overrides.key_repeat_sentence = base_config.key_repeat_sentence.clone();
+        overrides.key_toggle_search = base_config.key_toggle_search.clone();
         config = overrides;
     }
     set_log_level(reload_handle, config.log_level.as_filter_str());

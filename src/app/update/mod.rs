@@ -14,5 +14,7 @@ pub(super) enum Effect {
     StopTts,
     ScrollTo(RelativeOffset),
     AutoScrollToCurrent,
+    LoadCalibreBooks { force_refresh: bool },
+    LaunchBook(std::path::PathBuf),
     QuitSafely,
 }

@@ -5,6 +5,7 @@ use super::state::{
     MAX_MARGIN, MAX_TTS_VOLUME, MAX_WORD_SPACING, MIN_TTS_SPEED, MIN_TTS_VOLUME,
     PAGE_FLOW_SPACING_PX,
 };
+use crate::calibre::CalibreColumn;
 use crate::config::HighlightColor;
 use crate::pagination::{MAX_FONT_SIZE, MAX_LINES_PER_PAGE, MIN_FONT_SIZE, MIN_LINES_PER_PAGE};
 use iced::alignment::Horizontal;
@@ -12,7 +13,7 @@ use iced::alignment::Vertical;
 use iced::widget::text::{LineHeight, Wrapping};
 use iced::widget::{
     Column, Row, button, checkbox, column, container, horizontal_space, image, pick_list, row,
-    scrollable, slider, text,
+    scrollable, slider, text, text_input,
 };
 use iced::{ContentFit, Element, Length};
 use std::time::Duration;
@@ -35,6 +36,24 @@ impl App {
             "Show Settings"
         })
         .on_press(Message::ToggleSettings);
+        let search_toggle = button(if self.search.visible {
+            "Hide Search"
+        } else {
+            "Search"
+        })
+        .on_press(Message::ToggleSearch);
+        let recent_toggle = button(if self.recent.visible {
+            "Hide Recent"
+        } else {
+            "Recent"
+        })
+        .on_press(Message::ToggleRecentBooks);
+        let calibre_toggle = button(if self.calibre.visible {
+            "Hide Calibre"
+        } else {
+            "Calibre"
+        })
+        .on_press(Message::ToggleCalibreBrowser);
         let tts_toggle = button(if self.config.show_tts {
             "Hide TTS"
         } else {
@@ -70,6 +89,9 @@ impl App {
             next_button,
             theme_toggle,
             settings_toggle,
+            search_toggle,
+            recent_toggle,
+            calibre_toggle,
             tts_toggle,
             text_only_toggle,
             horizontal_space(),
@@ -278,10 +300,13 @@ impl App {
         .id(super::state::TEXT_SCROLL_ID.clone())
         .height(Length::FillPortion(1));
 
-        let mut content: Column<'_, Message> = column![controls, font_controls, text_view]
-            .padding(16)
-            .spacing(12)
-            .height(Length::Fill);
+        let mut content: Column<'_, Message> = column![controls, font_controls].spacing(12);
+
+        if self.search.visible {
+            content = content.push(self.search_bar());
+        }
+
+        content = content.push(text_view).padding(16).height(Length::Fill);
 
         if self.config.show_tts {
             content = content.push(self.tts_controls());
@@ -291,6 +316,12 @@ impl App {
 
         if self.config.show_settings {
             layout = layout.push(self.settings_panel());
+        }
+        if self.recent.visible {
+            layout = layout.push(self.recent_panel());
+        }
+        if self.calibre.visible {
+            layout = layout.push(self.calibre_panel());
         }
 
         layout.into()
@@ -348,6 +379,215 @@ impl App {
         ]
         .spacing(6)
         .align_y(Vertical::Center)
+    }
+
+    fn search_bar(&self) -> Element<'_, Message> {
+        let query_input = text_input("Regex search (current page)", &self.search.query)
+            .on_input(Message::SearchQueryChanged)
+            .on_submit(Message::SearchSubmit)
+            .padding(8)
+            .size(14.0)
+            .width(Length::Fill);
+
+        let has_matches = !self.search.matches.is_empty();
+        let prev_btn = if has_matches {
+            button("Prev").on_press(Message::SearchPrev)
+        } else {
+            button("Prev")
+        };
+        let next_btn = if has_matches {
+            button("Next").on_press(Message::SearchNext)
+        } else {
+            button("Next")
+        };
+        let status = if has_matches {
+            format!(
+                "Match {} of {}",
+                self.search.selected_match.saturating_add(1),
+                self.search.matches.len()
+            )
+        } else {
+            "No matches".to_string()
+        };
+
+        let mut content = column![
+            row![
+                text("Search"),
+                query_input,
+                prev_btn,
+                next_btn,
+                text(status)
+            ]
+            .spacing(8)
+            .align_y(Vertical::Center)
+        ]
+        .spacing(4);
+
+        if let Some(err) = &self.search.error {
+            content = content.push(text(format!("Invalid regex: {err}")).size(12.0));
+        }
+
+        container(content).padding(8).width(Length::Fill).into()
+    }
+
+    fn recent_panel(&self) -> Element<'_, Message> {
+        let mut entries: Column<'_, Message> = column![].spacing(8).width(Length::Fill);
+        if self.recent.books.is_empty() {
+            entries = entries.push(text("No recent books found in cache.").size(13.0));
+        } else {
+            for book in self.recent.books.iter().take(80) {
+                let title = book
+                    .source_path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("book");
+                let row = row![
+                    column![
+                        text(Self::truncate_text(title, 36)).size(13.0),
+                        text(book.source_path.to_string_lossy()).size(11.0),
+                    ]
+                    .spacing(2)
+                    .width(Length::Fill),
+                    button("Open").on_press(Message::OpenRecentBook(book.source_path.clone()))
+                ]
+                .spacing(8)
+                .align_y(Vertical::Center);
+                entries = entries.push(container(row).padding(4).width(Length::Fill));
+            }
+        }
+
+        let panel = column![
+            row![text("Recent Books").size(18.0)]
+                .spacing(8)
+                .align_y(Vertical::Center),
+            scrollable(entries).height(Length::Fill)
+        ]
+        .spacing(8)
+        .width(Length::Fixed(360.0));
+
+        container(panel).padding(12).into()
+    }
+
+    fn calibre_panel(&self) -> Element<'_, Message> {
+        let mut body: Column<'_, Message> = column![].spacing(6).width(Length::Fill);
+
+        if !self.calibre.config.enabled {
+            body = body.push(
+                text("Calibre browser is disabled. Set [calibre].enabled = true in conf/calibre.toml")
+                    .size(13.0),
+            );
+        } else if self.calibre.loading {
+            body = body.push(text("Loading Calibre catalog...").size(13.0));
+        } else if let Some(err) = &self.calibre.error {
+            body = body.push(text(format!("Calibre load failed: {err}")).size(13.0));
+        } else if self.calibre.books.is_empty() {
+            body = body.push(text("No eligible books found.").size(13.0));
+        } else {
+            let columns = self.calibre.config.sanitized_columns();
+
+            let mut header: Row<'_, Message> = row![].spacing(8);
+            for column in &columns {
+                header = match column {
+                    CalibreColumn::Title => {
+                        header.push(text("Title").width(Length::FillPortion(4)))
+                    }
+                    CalibreColumn::Extension => {
+                        header.push(text("Ext").width(Length::FillPortion(1)))
+                    }
+                    CalibreColumn::Author => {
+                        header.push(text("Author").width(Length::FillPortion(3)))
+                    }
+                    CalibreColumn::Year => header.push(text("Year").width(Length::FillPortion(1))),
+                    CalibreColumn::Size => header.push(text("Size").width(Length::FillPortion(1))),
+                };
+            }
+            header = header.push(text("").width(Length::Shrink));
+            body = body.push(header);
+
+            let mut rows: Column<'_, Message> = column![].spacing(4).width(Length::Fill);
+            for book in self.calibre.books.iter().take(400) {
+                let year = book
+                    .year
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                let size = book
+                    .file_size_bytes
+                    .map(Self::format_bytes)
+                    .unwrap_or_else(|| "-".to_string());
+                let mut line: Row<'_, Message> = row![].spacing(8).align_y(Vertical::Center);
+                for column in &columns {
+                    line = match column {
+                        CalibreColumn::Title => line.push(
+                            text(Self::truncate_text(&book.title, 52))
+                                .width(Length::FillPortion(4)),
+                        ),
+                        CalibreColumn::Extension => line.push(
+                            text(book.extension.to_uppercase()).width(Length::FillPortion(1)),
+                        ),
+                        CalibreColumn::Author => line.push(
+                            text(Self::truncate_text(&book.authors, 24))
+                                .width(Length::FillPortion(3)),
+                        ),
+                        CalibreColumn::Year => {
+                            line.push(text(year.clone()).width(Length::FillPortion(1)))
+                        }
+                        CalibreColumn::Size => {
+                            line.push(text(size.clone()).width(Length::FillPortion(1)))
+                        }
+                    };
+                }
+                line =
+                    line.push(button("Open").on_press(Message::OpenCalibreBook(book.path.clone())));
+                rows = rows.push(line);
+            }
+
+            body = body.push(scrollable(rows).height(Length::Fill));
+        }
+
+        let panel = column![
+            row![
+                text("Calibre Library").size(18.0),
+                horizontal_space(),
+                button("Refresh").on_press(Message::RefreshCalibreBooks)
+            ]
+            .spacing(8)
+            .align_y(Vertical::Center),
+            body
+        ]
+        .spacing(8)
+        .width(Length::Fixed(640.0));
+
+        container(panel).padding(12).into()
+    }
+
+    fn truncate_text(value: &str, max_chars: usize) -> String {
+        if max_chars == 0 {
+            return String::new();
+        }
+        let mut out = String::new();
+        for (idx, ch) in value.chars().enumerate() {
+            if idx >= max_chars {
+                out.push_str("...");
+                return out;
+            }
+            out.push(ch);
+        }
+        out
+    }
+
+    fn format_bytes(bytes: u64) -> String {
+        const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+        let mut value = bytes as f64;
+        let mut unit_idx = 0usize;
+        while value >= 1024.0 && unit_idx + 1 < UNITS.len() {
+            value /= 1024.0;
+            unit_idx += 1;
+        }
+        if unit_idx == 0 {
+            format!("{} {}", bytes, UNITS[unit_idx])
+        } else {
+            format!("{value:.1} {}", UNITS[unit_idx])
+        }
     }
 
     pub(super) fn settings_panel(&self) -> Element<'_, Message> {

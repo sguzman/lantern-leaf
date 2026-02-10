@@ -107,3 +107,7 @@ pub(crate) fn default_key_prev_sentence() -> String {
 pub(crate) fn default_key_repeat_sentence() -> String {
     "r".to_string()
 }
+
+pub(crate) fn default_key_toggle_search() -> String {
+    "ctrl+f".to_string()
+}

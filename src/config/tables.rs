@@ -47,6 +47,7 @@ impl From<ConfigTables> for AppConfig {
             key_next_sentence: tables.keybindings.next_sentence,
             key_prev_sentence: tables.keybindings.prev_sentence,
             key_repeat_sentence: tables.keybindings.repeat_sentence,
+            key_toggle_search: tables.keybindings.toggle_search,
             show_tts: tables.ui.show_tts,
             show_settings: tables.ui.show_settings,
             log_level: tables.logging.log_level,
@@ -109,6 +110,7 @@ impl From<&AppConfig> for ConfigTables {
                 next_sentence: config.key_next_sentence.clone(),
                 prev_sentence: config.key_prev_sentence.clone(),
                 repeat_sentence: config.key_repeat_sentence.clone(),
+                toggle_search: config.key_toggle_search.clone(),
             },
         }
     }
@@ -276,6 +278,8 @@ struct KeybindingsConfig {
     prev_sentence: String,
     #[serde(default = "defaults::default_key_repeat_sentence")]
     repeat_sentence: String,
+    #[serde(default = "defaults::default_key_toggle_search")]
+    toggle_search: String,
 }
 
 impl Default for KeybindingsConfig {
@@ -286,6 +290,7 @@ impl Default for KeybindingsConfig {
             next_sentence: defaults::default_key_next_sentence(),
             prev_sentence: defaults::default_key_prev_sentence(),
             repeat_sentence: defaults::default_key_repeat_sentence(),
+            toggle_search: defaults::default_key_toggle_search(),
         }
     }
 }

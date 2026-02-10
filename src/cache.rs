@@ -18,6 +18,7 @@ use std::time::UNIX_EPOCH;
 use tracing::{debug, warn};
 
 pub const CACHE_DIR: &str = ".cache";
+const SOURCE_PATH_FILE: &str = "source-path.txt";
 static CONTENT_DIGEST_CACHE: OnceLock<Mutex<HashMap<PathBuf, SourceDigestEntry>>> = OnceLock::new();
 
 #[derive(Clone)]
@@ -36,6 +37,12 @@ pub struct Bookmark {
     pub sentence_text: Option<String>,
     #[serde(default = "default_scroll")]
     pub scroll_y: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct RecentBook {
+    pub source_path: PathBuf,
+    pub last_opened_unix_secs: u64,
 }
 
 fn default_scroll() -> f32 {
@@ -158,6 +165,59 @@ fn source_content_hash(path: &Path) -> Option<String> {
 
 fn bookmark_path(epub_path: &Path) -> PathBuf {
     hash_dir(epub_path).join("bookmark.toml")
+}
+
+pub fn remember_source_path(source_path: &Path) {
+    let hint_path = hash_dir(source_path).join(SOURCE_PATH_FILE);
+    if let Some(parent) = hint_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let canonical = fs::canonicalize(source_path).unwrap_or_else(|_| source_path.to_path_buf());
+    let payload = canonical.to_string_lossy().to_string();
+    if let Err(err) = fs::write(&hint_path, payload) {
+        warn!(path = %hint_path.display(), "Failed to persist source path hint: {err}");
+    }
+}
+
+pub fn list_recent_books(limit: usize) -> Vec<RecentBook> {
+    let Ok(entries) = fs::read_dir(CACHE_DIR) else {
+        return Vec::new();
+    };
+
+    let mut books: Vec<RecentBook> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let Ok(file_type) = entry.file_type() else {
+                return None;
+            };
+            if !file_type.is_dir() {
+                return None;
+            }
+            let source_hint_path = entry.path().join(SOURCE_PATH_FILE);
+            let source_path_raw = fs::read_to_string(&source_hint_path).ok()?;
+            let source_path = PathBuf::from(source_path_raw.trim());
+            if source_path.as_os_str().is_empty() || !source_path.exists() {
+                return None;
+            }
+            let last_opened_unix_secs = fs::metadata(&source_hint_path)
+                .ok()
+                .and_then(|meta| meta.modified().ok())
+                .and_then(|ts| ts.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            Some(RecentBook {
+                source_path,
+                last_opened_unix_secs,
+            })
+        })
+        .collect();
+
+    books.sort_by(|a, b| b.last_opened_unix_secs.cmp(&a.last_opened_unix_secs));
+    books.dedup_by(|a, b| a.source_path == b.source_path);
+    if limit > 0 && books.len() > limit {
+        books.truncate(limit);
+    }
+    books
 }
 
 pub fn tts_dir(epub_path: &Path) -> PathBuf {

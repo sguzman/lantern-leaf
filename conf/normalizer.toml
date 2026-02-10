@@ -16,6 +16,8 @@ strip_markdown_links = true
 # Citation / bracket elision.
 drop_numeric_bracket_citations = true
 drop_parenthetical_numeric_citations = true
+drop_superscript_citations = true
+drop_word_suffix_numeric_footnotes = true
 drop_square_bracket_text = true
 drop_curly_brace_text = true
 
@@ -29,6 +31,13 @@ drop_tokens = []
 # Symbol/word replacements.
 [normalization.replacements]
 "#" = " "
+
+[normalization.abbreviations]
+"Mr." = "Mister"
+"Ms." = "Miss"
+"Mrs." = "Misses"
+"Mass." = "Massachusetts"
+"St." = "Saint"
 
 [normalization.acronyms]
 enabled = true

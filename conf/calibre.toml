@@ -1,0 +1,18 @@
+[calibre]
+# Enable Calibre browser integration.
+enabled = false
+
+# Local Calibre library root.
+library_path = "/path/to/Calibre Library"
+
+# Calibre CLI binary.
+calibredb_bin = "calibredb"
+
+# Allowed reader formats (only epub/markdown/txt are accepted).
+allowed_extensions = ["epub", "md", "txt"]
+
+# Configurable calibre browser columns.
+columns = ["title", "extension", "author", "year", "size"]
+
+# Reuse cached Calibre book list for this many seconds.
+list_cache_ttl_secs = 600

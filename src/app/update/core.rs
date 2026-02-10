@@ -7,7 +7,9 @@ use iced::keyboard::{self, Key, Modifiers, key};
 use iced::time;
 use iced::window;
 use iced::{Subscription, Task};
+use std::process::Command;
 use std::time::Duration;
+use tracing::warn;
 
 impl App {
     pub fn subscription(app: &App) -> Subscription<Message> {
@@ -44,6 +46,19 @@ impl App {
             Message::FontSizeChanged(size) => self.handle_font_size_changed(size, &mut effects),
             Message::ToggleTheme => self.handle_toggle_theme(&mut effects),
             Message::ToggleSettings => self.handle_toggle_settings(&mut effects),
+            Message::ToggleSearch => self.handle_toggle_search(&mut effects),
+            Message::SearchQueryChanged(query) => self.handle_search_query_changed(query),
+            Message::SearchSubmit => self.handle_search_submit(&mut effects),
+            Message::SearchNext => self.handle_search_next(&mut effects),
+            Message::SearchPrev => self.handle_search_prev(&mut effects),
+            Message::ToggleRecentBooks => self.handle_toggle_recent_books(),
+            Message::OpenRecentBook(path) => self.handle_open_recent_book(path, &mut effects),
+            Message::ToggleCalibreBrowser => self.handle_toggle_calibre_browser(&mut effects),
+            Message::RefreshCalibreBooks => self.handle_refresh_calibre_books(&mut effects),
+            Message::CalibreBooksLoaded { books, error } => {
+                self.handle_calibre_books_loaded(books, error)
+            }
+            Message::OpenCalibreBook(path) => self.handle_open_calibre_book(path, &mut effects),
             Message::ToggleTextOnly => self.handle_toggle_text_only(&mut effects),
             Message::FontFamilyChanged(family) => {
                 self.handle_font_family_changed(family, &mut effects);
@@ -135,6 +150,7 @@ impl App {
         if self.text_only_mode {
             self.ensure_text_only_preview_for_page(self.reader.current_page);
         }
+        self.update_search_matches();
 
         effects
     }
@@ -170,6 +186,44 @@ impl App {
                 }
                 Task::none()
             }
+            Effect::LoadCalibreBooks { force_refresh } => {
+                self.calibre.loading = true;
+                self.calibre.error = None;
+                let config = self.calibre.config.clone();
+                Task::perform(
+                    async move {
+                        match crate::calibre::load_books(&config, force_refresh) {
+                            Ok(books) => Message::CalibreBooksLoaded { books, error: None },
+                            Err(err) => Message::CalibreBooksLoaded {
+                                books: Vec::new(),
+                                error: Some(err.to_string()),
+                            },
+                        }
+                    },
+                    |message| message,
+                )
+            }
+            Effect::LaunchBook(path) => {
+                self.save_epub_config();
+                self.persist_bookmark();
+                self.stop_playback();
+
+                let exe = match std::env::current_exe() {
+                    Ok(exe) => exe,
+                    Err(err) => {
+                        warn!("Unable to determine current executable path: {err}");
+                        return Task::none();
+                    }
+                };
+
+                match Command::new(exe).arg(&path).spawn() {
+                    Ok(_) => iced::exit(),
+                    Err(err) => {
+                        warn!(path = %path.display(), "Failed to launch book: {err}");
+                        Task::none()
+                    }
+                }
+            }
             Effect::QuitSafely => {
                 self.save_epub_config();
                 self.persist_bookmark();
@@ -180,45 +234,174 @@ impl App {
     }
 
     fn shortcut_message_for_key(&self, key: Key, modifiers: Modifiers) -> Option<Message> {
-        if modifiers.control() || modifiers.alt() || modifiers.logo() {
-            return None;
-        }
-
         let pressed = match key.as_ref() {
             Key::Named(key::Named::Space) => "space".to_string(),
             Key::Character(ch) => ch.to_ascii_lowercase(),
             _ => return None,
         };
 
-        let toggle_play_pause =
-            Self::normalize_shortcut_token(&self.config.key_toggle_play_pause, "space");
-        let safe_quit = Self::normalize_shortcut_token(&self.config.key_safe_quit, "q");
-        let next_sentence = Self::normalize_shortcut_token(&self.config.key_next_sentence, "f");
-        let prev_sentence = Self::normalize_shortcut_token(&self.config.key_prev_sentence, "s");
-        let repeat_sentence = Self::normalize_shortcut_token(&self.config.key_repeat_sentence, "r");
-
-        if pressed == toggle_play_pause {
+        if Self::shortcut_matches(
+            &self.config.key_toggle_play_pause,
+            "space",
+            &pressed,
+            modifiers,
+        ) {
             Some(Message::TogglePlayPause)
-        } else if pressed == safe_quit {
+        } else if Self::shortcut_matches(&self.config.key_safe_quit, "q", &pressed, modifiers) {
             Some(Message::SafeQuit)
-        } else if pressed == next_sentence {
+        } else if Self::shortcut_matches(&self.config.key_next_sentence, "f", &pressed, modifiers) {
             Some(Message::SeekForward)
-        } else if pressed == prev_sentence {
+        } else if Self::shortcut_matches(&self.config.key_prev_sentence, "s", &pressed, modifiers) {
             Some(Message::SeekBackward)
-        } else if pressed == repeat_sentence {
+        } else if Self::shortcut_matches(&self.config.key_repeat_sentence, "r", &pressed, modifiers)
+        {
             Some(Message::RepeatCurrentSentence)
+        } else if Self::shortcut_matches(
+            &self.config.key_toggle_search,
+            "ctrl+f",
+            &pressed,
+            modifiers,
+        ) {
+            Some(Message::ToggleSearch)
         } else {
             None
         }
     }
 
+    fn shortcut_matches(raw: &str, fallback: &str, pressed: &str, modifiers: Modifiers) -> bool {
+        let normalized = Self::normalize_shortcut_token(raw, fallback);
+
+        let mut required_ctrl = false;
+        let mut required_alt = false;
+        let mut required_logo = false;
+        let mut required_shift = false;
+        let mut required_key: Option<&str> = None;
+
+        for token in normalized
+            .split('+')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            match token {
+                "ctrl" | "control" => required_ctrl = true,
+                "alt" => required_alt = true,
+                "logo" | "meta" | "super" | "cmd" | "command" => required_logo = true,
+                "shift" => required_shift = true,
+                key => required_key = Some(key),
+            }
+        }
+
+        let required_key = required_key.unwrap_or(fallback);
+        if pressed != required_key {
+            return false;
+        }
+
+        modifiers.control() == required_ctrl
+            && modifiers.alt() == required_alt
+            && modifiers.logo() == required_logo
+            && modifiers.shift() == required_shift
+    }
+
     fn normalize_shortcut_token(raw: &str, fallback: &str) -> String {
         let normalized = raw.trim().to_ascii_lowercase();
-        match normalized.as_str() {
-            "" => fallback.to_string(),
-            "spacebar" => "space".to_string(),
-            _ => normalized,
+        if normalized.is_empty() {
+            fallback.to_string()
+        } else {
+            normalized.replace("spacebar", "space")
         }
+    }
+
+    fn handle_toggle_search(&mut self, effects: &mut Vec<Effect>) {
+        self.search.visible = !self.search.visible;
+        if self.search.visible {
+            self.update_search_matches();
+        } else {
+            self.search.error = None;
+            self.search.matches.clear();
+            self.search.selected_match = 0;
+        }
+        effects.push(Effect::SaveBookmark);
+    }
+
+    fn handle_search_query_changed(&mut self, query: String) {
+        self.search.query = query;
+        self.update_search_matches();
+    }
+
+    fn handle_search_submit(&mut self, effects: &mut Vec<Effect>) {
+        self.jump_to_selected_search_match(effects);
+    }
+
+    fn handle_search_next(&mut self, effects: &mut Vec<Effect>) {
+        if self.search.matches.is_empty() {
+            return;
+        }
+        self.search.selected_match = (self.search.selected_match + 1) % self.search.matches.len();
+        self.jump_to_selected_search_match(effects);
+    }
+
+    fn handle_search_prev(&mut self, effects: &mut Vec<Effect>) {
+        if self.search.matches.is_empty() {
+            return;
+        }
+        if self.search.selected_match == 0 {
+            self.search.selected_match = self.search.matches.len().saturating_sub(1);
+        } else {
+            self.search.selected_match -= 1;
+        }
+        self.jump_to_selected_search_match(effects);
+    }
+
+    fn jump_to_selected_search_match(&mut self, effects: &mut Vec<Effect>) {
+        let Some(sentence_idx) = self.selected_search_sentence_idx() else {
+            return;
+        };
+        let Some(display_idx) = self.display_idx_for_search_sentence_idx(sentence_idx) else {
+            return;
+        };
+        self.tts.current_sentence_idx = Some(display_idx);
+        effects.push(Effect::AutoScrollToCurrent);
+        effects.push(Effect::SaveBookmark);
+    }
+
+    fn handle_toggle_recent_books(&mut self) {
+        self.recent.visible = !self.recent.visible;
+        if self.recent.visible {
+            self.refresh_recent_books();
+        }
+    }
+
+    fn handle_open_recent_book(&mut self, path: std::path::PathBuf, effects: &mut Vec<Effect>) {
+        effects.push(Effect::LaunchBook(path));
+    }
+
+    fn handle_toggle_calibre_browser(&mut self, effects: &mut Vec<Effect>) {
+        self.calibre.visible = !self.calibre.visible;
+        if self.calibre.visible && self.calibre.books.is_empty() && !self.calibre.loading {
+            effects.push(Effect::LoadCalibreBooks {
+                force_refresh: false,
+            });
+        }
+    }
+
+    fn handle_refresh_calibre_books(&mut self, effects: &mut Vec<Effect>) {
+        effects.push(Effect::LoadCalibreBooks {
+            force_refresh: true,
+        });
+    }
+
+    fn handle_calibre_books_loaded(
+        &mut self,
+        books: Vec<crate::calibre::CalibreBook>,
+        error: Option<String>,
+    ) {
+        self.calibre.loading = false;
+        self.calibre.error = error;
+        self.calibre.books = books;
+    }
+
+    fn handle_open_calibre_book(&mut self, path: std::path::PathBuf, effects: &mut Vec<Effect>) {
+        effects.push(Effect::LaunchBook(path));
     }
 }
 
