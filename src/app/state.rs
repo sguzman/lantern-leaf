@@ -65,6 +65,9 @@ pub struct ReaderState {
 pub struct TtsState {
     pub(super) engine: Option<TtsEngine>,
     pub(super) playback: Option<TtsPlayback>,
+    pub(super) preparing: bool,
+    pub(super) preparing_page: Option<usize>,
+    pub(super) preparing_sentence_idx: Option<usize>,
     pub(super) last_sentences: Vec<String>,
     pub(super) current_sentence_idx: Option<usize>,
     pub(super) sentence_offset: usize,
@@ -443,6 +446,9 @@ impl App {
             )
             .ok(),
             playback: None,
+            preparing: false,
+            preparing_page: None,
+            preparing_sentence_idx: None,
             last_sentences: Vec::new(),
             current_sentence_idx: None,
             sentence_offset: 0,
@@ -608,6 +614,9 @@ impl App {
                 )
                 .ok(),
                 playback: None,
+                preparing: false,
+                preparing_page: None,
+                preparing_sentence_idx: None,
                 last_sentences: Vec::new(),
                 current_sentence_idx: None,
                 sentence_offset: 0,
@@ -734,6 +743,9 @@ impl App {
             tts: TtsState {
                 engine: None,
                 playback: None,
+                preparing: false,
+                preparing_page: None,
+                preparing_sentence_idx: None,
                 last_sentences: Vec::new(),
                 current_sentence_idx: None,
                 sentence_offset: 0,

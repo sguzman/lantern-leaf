@@ -3,8 +3,11 @@ use piper_rs::from_config_path;
 use piper_rs::synth::PiperSpeechSynthesizer;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Deserialize)]
 struct WorkerRequest {
@@ -161,17 +164,42 @@ fn synthesize_to_file_serial(
 }
 
 fn write_wav(path: &Path, sample_rate: u32, channels: u16, samples: &[f32]) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
     let spec = WavSpec {
         channels,
         sample_rate,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
-    let mut writer = hound::WavWriter::create(path, spec)?;
+    let temp_path = unique_temp_wav_path(path);
+    let mut writer = hound::WavWriter::create(&temp_path, spec)?;
     for &s in samples {
         let clamped = (s * i16::MAX as f32).clamp(i16::MIN as f32, i16::MAX as f32) as i16;
         writer.write_sample(clamped)?;
     }
     writer.finalize()?;
+    if fs::rename(&temp_path, path).is_err() {
+        fs::copy(&temp_path, path)?;
+        let _ = fs::remove_file(&temp_path);
+    }
     Ok(())
+}
+
+fn unique_temp_wav_path(path: &Path) -> PathBuf {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let nonce = SEQ.fetch_add(1, Ordering::Relaxed);
+    let ts_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut temp_name = path
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("tts.wav")
+        .to_string();
+    temp_name.push_str(&format!(".tmp-{}-{nonce}", ts_nanos));
+    path.with_file_name(temp_name)
 }

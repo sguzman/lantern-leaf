@@ -93,6 +93,14 @@ impl App {
     }
 
     pub(super) fn handle_play(&mut self, effects: &mut Vec<Effect>) {
+        if self.tts.preparing {
+            info!(
+                page = self.tts.preparing_page.unwrap_or(self.reader.current_page) + 1,
+                sentence_idx = self.tts.preparing_sentence_idx.unwrap_or(0),
+                "TTS batch preparation already in progress; ignoring duplicate play request"
+            );
+            return;
+        }
         if let Some(playback) = &self.tts.playback {
             info!("Resuming TTS playback");
             playback.play();
@@ -117,7 +125,7 @@ impl App {
             .as_ref()
             .map(|p| !p.is_paused())
             .unwrap_or(false);
-        if currently_playing {
+        if self.tts.preparing || currently_playing {
             self.handle_pause(effects);
         } else {
             self.handle_play(effects);
@@ -148,6 +156,13 @@ impl App {
     }
 
     pub(super) fn handle_pause(&mut self, _effects: &mut Vec<Effect>) {
+        if self.tts.preparing {
+            self.tts.request_id = self.tts.request_id.wrapping_add(1);
+            self.tts.preparing = false;
+            self.tts.preparing_page = None;
+            self.tts.preparing_sentence_idx = None;
+            info!("Cancelled pending TTS batch preparation");
+        }
         if let Some(playback) = &self.tts.playback {
             info!("Pausing TTS playback");
             playback.pause();
@@ -304,9 +319,13 @@ impl App {
             );
             return;
         }
+        self.tts.preparing = false;
+        self.tts.preparing_page = None;
+        self.tts.preparing_sentence_idx = None;
         info!(
             page,
             start_idx,
+            request_id,
             file_count = files.len(),
             "Received prepared TTS batch"
         );
@@ -387,10 +406,26 @@ impl App {
         let display_sentences = self.raw_sentences_for_page(page);
         self.tts.last_sentences = display_sentences.clone();
         if display_sentences.is_empty() {
+            self.tts.preparing = false;
+            self.tts.preparing_page = None;
+            self.tts.preparing_sentence_idx = None;
             self.tts.current_sentence_idx = None;
             self.tts.sentence_offset = 0;
             self.tts.display_to_audio.clear();
             self.tts.audio_to_display.clear();
+            return Task::none();
+        }
+
+        let requested_display_idx = sentence_idx.min(display_sentences.len().saturating_sub(1));
+        if self.tts.preparing
+            && self.tts.preparing_page == Some(page)
+            && self.tts.preparing_sentence_idx == Some(requested_display_idx)
+        {
+            info!(
+                page = page + 1,
+                sentence_idx = requested_display_idx,
+                "Skipping duplicate TTS start request while preparation is in progress"
+            );
             return Task::none();
         }
 
@@ -399,8 +434,6 @@ impl App {
             .plan_page_cached(&self.epub_path, page, &display_sentences);
         self.tts.display_to_audio = plan.display_to_audio;
         self.tts.audio_to_display = plan.audio_to_display;
-
-        let requested_display_idx = sentence_idx.min(display_sentences.len().saturating_sub(1));
         let Some(audio_start_idx) =
             self.find_audio_start_for_display_sentence(requested_display_idx)
         else {
@@ -409,6 +442,9 @@ impl App {
                 display_idx = requested_display_idx,
                 "No speakable text on page after normalization"
             );
+            self.tts.preparing = false;
+            self.tts.preparing_page = None;
+            self.tts.preparing_sentence_idx = None;
             self.tts.current_sentence_idx = Some(requested_display_idx);
             self.tts.sentence_offset = 0;
             return Task::none();
@@ -426,6 +462,9 @@ impl App {
         let page_id = page;
         self.tts.started_at = None;
         self.tts.elapsed = Duration::ZERO;
+        self.tts.preparing = true;
+        self.tts.preparing_page = Some(page);
+        self.tts.preparing_sentence_idx = Some(requested_display_idx);
         self.tts.request_id = self.tts.request_id.wrapping_add(1);
         let request_id = self.tts.request_id;
         self.save_epub_config();
@@ -433,6 +472,7 @@ impl App {
             page = page + 1,
             sentence_idx = requested_display_idx,
             audio_start_idx,
+            request_id,
             speed,
             threads,
             progress_log_interval_secs,
