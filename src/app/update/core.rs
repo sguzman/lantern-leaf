@@ -54,6 +54,8 @@ impl App {
             Message::ToggleRecentBooks => self.handle_toggle_recent_books(),
             Message::OpenRecentBook(path) => self.handle_open_recent_book(path, &mut effects),
             Message::ToggleCalibreBrowser => self.handle_toggle_calibre_browser(&mut effects),
+            Message::OpenPathInputChanged(path) => self.handle_open_path_input_changed(path),
+            Message::OpenPathRequested => self.handle_open_path_requested(&mut effects),
             Message::RefreshCalibreBooks => self.handle_refresh_calibre_books(&mut effects),
             Message::CalibreBooksLoaded { books, error } => {
                 self.handle_calibre_books_loaded(books, error)
@@ -373,6 +375,20 @@ impl App {
 
     fn handle_open_recent_book(&mut self, path: std::path::PathBuf, effects: &mut Vec<Effect>) {
         effects.push(Effect::LaunchBook(path));
+    }
+
+    fn handle_open_path_input_changed(&mut self, path: String) {
+        self.open_path_input = path;
+    }
+
+    fn handle_open_path_requested(&mut self, effects: &mut Vec<Effect>) {
+        let candidate = std::path::PathBuf::from(self.open_path_input.trim());
+        if candidate.as_os_str().is_empty() {
+            return;
+        }
+        if candidate.exists() {
+            effects.push(Effect::LaunchBook(candidate));
+        }
     }
 
     fn handle_toggle_calibre_browser(&mut self, effects: &mut Vec<Effect>) {

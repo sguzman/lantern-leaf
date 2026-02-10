@@ -64,6 +64,7 @@ pub struct CalibreBook {
     pub year: Option<i32>,
     pub file_size_bytes: Option<u64>,
     pub path: PathBuf,
+    pub cover_thumbnail: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -233,6 +234,7 @@ fn fetch_books(config: &CalibreConfig, library: &Path) -> Result<Vec<CalibreBook
             authors,
             year,
             file_size_bytes,
+            cover_thumbnail: resolve_cover_thumbnail(path.parent()),
             path,
         });
     }
@@ -352,6 +354,19 @@ fn resolve_book_file_path(
         };
         if normalized_ext == extension {
             return Some(path);
+        }
+    }
+    None
+}
+
+fn resolve_cover_thumbnail(book_dir: Option<&Path>) -> Option<PathBuf> {
+    let Some(dir) = book_dir else {
+        return None;
+    };
+    for name in ["cover.jpg", "cover.jpeg", "cover.png", "cover.webp"] {
+        let candidate = dir.join(name);
+        if candidate.exists() {
+            return Some(candidate);
         }
     }
     None

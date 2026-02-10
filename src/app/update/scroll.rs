@@ -79,6 +79,9 @@ impl App {
     }
 
     pub(super) fn persist_bookmark(&self) {
+        if self.starter_mode {
+            return;
+        }
         let sentences = self.current_sentences();
 
         let sentence_idx = self

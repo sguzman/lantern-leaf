@@ -20,6 +20,10 @@ use std::time::Duration;
 
 impl App {
     pub fn view(&self) -> Element<'_, Message> {
+        if self.starter_mode {
+            return self.starter_view();
+        }
+
         let total_pages = self.reader.pages.len().max(1);
         let page_label = format!("Page {} of {}", self.reader.current_page + 1, total_pages);
         let tts_progress_label = self.audio_progress_label();
@@ -329,6 +333,50 @@ impl App {
 }
 
 impl App {
+    fn starter_view(&self) -> Element<'_, Message> {
+        let open_button = button("Open Path").on_press(Message::OpenPathRequested);
+        let top = column![
+            text("Welcome").size(28.0),
+            text("Open a local file or choose a book from Calibre / Recent.").size(14.0),
+            row![
+                text_input("Path to .epub/.txt/.md", &self.open_path_input)
+                    .on_input(Message::OpenPathInputChanged)
+                    .on_submit(Message::OpenPathRequested)
+                    .padding(10)
+                    .width(Length::Fill),
+                open_button
+            ]
+            .spacing(8)
+            .align_y(Vertical::Center),
+            row![
+                button(if self.recent.visible {
+                    "Hide Recent"
+                } else {
+                    "Show Recent"
+                })
+                .on_press(Message::ToggleRecentBooks),
+                button(if self.calibre.visible {
+                    "Hide Calibre"
+                } else {
+                    "Show Calibre"
+                })
+                .on_press(Message::ToggleCalibreBrowser),
+                button("Refresh Calibre").on_press(Message::RefreshCalibreBooks),
+            ]
+            .spacing(8),
+        ]
+        .spacing(12);
+
+        let mut layout: Row<'_, Message> = row![container(top).padding(16).width(Length::Fill)];
+        if self.recent.visible {
+            layout = layout.push(self.recent_panel());
+        }
+        if self.calibre.visible {
+            layout = layout.push(self.calibre_panel());
+        }
+        layout.spacing(16).into()
+    }
+
     fn audio_progress_label(&self) -> String {
         let total_sentences = self.reader.page_sentence_counts.iter().sum::<usize>();
         if total_sentences == 0 {
@@ -485,7 +533,8 @@ impl App {
         } else {
             let columns = self.calibre.config.sanitized_columns();
 
-            let mut header: Row<'_, Message> = row![].spacing(8);
+            let mut header: Row<'_, Message> =
+                row![text("Cover").width(Length::Fixed(42.0))].spacing(8);
             for column in &columns {
                 header = match column {
                     CalibreColumn::Title => {
@@ -515,6 +564,19 @@ impl App {
                     .map(Self::format_bytes)
                     .unwrap_or_else(|| "-".to_string());
                 let mut line: Row<'_, Message> = row![].spacing(8).align_y(Vertical::Center);
+                let cover_cell: Element<'_, Message> = if let Some(path) = &book.cover_thumbnail {
+                    image(path.clone())
+                        .width(Length::Fixed(34.0))
+                        .height(Length::Fixed(48.0))
+                        .content_fit(ContentFit::Contain)
+                        .into()
+                } else {
+                    text("x")
+                        .width(Length::Fixed(34.0))
+                        .align_x(Horizontal::Center)
+                        .into()
+                };
+                line = line.push(cover_cell);
                 for column in &columns {
                     line = match column {
                         CalibreColumn::Title => line.push(

@@ -119,6 +119,7 @@ pub struct CalibreState {
 
 /// Core application state composed of sub-models.
 pub struct App {
+    pub(super) starter_mode: bool,
     pub(super) reader: ReaderState,
     pub(super) tts: TtsState,
     pub(super) bookmark: BookmarkState,
@@ -130,6 +131,7 @@ pub struct App {
     pub(super) search: SearchState,
     pub(super) recent: RecentState,
     pub(super) calibre: CalibreState,
+    pub(super) open_path_input: String,
 }
 
 impl App {
@@ -390,6 +392,9 @@ impl App {
     }
 
     pub(super) fn save_epub_config(&self) {
+        if self.starter_mode {
+            return;
+        }
         save_epub_config(&self.epub_path, &self.config);
     }
 
@@ -462,6 +467,7 @@ impl App {
     ) -> (App, Task<Message>) {
         clamp_config(&mut config);
         let mut app = App {
+            starter_mode: false,
             reader: ReaderState {
                 pages: Vec::new(),
                 page_sentences: Vec::new(),
@@ -522,6 +528,7 @@ impl App {
                 books: Vec::new(),
                 config: CalibreConfig::load_default(),
             },
+            open_path_input: String::new(),
         };
 
         app.repaginate();
@@ -589,6 +596,77 @@ impl App {
         app.ensure_text_only_preview_for_page(app.reader.current_page);
         app.update_search_matches();
 
+        (app, init_task)
+    }
+
+    pub(super) fn bootstrap_starter(mut config: AppConfig) -> (App, Task<Message>) {
+        clamp_config(&mut config);
+        let app = App {
+            starter_mode: true,
+            reader: ReaderState {
+                pages: vec![String::new()],
+                page_sentences: vec![Vec::new()],
+                page_sentence_counts: vec![0],
+                full_text: String::new(),
+                images: Vec::new(),
+                current_page: 0,
+            },
+            tts: TtsState {
+                engine: None,
+                playback: None,
+                last_sentences: Vec::new(),
+                current_sentence_idx: None,
+                sentence_offset: 0,
+                track: Vec::new(),
+                started_at: None,
+                elapsed: Duration::ZERO,
+                running: false,
+                request_id: 0,
+                sources_per_sentence: 1,
+                total_sources: 0,
+                display_to_audio: Vec::new(),
+                audio_to_display: Vec::new(),
+            },
+            bookmark: BookmarkState {
+                last_scroll_offset: RelativeOffset::START,
+                viewport_fraction: 0.25,
+                viewport_width: 0.0,
+                viewport_height: 0.0,
+                content_width: 0.0,
+                content_height: 0.0,
+                pending_sentence_snap: None,
+            },
+            config,
+            epub_path: PathBuf::new(),
+            normalizer: TextNormalizer::load_default(),
+            text_only_mode: false,
+            text_only_preview: None,
+            search: SearchState {
+                visible: false,
+                query: String::new(),
+                error: None,
+                matches: Vec::new(),
+                selected_match: 0,
+            },
+            recent: RecentState {
+                visible: true,
+                books: list_recent_books(64),
+            },
+            calibre: CalibreState {
+                visible: true,
+                loading: false,
+                error: None,
+                books: Vec::new(),
+                config: CalibreConfig::load_default(),
+            },
+            open_path_input: String::new(),
+        };
+
+        let init_task = if app.calibre.config.enabled {
+            Task::done(Message::RefreshCalibreBooks)
+        } else {
+            Task::none()
+        };
         (app, init_task)
     }
 }

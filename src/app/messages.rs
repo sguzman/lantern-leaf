@@ -21,6 +21,8 @@ pub enum Message {
     ToggleRecentBooks,
     OpenRecentBook(PathBuf),
     ToggleCalibreBrowser,
+    OpenPathInputChanged(String),
+    OpenPathRequested,
     RefreshCalibreBooks,
     CalibreBooksLoaded {
         books: Vec<CalibreBook>,

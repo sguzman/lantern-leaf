@@ -40,3 +40,29 @@ pub fn run_app(
         })
         .run_with(move || App::bootstrap(book, config, epub_path, bookmark))
 }
+
+/// Helper to launch the app in starter mode (no book path yet).
+pub fn run_app_starter(config: AppConfig) -> iced::Result {
+    let window_settings = window::Settings {
+        size: Size::new(config.window_width, config.window_height),
+        position: match (config.window_pos_x, config.window_pos_y) {
+            (Some(x), Some(y)) if x.is_finite() && y.is_finite() => {
+                window::Position::Specific(Point::new(x, y))
+            }
+            _ => window::Position::Default,
+        },
+        ..window::Settings::default()
+    };
+
+    iced::application("EPUB Viewer", App::update, App::view)
+        .window(window_settings)
+        .subscription(App::subscription)
+        .theme(|app: &App| {
+            if matches!(app.config.theme, crate::config::ThemeMode::Night) {
+                Theme::Dark
+            } else {
+                Theme::Light
+            }
+        })
+        .run_with(move || App::bootstrap_starter(config))
+}

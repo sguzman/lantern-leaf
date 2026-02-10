@@ -17,7 +17,7 @@ mod text_utils;
 mod tts;
 mod tts_worker;
 
-use crate::app::run_app;
+use crate::app::{run_app, run_app_starter};
 use crate::cache::{load_bookmark, load_epub_config, remember_source_path};
 use crate::config::load_config;
 use crate::epub_loader::load_book_content;
@@ -41,9 +41,20 @@ fn main() {
 }
 
 fn run(reload_handle: &ReloadHandle) -> Result<()> {
-    let epub_path = parse_args()?;
-    remember_source_path(&epub_path);
     let base_config = load_config(Path::new("conf/config.toml"));
+    let path_arg = parse_args()?;
+
+    let Some(epub_path) = path_arg else {
+        set_log_level(reload_handle, base_config.log_level.as_filter_str());
+        info!(
+            level = %base_config.log_level,
+            "Starting EPUB viewer in starter mode"
+        );
+        run_app_starter(base_config).context("Failed to start the starter GUI")?;
+        return Ok(());
+    };
+
+    remember_source_path(&epub_path);
     let mut config = base_config.clone();
     if let Some(mut overrides) = load_epub_config(&epub_path) {
         info!("Loaded per-epub overrides from cache");
@@ -85,17 +96,17 @@ fn run(reload_handle: &ReloadHandle) -> Result<()> {
     Ok(())
 }
 
-fn parse_args() -> Result<PathBuf> {
+fn parse_args() -> Result<Option<PathBuf>> {
     let mut args = env::args().skip(1);
-    let path = args
-        .next()
-        .ok_or_else(|| anyhow!("Usage: epub-viewer <path-to-book>"))?;
+    let Some(path) = args.next() else {
+        return Ok(None);
+    };
 
     let path = PathBuf::from(path);
     if !path.exists() {
         return Err(anyhow!("File not found: {}", path.as_path().display()));
     }
-    Ok(path)
+    Ok(Some(path))
 }
 
 fn init_tracing() -> ReloadHandle {
