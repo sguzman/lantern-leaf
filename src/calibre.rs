@@ -21,7 +21,7 @@ const THUMB_WIDTH: u32 = 68;
 const THUMB_HEIGHT: u32 = 100;
 const THUMB_PREFETCH_LIMIT: usize = 200;
 const THUMB_PREFETCH_BUDGET: Duration = Duration::from_secs(2);
-const THUMB_FETCH_TIMEOUT: Duration = Duration::from_millis(900);
+const THUMB_FETCH_TIMEOUT: Duration = Duration::from_millis(350);
 const CALIBRE_DB_TIMEOUT_SECS: u64 = 15;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -242,7 +242,9 @@ pub fn load_books(config: &CalibreConfig, force_refresh: bool) -> Result<Vec<Cal
         THUMB_PREFETCH_LIMIT,
         THUMB_PREFETCH_BUDGET,
     );
+    info!(book_count = books.len(), "Writing calibre cache file");
     write_cache(&signature, &books)?;
+    info!(book_count = books.len(), "Calibre cache file updated");
     info!(
         book_count = books.len(),
         elapsed_ms = started.elapsed().as_millis(),
@@ -762,6 +764,7 @@ fn hydrate_book_thumbnails(
 ) -> bool {
     let mut changed = false;
     let started = Instant::now();
+    let deadline = started + budget;
     let mut processed = 0usize;
     let mut available = 0usize;
     let prefetch_count = books.len().min(limit);
@@ -776,10 +779,19 @@ fn hydrate_book_thumbnails(
             break;
         }
         let current = book.cover_thumbnail.clone();
-        let next = ensure_book_thumbnail(config, book.id, book.path.as_deref());
+        let book_started = Instant::now();
+        let next = ensure_book_thumbnail(config, book.id, book.path.as_deref(), deadline);
         if next != current {
             book.cover_thumbnail = next;
             changed = true;
+        }
+        let per_book_ms = book_started.elapsed().as_millis();
+        if per_book_ms > 200 {
+            info!(
+                book_id = book.id,
+                elapsed_ms = per_book_ms,
+                "Slow thumbnail prefetch item"
+            );
         }
         processed += 1;
         if book.cover_thumbnail.is_some() {
@@ -808,6 +820,7 @@ fn ensure_book_thumbnail(
     config: &CalibreConfig,
     book_id: u64,
     source_path: Option<&Path>,
+    deadline: Instant,
 ) -> Option<PathBuf> {
     let thumb_path = calibre_thumbnail_path(config, book_id);
     if thumb_path.exists() {
@@ -822,7 +835,7 @@ fn ensure_book_thumbnail(
         return Some(thumb_path);
     }
 
-    if let Some(bytes) = fetch_thumbnail_from_server(config, book_id)
+    if let Some(bytes) = fetch_thumbnail_from_server(config, book_id, deadline)
         && write_thumbnail_file(&thumb_path, &bytes).is_ok()
     {
         return Some(thumb_path);
@@ -841,9 +854,18 @@ fn resolve_local_cover_file(book_dir: &Path) -> Option<PathBuf> {
     None
 }
 
-fn fetch_thumbnail_from_server(config: &CalibreConfig, book_id: u64) -> Option<Vec<u8>> {
+fn fetch_thumbnail_from_server(
+    config: &CalibreConfig,
+    book_id: u64,
+    deadline: Instant,
+) -> Option<Vec<u8>> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining < Duration::from_millis(40) {
+        return None;
+    }
+    let timeout = remaining.min(THUMB_FETCH_TIMEOUT);
     let client = reqwest::blocking::Client::builder()
-        .timeout(THUMB_FETCH_TIMEOUT)
+        .timeout(timeout)
         .build()
         .ok()?;
     let username = effective_username(config);
@@ -853,8 +875,14 @@ fn fetch_thumbnail_from_server(config: &CalibreConfig, book_id: u64) -> Option<V
         format!("get/cover/{book_id}"),
     ];
 
-    for base in cover_server_urls(config) {
+    for base in cover_server_urls(config).into_iter().take(1) {
+        if Instant::now() >= deadline {
+            return None;
+        }
         for endpoint in &endpoints {
+            if Instant::now() >= deadline {
+                return None;
+            }
             let url = format!("{base}/{endpoint}");
             let mut request = client.get(&url);
             if let Some(user) = username.as_ref() {
