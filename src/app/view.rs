@@ -66,7 +66,7 @@ impl App {
             text(if self.text_only_mode {
                 "Pretty Text"
             } else {
-                "Text-Only"
+                "Text Only"
             })
             .wrapping(Wrapping::None),
         )
@@ -85,13 +85,51 @@ impl App {
         };
 
         let available_width = self.controls_layout_width();
+        let controls_spacing = 10.0;
+        let controls_budget = (available_width - 56.0).max(0.0);
+        let mut used_controls_width = Self::estimate_button_width_px("Previous")
+            + Self::estimate_button_width_px("Next")
+            + Self::estimate_button_width_px(theme_label)
+            + (controls_spacing * 2.0);
+        let mut add_optional = |label: &str| -> bool {
+            let extra = controls_spacing + Self::estimate_button_width_px(label);
+            if used_controls_width + extra <= controls_budget {
+                used_controls_width += extra;
+                true
+            } else {
+                false
+            }
+        };
+        let show_settings_toggle = add_optional(if self.config.show_settings {
+            "Hide Settings"
+        } else {
+            "Show Settings"
+        });
+        let show_search_toggle = add_optional(if self.search.visible {
+            "Hide Search"
+        } else {
+            "Search"
+        });
+        let show_tts_toggle = add_optional(if self.config.show_tts {
+            "Hide TTS"
+        } else {
+            "Show TTS"
+        });
+        let show_text_only_toggle = add_optional(if self.text_only_mode {
+            "Pretty Text"
+        } else {
+            "Text Only"
+        });
         let show_compact_status = !self.config.show_settings;
-        let show_settings_toggle = available_width >= 420.0;
-        let show_search_toggle = available_width >= 520.0;
-        let show_tts_toggle = available_width >= 620.0;
-        let show_text_only_toggle = available_width >= 760.0;
-        let show_page_label = show_compact_status && available_width >= 760.0;
-        let show_tts_progress_label = show_compact_status && available_width >= 920.0;
+        let mut status_budget = (controls_budget - used_controls_width - 24.0).max(0.0);
+        let page_label_width = Self::estimate_status_text_width_px(&page_label);
+        let tts_progress_label_width = Self::estimate_status_text_width_px(&tts_progress_label);
+        let show_page_label = show_compact_status && status_budget >= page_label_width;
+        if show_page_label {
+            status_budget -= page_label_width;
+        }
+        let show_tts_progress_label =
+            show_compact_status && status_budget >= (tts_progress_label_width + controls_spacing);
 
         let mut controls = row![prev_button, next_button, theme_toggle]
             .spacing(10)
@@ -1044,22 +1082,35 @@ impl App {
             button(text("Play From Highlight").wrapping(Wrapping::None))
         };
         let available_width = self.controls_layout_width();
-        let show_sentence_step = available_width >= 420.0;
-        let show_play_page = available_width >= 560.0;
-        let show_play_from_highlight = available_width >= 700.0;
-        let show_jump = available_width >= 840.0;
+        let controls_spacing = 10.0;
+        let controls_budget = (available_width - 56.0).max(0.0);
+        let mut used_controls_width = Self::estimate_button_width_px(play_label);
+        let mut add_optional = |label: &str| -> bool {
+            let extra = controls_spacing + Self::estimate_button_width_px(label);
+            if used_controls_width + extra <= controls_budget {
+                used_controls_width += extra;
+                true
+            } else {
+                false
+            }
+        };
+        let show_prev_sentence = add_optional("Prev Sent");
+        let show_next_sentence = add_optional("Next Sent");
+        let show_play_page = add_optional("Play Page");
+        let show_play_from_highlight = add_optional("Play From Highlight");
+        let show_jump = add_optional("Jump to Audio");
 
         let mut controls = row![]
             .spacing(10)
             .align_y(Vertical::Center)
             .width(Length::Fill);
-        if show_sentence_step {
+        if show_prev_sentence {
             controls = controls.push(
                 button(text("Prev Sent").wrapping(Wrapping::None)).on_press(Message::SeekBackward),
             );
         }
         controls = controls.push(play_button);
-        if show_sentence_step {
+        if show_next_sentence {
             controls = controls.push(
                 button(text("Next Sent").wrapping(Wrapping::None)).on_press(Message::SeekForward),
             );
@@ -1074,7 +1125,7 @@ impl App {
             controls = controls.push(jump_button);
         }
         controls = controls.push(horizontal_space());
-        if !self.config.show_settings && available_width >= 920.0 {
+        if !self.config.show_settings && (controls_budget - used_controls_width).max(0.0) >= 220.0 {
             controls = controls.push(self.eta_trackers_view(available_width));
         }
 
@@ -1210,6 +1261,16 @@ impl App {
         let stable_window_width = self.config.window_width.max(320.0);
         let measured = self.estimated_controls_width();
         measured.max(stable_window_width)
+    }
+
+    fn estimate_button_width_px(label: &str) -> f32 {
+        // Conservative estimate: character width plus button horizontal padding.
+        let chars = label.chars().count() as f32;
+        (chars * 8.2) + 34.0
+    }
+
+    fn estimate_status_text_width_px(value: &str) -> f32 {
+        (value.chars().count() as f32 * 7.4) + 8.0
     }
 
     fn format_duration_dhms(duration: Duration) -> String {
