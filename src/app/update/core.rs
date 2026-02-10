@@ -215,6 +215,11 @@ impl App {
                 self.calibre.loading = true;
                 self.calibre.error = None;
                 let config = self.calibre.config.clone();
+                info!(
+                    force_refresh,
+                    enabled = config.enabled,
+                    "Dispatching calibre load task"
+                );
                 Task::perform(
                     async move {
                         match crate::calibre::load_books(&config, force_refresh) {
@@ -466,9 +471,8 @@ impl App {
     }
 
     fn handle_refresh_calibre_books(&mut self, effects: &mut Vec<Effect>) {
-        effects.push(Effect::LoadCalibreBooks {
-            force_refresh: true,
-        });
+        let force_refresh = !self.calibre.books.is_empty();
+        effects.push(Effect::LoadCalibreBooks { force_refresh });
     }
 
     fn handle_calibre_search_query_changed(&mut self, query: String) {

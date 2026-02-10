@@ -9,8 +9,8 @@ use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, warn};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tracing::{debug, info, warn};
 
 const DEFAULT_CALIBRE_CONFIG_PATH: &str = "conf/calibre.toml";
 const CALIBRE_CACHE_PATH: &str = ".cache/calibre-books.toml";
@@ -19,7 +19,10 @@ const CALIBRE_DOWNLOAD_DIR: &str = ".cache/calibre-downloads";
 const CALIBRE_THUMB_DIR: &str = ".cache/calibre-thumbs";
 const THUMB_WIDTH: u32 = 68;
 const THUMB_HEIGHT: u32 = 100;
-const THUMB_PREFETCH_LIMIT: usize = 400;
+const THUMB_PREFETCH_LIMIT: usize = 200;
+const THUMB_PREFETCH_BUDGET: Duration = Duration::from_secs(2);
+const THUMB_FETCH_TIMEOUT: Duration = Duration::from_millis(900);
+const CALIBRE_DB_TIMEOUT_SECS: u64 = 15;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -197,20 +200,54 @@ pub fn load_books(config: &CalibreConfig, force_refresh: bool) -> Result<Vec<Cal
         return Ok(Vec::new());
     }
 
+    let started = Instant::now();
+    info!(
+        force_refresh,
+        list_cache_ttl_secs = config.list_cache_ttl_secs,
+        thumb_prefetch_limit = THUMB_PREFETCH_LIMIT,
+        thumb_prefetch_budget_ms = THUMB_PREFETCH_BUDGET.as_millis(),
+        "Starting calibre catalog load"
+    );
+
     let signature = cache_signature(config);
     if !force_refresh {
         if let Some(mut cached) = try_load_cache(config, &signature)? {
-            let changed = hydrate_book_thumbnails(config, &mut cached, THUMB_PREFETCH_LIMIT);
+            info!(book_count = cached.len(), "Using cached calibre catalog");
+            let changed = hydrate_book_thumbnails(
+                config,
+                &mut cached,
+                THUMB_PREFETCH_LIMIT,
+                THUMB_PREFETCH_BUDGET,
+            );
             if changed {
                 let _ = write_cache(&signature, &cached);
             }
+            info!(
+                book_count = cached.len(),
+                elapsed_ms = started.elapsed().as_millis(),
+                "Finished calibre catalog load from cache"
+            );
             return Ok(cached);
         }
     }
 
     let mut books = fetch_books(config)?;
-    let _ = hydrate_book_thumbnails(config, &mut books, THUMB_PREFETCH_LIMIT);
+    info!(
+        book_count = books.len(),
+        "Fetched calibre catalog from source"
+    );
+    let _ = hydrate_book_thumbnails(
+        config,
+        &mut books,
+        THUMB_PREFETCH_LIMIT,
+        THUMB_PREFETCH_BUDGET,
+    );
     write_cache(&signature, &books)?;
+    info!(
+        book_count = books.len(),
+        elapsed_ms = started.elapsed().as_millis(),
+        "Finished calibre catalog load"
+    );
     Ok(books)
 }
 
@@ -344,8 +381,12 @@ fn fetch_books(config: &CalibreConfig) -> Result<Vec<CalibreBook>> {
 fn fetch_rows_from_targets(config: &CalibreConfig) -> Result<Vec<serde_json::Value>> {
     let mut last_err = None;
     for target in calibre_targets(config) {
+        info!(target = %target.label, "Attempting calibre target");
         match run_calibredb_list(config, &target) {
-            Ok(rows) => return Ok(rows),
+            Ok(rows) => {
+                info!(target = %target.label, row_count = rows.len(), "Calibre target responded");
+                return Ok(rows);
+            }
             Err(err) => last_err = Some(format!("{}: {err}", target.label)),
         }
     }
@@ -360,6 +401,8 @@ fn run_calibredb_list(
     target: &CalibreTarget,
 ) -> Result<Vec<serde_json::Value>> {
     let mut cmd = Command::new(&config.calibredb_bin);
+    cmd.arg("--timeout")
+        .arg(CALIBRE_DB_TIMEOUT_SECS.to_string());
     cmd.arg("--with-library").arg(&target.with_library);
     if let Some(username) = &target.username {
         cmd.arg("--username").arg(username);
@@ -398,6 +441,8 @@ fn run_calibredb_export(
     out_dir: &Path,
 ) -> Result<()> {
     let mut cmd = Command::new(&config.calibredb_bin);
+    cmd.arg("--timeout")
+        .arg((CALIBRE_DB_TIMEOUT_SECS * 4).to_string());
     cmd.arg("--with-library").arg(&target.with_library);
     if let Some(username) = &target.username {
         cmd.arg("--username").arg(username);
@@ -713,17 +758,49 @@ fn hydrate_book_thumbnails(
     config: &CalibreConfig,
     books: &mut [CalibreBook],
     limit: usize,
+    budget: Duration,
 ) -> bool {
     let mut changed = false;
+    let started = Instant::now();
+    let mut processed = 0usize;
+    let mut available = 0usize;
     let prefetch_count = books.len().min(limit);
     for book in books.iter_mut().take(prefetch_count) {
+        if started.elapsed() >= budget {
+            info!(
+                processed,
+                available,
+                budget_ms = budget.as_millis(),
+                "Stopping calibre thumbnail prefetch due to time budget"
+            );
+            break;
+        }
         let current = book.cover_thumbnail.clone();
         let next = ensure_book_thumbnail(config, book.id, book.path.as_deref());
         if next != current {
             book.cover_thumbnail = next;
             changed = true;
         }
+        processed += 1;
+        if book.cover_thumbnail.is_some() {
+            available += 1;
+        }
+        if processed % 25 == 0 {
+            info!(
+                processed,
+                available,
+                elapsed_ms = started.elapsed().as_millis(),
+                "Calibre thumbnail prefetch progress"
+            );
+        }
     }
+    info!(
+        processed,
+        available,
+        changed,
+        elapsed_ms = started.elapsed().as_millis(),
+        "Finished calibre thumbnail prefetch pass"
+    );
     changed
 }
 
@@ -766,7 +843,7 @@ fn resolve_local_cover_file(book_dir: &Path) -> Option<PathBuf> {
 
 fn fetch_thumbnail_from_server(config: &CalibreConfig, book_id: u64) -> Option<Vec<u8>> {
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(6))
+        .timeout(THUMB_FETCH_TIMEOUT)
         .build()
         .ok()?;
     let username = effective_username(config);

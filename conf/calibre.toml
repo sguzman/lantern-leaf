@@ -29,4 +29,4 @@ allowed_extensions = ["epub", "md", "txt"]
 columns = ["title", "extension", "author", "year", "size"]
 
 # Reuse cached Calibre book list for this many seconds.
-list_cache_ttl_secs = 6000
+list_cache_ttl_secs = 60000
