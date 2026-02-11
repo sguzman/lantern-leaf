@@ -54,52 +54,34 @@ impl TtsEngine {
         files: &[PathBuf],
         pause_after: std::time::Duration,
         speed: f32,
+        volume: f32,
+        start_paused: bool,
     ) -> Result<TtsPlayback> {
         let (_stream, handle) = OutputStream::try_default().context("Opening audio output")?;
         let sink = Sink::try_new(&handle).context("Creating sink")?;
-        let speed = if speed <= f32::EPSILON { 1.0 } else { speed };
+        let mut playback = TtsPlayback {
+            _stream,
+            sink,
+            sentence_durations: Vec::new(),
+        };
+        playback.set_volume(volume);
+        if start_paused {
+            playback.pause();
+        }
 
         info!(
             count = files.len(),
             pause_ms = pause_after.as_millis(),
+            volume,
+            start_paused,
             speed,
             "Starting TTS playback"
         );
-        let mut sentence_durations = Vec::with_capacity(files.len());
-        for file in files {
-            let reader = BufReader::new(File::open(file)?);
-            let source = Decoder::new(reader)?;
-            if (speed - 1.0).abs() <= f32::EPSILON {
-                let dur = source
-                    .total_duration()
-                    .unwrap_or_else(|| sentence_duration(file));
-                sentence_durations.push(dur);
-                sink.append(source);
-            } else {
-                let channels = source.channels() as u16;
-                let sample_rate = source.sample_rate();
-                let samples: Vec<f32> = source.convert_samples().collect();
-                let stretched = time_stretch(&samples, sample_rate, channels, speed)
-                    .context("Time-stretching audio")?;
-                let dur = std::time::Duration::from_secs_f64(
-                    stretched.len() as f64 / (sample_rate as f64 * channels as f64),
-                );
-                sentence_durations.push(dur);
-                let buffer = SamplesBuffer::new(channels, sample_rate, stretched);
-                sink.append(buffer);
-            }
-            if pause_after > std::time::Duration::ZERO {
-                let silence = Zero::<f32>::new(1, 48_000).take_duration(pause_after);
-                sink.append(silence);
-            }
+        playback.append_files(files, pause_after, speed)?;
+        if !start_paused {
+            playback.play();
         }
-
-        sink.play();
-        Ok(TtsPlayback {
-            _stream,
-            sink,
-            sentence_durations,
-        })
+        Ok(playback)
     }
 
     /// Prepare a batch of sentences concurrently using a thread pool.
@@ -289,6 +271,46 @@ impl TtsPlayback {
 
     pub fn set_volume(&self, volume: f32) {
         self.sink.set_volume(volume.max(0.0));
+    }
+
+    pub fn append_files(
+        &mut self,
+        files: &[PathBuf],
+        pause_after: std::time::Duration,
+        speed: f32,
+    ) -> Result<Vec<std::time::Duration>> {
+        let speed = if speed <= f32::EPSILON { 1.0 } else { speed };
+        let mut appended_durations = Vec::with_capacity(files.len());
+        for file in files {
+            let reader = BufReader::new(File::open(file)?);
+            let source = Decoder::new(reader)?;
+            if (speed - 1.0).abs() <= f32::EPSILON {
+                let dur = source
+                    .total_duration()
+                    .unwrap_or_else(|| sentence_duration(file));
+                appended_durations.push(dur);
+                self.sink.append(source);
+            } else {
+                let channels = source.channels() as u16;
+                let sample_rate = source.sample_rate();
+                let samples: Vec<f32> = source.convert_samples().collect();
+                let stretched = time_stretch(&samples, sample_rate, channels, speed)
+                    .context("Time-stretching audio")?;
+                let dur = std::time::Duration::from_secs_f64(
+                    stretched.len() as f64 / (sample_rate as f64 * channels as f64),
+                );
+                appended_durations.push(dur);
+                let buffer = SamplesBuffer::new(channels, sample_rate, stretched);
+                self.sink.append(buffer);
+            }
+            if pause_after > std::time::Duration::ZERO {
+                let silence = Zero::<f32>::new(1, 48_000).take_duration(pause_after);
+                self.sink.append(silence);
+            }
+        }
+        self.sentence_durations
+            .extend(appended_durations.iter().copied());
+        Ok(appended_durations)
     }
 
     pub fn sentence_durations(&self) -> &[std::time::Duration] {

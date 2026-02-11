@@ -102,6 +102,12 @@ pub enum Message {
         request_id: u64,
         files: Vec<(PathBuf, Duration)>,
     },
+    TtsAppendPrepared {
+        page: usize,
+        start_idx: usize,
+        request_id: u64,
+        files: Vec<(PathBuf, Duration)>,
+    },
     Tick(Instant),
 }
 

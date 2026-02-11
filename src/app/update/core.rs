@@ -169,6 +169,12 @@ impl App {
                 request_id,
                 files,
             } => self.handle_tts_prepared(page, start_idx, request_id, files, &mut effects),
+            Message::TtsAppendPrepared {
+                page,
+                start_idx,
+                request_id,
+                files,
+            } => self.handle_tts_append_prepared(page, start_idx, request_id, files),
             Message::Tick(now) => self.handle_tick(now, &mut effects),
         }
 

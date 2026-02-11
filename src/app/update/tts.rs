@@ -22,7 +22,8 @@ impl App {
             self.config.pause_after_sentence = clamped;
             info!(pause_secs = clamped, "Updated pause after sentence");
             effects.push(Effect::SaveConfig);
-            if self.tts.playback.is_some() {
+            if let Some(playback) = &self.tts.playback {
+                self.tts.resume_after_prepare = !playback.is_paused();
                 let idx = self.tts.current_sentence_idx.unwrap_or(0);
                 effects.push(Effect::StartTts {
                     page: self.reader.current_page,
@@ -70,7 +71,8 @@ impl App {
         let clamped = speed.clamp(MIN_TTS_SPEED, MAX_TTS_SPEED);
         self.config.tts_speed = clamped;
         info!(speed = self.config.tts_speed, "Adjusted TTS speed");
-        if self.tts.playback.is_some() {
+        if let Some(playback) = &self.tts.playback {
+            self.tts.resume_after_prepare = !playback.is_paused();
             let idx = self.tts.current_sentence_idx.unwrap_or(0);
             effects.push(Effect::StartTts {
                 page: self.reader.current_page,
@@ -108,6 +110,7 @@ impl App {
             self.tts.started_at = Some(Instant::now());
         } else {
             let start_idx = self.tts.current_sentence_idx.unwrap_or(0);
+            self.tts.resume_after_prepare = true;
             info!(start_idx, "Starting TTS playback from cursor");
             effects.push(Effect::StartTts {
                 page: self.reader.current_page,
@@ -134,6 +137,7 @@ impl App {
 
     pub(super) fn handle_play_from_page_start(&mut self, effects: &mut Vec<Effect>) {
         info!("Playing page from start");
+        self.tts.resume_after_prepare = true;
         effects.push(Effect::StartTts {
             page: self.reader.current_page,
             sentence_idx: 0,
@@ -161,6 +165,7 @@ impl App {
             self.tts.preparing = false;
             self.tts.preparing_page = None;
             self.tts.preparing_sentence_idx = None;
+            self.tts.pending_append = false;
             info!("Cancelled pending TTS batch preparation");
         }
         if let Some(playback) = &self.tts.playback {
@@ -177,6 +182,7 @@ impl App {
         let next_idx = self.tts.current_sentence_idx.unwrap_or(0) + 1;
         if next_idx < self.tts.last_sentences.len() {
             info!(next_idx, "Seeking forward within page");
+            self.tts.resume_after_prepare = true;
             effects.push(Effect::StartTts {
                 page: self.reader.current_page,
                 sentence_idx: next_idx,
@@ -186,6 +192,7 @@ impl App {
         } else if self.reader.current_page + 1 < self.reader.pages.len() {
             self.reader.current_page += 1;
             info!("Seeking forward into next page");
+            self.tts.resume_after_prepare = true;
             effects.push(Effect::StartTts {
                 page: self.reader.current_page,
                 sentence_idx: 0,
@@ -204,6 +211,7 @@ impl App {
                 previous_idx = current_idx.saturating_sub(1),
                 "Seeking backward within page"
             );
+            self.tts.resume_after_prepare = true;
             effects.push(Effect::StartTts {
                 page: self.reader.current_page,
                 sentence_idx: current_idx - 1,
@@ -216,6 +224,7 @@ impl App {
                 .sentence_count_for_page(self.reader.current_page)
                 .saturating_sub(1);
             info!("Seeking backward into previous page");
+            self.tts.resume_after_prepare = true;
             effects.push(Effect::StartTts {
                 page: self.reader.current_page,
                 sentence_idx: last_idx,
@@ -286,6 +295,9 @@ impl App {
                 effects.push(Effect::SaveBookmark);
             }
         } else {
+            if self.tts.pending_append {
+                return;
+            }
             effects.push(Effect::StopTts);
             if self.reader.current_page + 1 < self.reader.pages.len() {
                 self.reader.current_page += 1;
@@ -343,16 +355,20 @@ impl App {
             self.tts.current_sentence_idx = None;
             return;
         }
+        let keep_pending_append = self.tts.pending_append;
         self.stop_playback();
+        self.tts.pending_append = keep_pending_append;
         if let Some(engine) = &self.tts.engine {
             let file_paths: Vec<_> = files.iter().map(|(p, _)| p.clone()).collect();
+            let start_paused = !self.tts.resume_after_prepare;
             if let Ok(playback) = engine.play_files(
                 &file_paths,
                 Duration::from_secs_f32(self.config.pause_after_sentence),
                 self.config.tts_speed,
+                self.config.tts_volume,
+                start_paused,
             ) {
-                playback.set_volume(self.config.tts_volume);
-                let played = playback.sentence_durations();
+                let played = playback.sentence_durations().to_vec();
                 self.tts.track = if played.len() == file_paths.len() {
                     file_paths.into_iter().zip(played.iter().copied()).collect()
                 } else {
@@ -376,8 +392,14 @@ impl App {
                 };
                 self.tts.total_sources = self.tts.track.len() * self.tts.sources_per_sentence;
                 self.tts.elapsed = Duration::ZERO;
-                self.tts.started_at = Some(Instant::now());
-                self.tts.running = true;
+                if start_paused {
+                    self.tts.started_at = None;
+                    self.tts.running = false;
+                } else {
+                    self.tts.started_at = Some(Instant::now());
+                    self.tts.running = true;
+                }
+                self.tts.resume_after_prepare = true;
                 effects.push(Effect::AutoScrollToCurrent);
                 debug!(
                     offset = self.tts.sentence_offset,
@@ -385,8 +407,69 @@ impl App {
                 );
             } else {
                 warn!("Failed to start playback from prepared files");
+                self.tts.pending_append = false;
             }
         }
+    }
+
+    pub(super) fn handle_tts_append_prepared(
+        &mut self,
+        page: usize,
+        start_idx: usize,
+        request_id: u64,
+        files: Vec<(std::path::PathBuf, Duration)>,
+    ) {
+        if request_id != self.tts.request_id {
+            debug!(
+                request_id,
+                current = self.tts.request_id,
+                "Ignoring stale append TTS request"
+            );
+            return;
+        }
+        if page != self.reader.current_page {
+            debug!(
+                page,
+                current = self.reader.current_page,
+                "Ignoring stale append TTS batch"
+            );
+            return;
+        }
+        self.tts.pending_append = false;
+        if files.is_empty() {
+            warn!("Append TTS batch was empty");
+            return;
+        }
+        let file_paths: Vec<_> = files.iter().map(|(p, _)| p.clone()).collect();
+        let appended = if let Some(playback) = self.tts.playback.as_mut() {
+            match playback.append_files(
+                &file_paths,
+                Duration::from_secs_f32(self.config.pause_after_sentence),
+                self.config.tts_speed,
+            ) {
+                Ok(durations) => durations,
+                Err(err) => {
+                    warn!("Failed appending prepared TTS files: {err}");
+                    return;
+                }
+            }
+        } else {
+            return;
+        };
+        if appended.len() == file_paths.len() {
+            self.tts
+                .track
+                .extend(file_paths.into_iter().zip(appended.iter().copied()));
+        } else {
+            self.tts.track.extend(files);
+        }
+        self.tts.total_sources = self.tts.track.len() * self.tts.sources_per_sentence.max(1);
+        info!(
+            page = page + 1,
+            start_idx,
+            appended = self.tts.track.len(),
+            "Appended prepared TTS files to active playback"
+        );
     }
 
     pub(super) fn start_playback_from(
@@ -434,6 +517,7 @@ impl App {
             .plan_page_cached(&self.epub_path, page, &display_sentences);
         self.tts.display_to_audio = plan.display_to_audio;
         self.tts.audio_to_display = plan.audio_to_display;
+        let audio_sentences = plan.audio_sentences;
         let Some(audio_start_idx) =
             self.find_audio_start_for_display_sentence(requested_display_idx)
         else {
@@ -462,12 +546,12 @@ impl App {
         let page_id = page;
         self.tts.started_at = None;
         self.tts.elapsed = Duration::ZERO;
+        self.tts.pending_append = false;
         self.tts.preparing = true;
         self.tts.preparing_page = Some(page);
         self.tts.preparing_sentence_idx = Some(requested_display_idx);
         self.tts.request_id = self.tts.request_id.wrapping_add(1);
         let request_id = self.tts.request_id;
-        self.save_epub_config();
         info!(
             page = page + 1,
             sentence_idx = requested_display_idx,
@@ -479,14 +563,38 @@ impl App {
             "Preparing playback task"
         );
 
-        let audio_sentences = plan.audio_sentences;
-        Task::perform(
+        let total_audio = audio_sentences.len();
+        let remaining = total_audio.saturating_sub(audio_start_idx);
+        let initial_count = remaining.min(1);
+        let initial_sentences = audio_sentences
+            .iter()
+            .skip(audio_start_idx)
+            .take(initial_count)
+            .cloned()
+            .collect::<Vec<_>>();
+        let append_sentences = audio_sentences
+            .iter()
+            .skip(audio_start_idx + initial_count)
+            .cloned()
+            .collect::<Vec<_>>();
+        self.tts.pending_append = !append_sentences.is_empty();
+        info!(
+            page = page + 1,
+            audio_start_idx,
+            initial_count,
+            append_count = append_sentences.len(),
+            "Split TTS generation into initial playback batch and background append batch"
+        );
+
+        let initial_engine = engine.clone();
+        let initial_cache = cache_root.clone();
+        let initial_task = Task::perform(
             async move {
-                engine
+                initial_engine
                     .prepare_batch(
-                        cache_root,
-                        audio_sentences,
-                        audio_start_idx,
+                        initial_cache,
+                        initial_sentences,
+                        0,
                         threads,
                         Duration::from_secs_f32(progress_log_interval_secs),
                     )
@@ -504,7 +612,39 @@ impl App {
                     })
             },
             |msg| msg,
-        )
+        );
+
+        if append_sentences.is_empty() {
+            return initial_task;
+        }
+
+        let append_start_idx = audio_start_idx + initial_count;
+        let append_task = Task::perform(
+            async move {
+                engine
+                    .prepare_batch(
+                        cache_root,
+                        append_sentences,
+                        0,
+                        threads,
+                        Duration::from_secs_f32(progress_log_interval_secs),
+                    )
+                    .map(|files| super::super::messages::Message::TtsAppendPrepared {
+                        page: page_id,
+                        start_idx: append_start_idx,
+                        request_id,
+                        files,
+                    })
+                    .unwrap_or_else(|_| super::super::messages::Message::TtsAppendPrepared {
+                        page: page_id,
+                        start_idx: append_start_idx,
+                        request_id,
+                        files: Vec::new(),
+                    })
+            },
+            |msg| msg,
+        );
+        Task::batch([initial_task, append_task])
     }
 
     fn begin_play_from_sentence(
@@ -521,6 +661,7 @@ impl App {
         self.tts.last_sentences = sentences;
         self.tts.current_sentence_idx = Some(clamped);
         self.tts.sentence_offset = clamped;
+        self.tts.resume_after_prepare = true;
         info!(idx = clamped, "{log_message}");
         effects.push(Effect::StartTts {
             page: self.reader.current_page,

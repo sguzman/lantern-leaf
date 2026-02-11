@@ -68,6 +68,8 @@ pub struct TtsState {
     pub(super) preparing: bool,
     pub(super) preparing_page: Option<usize>,
     pub(super) preparing_sentence_idx: Option<usize>,
+    pub(super) pending_append: bool,
+    pub(super) resume_after_prepare: bool,
     pub(super) last_sentences: Vec<String>,
     pub(super) current_sentence_idx: Option<usize>,
     pub(super) sentence_offset: usize,
@@ -183,6 +185,7 @@ impl App {
         self.tts.running = false;
         self.tts.started_at = None;
         self.tts.total_sources = 0;
+        self.tts.pending_append = false;
     }
 
     pub(super) fn current_font(&self) -> Font {
@@ -449,6 +452,8 @@ impl App {
             preparing: false,
             preparing_page: None,
             preparing_sentence_idx: None,
+            pending_append: false,
+            resume_after_prepare: true,
             last_sentences: Vec::new(),
             current_sentence_idx: None,
             sentence_offset: 0,
@@ -617,6 +622,8 @@ impl App {
                 preparing: false,
                 preparing_page: None,
                 preparing_sentence_idx: None,
+                pending_append: false,
+                resume_after_prepare: true,
                 last_sentences: Vec::new(),
                 current_sentence_idx: None,
                 sentence_offset: 0,
@@ -746,6 +753,8 @@ impl App {
                 preparing: false,
                 preparing_page: None,
                 preparing_sentence_idx: None,
+                pending_append: false,
+                resume_after_prepare: true,
                 last_sentences: Vec::new(),
                 current_sentence_idx: None,
                 sentence_offset: 0,
