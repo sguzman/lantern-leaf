@@ -62,6 +62,13 @@ pub struct ReaderState {
 }
 
 /// Runtime TTS model (configuration lives in `AppConfig`).
+pub struct PendingAppendBatch {
+    pub(super) page: usize,
+    pub(super) request_id: u64,
+    pub(super) start_idx: usize,
+    pub(super) audio_sentences: Vec<String>,
+}
+
 pub struct TtsState {
     pub(super) engine: Option<TtsEngine>,
     pub(super) playback: Option<TtsPlayback>,
@@ -69,6 +76,7 @@ pub struct TtsState {
     pub(super) preparing_page: Option<usize>,
     pub(super) preparing_sentence_idx: Option<usize>,
     pub(super) pending_append: bool,
+    pub(super) pending_append_batch: Option<PendingAppendBatch>,
     pub(super) resume_after_prepare: bool,
     pub(super) last_sentences: Vec<String>,
     pub(super) current_sentence_idx: Option<usize>,
@@ -186,6 +194,7 @@ impl App {
         self.tts.started_at = None;
         self.tts.total_sources = 0;
         self.tts.pending_append = false;
+        self.tts.pending_append_batch = None;
     }
 
     pub(super) fn current_font(&self) -> Font {
@@ -453,6 +462,7 @@ impl App {
             preparing_page: None,
             preparing_sentence_idx: None,
             pending_append: false,
+            pending_append_batch: None,
             resume_after_prepare: true,
             last_sentences: Vec::new(),
             current_sentence_idx: None,
@@ -623,6 +633,7 @@ impl App {
                 preparing_page: None,
                 preparing_sentence_idx: None,
                 pending_append: false,
+                pending_append_batch: None,
                 resume_after_prepare: true,
                 last_sentences: Vec::new(),
                 current_sentence_idx: None,
@@ -754,6 +765,7 @@ impl App {
                 preparing_page: None,
                 preparing_sentence_idx: None,
                 pending_append: false,
+                pending_append_batch: None,
                 resume_after_prepare: true,
                 last_sentences: Vec::new(),
                 current_sentence_idx: None,

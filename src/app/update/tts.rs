@@ -166,6 +166,7 @@ impl App {
             self.tts.preparing_page = None;
             self.tts.preparing_sentence_idx = None;
             self.tts.pending_append = false;
+            self.tts.pending_append_batch = None;
             info!("Cancelled pending TTS batch preparation");
         }
         if let Some(playback) = &self.tts.playback {
@@ -180,7 +181,7 @@ impl App {
 
     pub(super) fn handle_seek_forward(&mut self, effects: &mut Vec<Effect>) {
         let next_idx = self.tts.current_sentence_idx.unwrap_or(0) + 1;
-        if next_idx < self.tts.last_sentences.len() {
+        if next_idx < self.sentence_count_for_page(self.reader.current_page) {
             info!(next_idx, "Seeking forward within page");
             self.tts.resume_after_prepare = true;
             effects.push(Effect::StartTts {
@@ -287,7 +288,10 @@ impl App {
             let display_idx = self
                 .display_index_for_audio_sentence(clamped_audio)
                 .unwrap_or_else(|| {
-                    clamped_audio.min(self.tts.last_sentences.len().saturating_sub(1))
+                    clamped_audio.min(
+                        self.sentence_count_for_page(self.reader.current_page)
+                            .saturating_sub(1),
+                    )
                 });
             if Some(display_idx) != self.tts.current_sentence_idx {
                 self.tts.current_sentence_idx = Some(display_idx);
@@ -380,9 +384,10 @@ impl App {
                 let display_idx = self
                     .display_index_for_audio_sentence(self.tts.sentence_offset)
                     .unwrap_or_else(|| {
-                        self.tts
-                            .sentence_offset
-                            .min(self.tts.last_sentences.len().saturating_sub(1))
+                        self.tts.sentence_offset.min(
+                            self.sentence_count_for_page(self.reader.current_page)
+                                .saturating_sub(1),
+                        )
                     });
                 self.tts.current_sentence_idx = Some(display_idx);
                 self.tts.sources_per_sentence = if self.config.pause_after_sentence > f32::EPSILON {
@@ -401,6 +406,16 @@ impl App {
                 }
                 self.tts.resume_after_prepare = true;
                 effects.push(Effect::AutoScrollToCurrent);
+                if let Some(pending) = self.tts.pending_append_batch.take() {
+                    if pending.request_id == request_id && pending.page == page {
+                        effects.push(Effect::PrepareTtsAppend {
+                            page: pending.page,
+                            request_id: pending.request_id,
+                            start_idx: pending.start_idx,
+                            audio_sentences: pending.audio_sentences,
+                        });
+                    }
+                }
                 debug!(
                     offset = self.tts.sentence_offset,
                     "Started TTS playback and highlighting"
@@ -408,6 +423,7 @@ impl App {
             } else {
                 warn!("Failed to start playback from prepared files");
                 self.tts.pending_append = false;
+                self.tts.pending_append_batch = None;
             }
         }
     }
@@ -436,6 +452,7 @@ impl App {
             return;
         }
         self.tts.pending_append = false;
+        self.tts.pending_append_batch = None;
         if files.is_empty() {
             warn!("Append TTS batch was empty");
             return;
@@ -511,6 +528,7 @@ impl App {
             self.tts.preparing_page = None;
             self.tts.preparing_sentence_idx = None;
             self.tts.pending_append = false;
+            self.tts.pending_append_batch = None;
             self.tts.current_sentence_idx = Some(requested_display_idx);
             self.tts.sentence_offset = 0;
             return;
@@ -543,12 +561,12 @@ impl App {
         self.tts.started_at = None;
 
         let display_sentences = self.raw_sentences_for_page(page);
-        self.tts.last_sentences = display_sentences.clone();
         if display_sentences.is_empty() {
             self.tts.preparing = false;
             self.tts.preparing_page = None;
             self.tts.preparing_sentence_idx = None;
             self.tts.pending_append = false;
+            self.tts.pending_append_batch = None;
             self.tts.current_sentence_idx = None;
             self.tts.sentence_offset = 0;
             self.tts.display_to_audio.clear();
@@ -574,6 +592,7 @@ impl App {
         self.tts.started_at = None;
         self.tts.elapsed = Duration::ZERO;
         self.tts.pending_append = false;
+        self.tts.pending_append_batch = None;
         self.tts.preparing = true;
         self.tts.preparing_page = Some(page);
         self.tts.preparing_sentence_idx = Some(requested_display_idx);
@@ -607,12 +626,11 @@ impl App {
         effects: &mut Vec<Effect>,
         log_message: &str,
     ) {
-        let sentences = self.raw_sentences_for_page(self.reader.current_page);
-        if sentences.is_empty() {
+        let sentence_count = self.sentence_count_for_page(self.reader.current_page);
+        if sentence_count == 0 {
             return;
         }
-        let clamped = idx.min(sentences.len().saturating_sub(1));
-        self.tts.last_sentences = sentences;
+        let clamped = idx.min(sentence_count.saturating_sub(1));
         self.tts.current_sentence_idx = Some(clamped);
         self.tts.sentence_offset = clamped;
         self.tts.resume_after_prepare = true;
@@ -622,6 +640,5 @@ impl App {
             sentence_idx: clamped,
         });
         effects.push(Effect::AutoScrollToCurrent);
-        effects.push(Effect::SaveBookmark);
     }
 }

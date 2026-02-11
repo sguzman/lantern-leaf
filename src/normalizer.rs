@@ -150,6 +150,7 @@ struct PronunciationConfig {
     insert_and: bool,
     enable_brand_map: bool,
     brand_map: BTreeMap<String, String>,
+    custom_pronunciations: BTreeMap<String, String>,
 }
 
 impl Default for PronunciationConfig {
@@ -167,6 +168,7 @@ impl Default for PronunciationConfig {
             insert_and: false,
             enable_brand_map: true,
             brand_map,
+            custom_pronunciations: BTreeMap::new(),
         }
     }
 }
@@ -439,6 +441,10 @@ impl TextNormalizer {
             && !self.config.pronunciation.brand_map.is_empty()
         {
             text = apply_brand_map(&text, &self.config.pronunciation.brand_map);
+        }
+
+        if !self.config.pronunciation.custom_pronunciations.is_empty() {
+            text = apply_brand_map(&text, &self.config.pronunciation.custom_pronunciations);
         }
 
         if self.config.pronunciation.year_mode != YearMode::None {

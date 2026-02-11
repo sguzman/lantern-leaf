@@ -96,3 +96,7 @@ Mysql = "My S Q L"
 SQLite = "S Q Lite"
 SQLITE = "S Q Lite"
 PostCSS = "Post C S S"
+
+# Arbitrary user-defined pronunciations for whole words/tokens.
+[normalization.pronunciation.custom_pronunciations]
+Cato = "Kay toe"
