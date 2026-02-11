@@ -529,7 +529,6 @@ impl App {
             "Loaded book into reader state"
         );
 
-        self.ensure_text_only_preview_for_page(self.reader.current_page);
         self.update_search_matches();
         initial_scroll
     }
@@ -740,7 +739,6 @@ impl App {
             "Initialized app state"
         );
 
-        app.ensure_text_only_preview_for_page(app.reader.current_page);
         app.update_search_matches();
 
         (app, init_task)

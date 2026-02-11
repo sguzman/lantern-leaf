@@ -360,8 +360,10 @@ impl App {
             return;
         }
         let keep_pending_append = self.tts.pending_append;
+        let keep_pending_append_batch = self.tts.pending_append_batch.take();
         self.stop_playback();
         self.tts.pending_append = keep_pending_append;
+        self.tts.pending_append_batch = keep_pending_append_batch;
         if let Some(engine) = &self.tts.engine {
             let file_paths: Vec<_> = files.iter().map(|(p, _)| p.clone()).collect();
             let start_paused = !self.tts.resume_after_prepare;
