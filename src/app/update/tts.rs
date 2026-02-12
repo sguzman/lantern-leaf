@@ -760,28 +760,12 @@ impl App {
             "Scheduling async TTS planning tasks"
         );
         let normalizer = self.normalizer.clone();
-        let initial_normalizer = normalizer.clone();
         let epub_path = self.epub_path.clone();
-        let initial_epub_path = epub_path.clone();
-        let initial_sentences = display_sentences.clone();
-        let initial_task = Task::perform(
-            async move {
-                let initial = initial_normalizer.first_speakable_sentence_cached(
-                    &initial_epub_path,
-                    &initial_sentences,
-                    requested_display_idx,
-                );
-                super::super::messages::Message::TtsInitialReady {
-                    page,
-                    requested_display_idx,
-                    request_id,
-                    sentence_count: initial_sentences.len(),
-                    start_display_idx: initial.as_ref().map(|(display_idx, _, _)| *display_idx),
-                    start_audio_idx: initial.as_ref().map(|(_, audio_idx, _)| *audio_idx),
-                    audio_sentence: initial.map(|(_, _, sentence)| sentence),
-                }
-            },
-            |msg| msg,
+        debug!(
+            page = page + 1,
+            sentence_idx = requested_display_idx,
+            request_id,
+            "Quick-start batch disabled; waiting for full normalization plan"
         );
         let full_task = Task::perform(
             async move {
@@ -795,7 +779,7 @@ impl App {
             },
             |msg| msg,
         );
-        Task::batch(vec![initial_task, full_task])
+        full_task
     }
 
     fn begin_play_from_sentence(
