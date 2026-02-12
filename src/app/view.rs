@@ -120,7 +120,7 @@ impl App {
             "Search"
         });
 
-        let mut controls = row![
+        let mut controls_row = row![
             prev_button,
             next_button,
             theme_toggle,
@@ -132,15 +132,19 @@ impl App {
         .align_y(Vertical::Center)
         .width(Length::Fill);
         if show_text_only_toggle {
-            controls = controls.push(text_only_toggle);
+            controls_row = controls_row.push(text_only_toggle);
         }
         if show_tts_toggle {
-            controls = controls.push(tts_toggle);
+            controls_row = controls_row.push(tts_toggle);
         }
         if show_search_toggle {
-            controls = controls.push(search_toggle);
+            controls_row = controls_row.push(search_toggle);
         }
-        controls = controls.push(horizontal_space());
+        controls_row = controls_row.push(horizontal_space());
+        let controls = container(controls_row)
+            .height(Length::Fixed(42.0))
+            .align_y(Vertical::Center)
+            .width(Length::Fill);
 
         let font_controls = row![
             column![
@@ -1399,7 +1403,7 @@ impl App {
     fn estimate_button_width_px(label: &str) -> f32 {
         // Approximate intrinsic width for default text size plus button padding.
         let chars = label.chars().count() as f32;
-        (chars * 7.6) + 28.0
+        (chars * 9.0) + 44.0
     }
 
     fn format_duration_dhms(duration: Duration) -> String {
