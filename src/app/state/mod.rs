@@ -1,169 +1,39 @@
-use crate::cache::{Bookmark, RecentBook, list_recent_books, save_epub_config};
-use crate::calibre::{CalibreBook, CalibreColumn, CalibreConfig};
+mod bookmark;
+mod constants;
+mod reader;
+mod tts;
+mod ui;
+
+use crate::cache::{Bookmark, list_recent_books, save_epub_config};
+use crate::calibre::{CalibreColumn, CalibreConfig};
 use crate::config::{AppConfig, FontFamily, FontWeight, HighlightColor, ThemeMode};
-use crate::epub_loader::{BookImage, LoadedBook};
+use crate::epub_loader::LoadedBook;
 use crate::normalizer::TextNormalizer;
 use crate::pagination::{MAX_LINES_PER_PAGE, MIN_LINES_PER_PAGE, paginate};
 use crate::text_utils::split_sentences;
-use crate::tts::{TtsEngine, TtsPlayback};
+use crate::tts::TtsEngine;
 use iced::font::{Family, Weight};
-use iced::widget::scrollable::{Id as ScrollId, RelativeOffset};
+use iced::widget::scrollable::RelativeOffset;
 use iced::{Color, Font, Task};
-use once_cell::sync::Lazy;
 use regex::Regex;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
 
 use super::messages::{Component, Message};
 
-/// Limits and defaults for reader controls.
-pub(crate) const MAX_HORIZONTAL_MARGIN: u16 = 1000;
-pub(crate) const MAX_VERTICAL_MARGIN: u16 = 100;
-pub(crate) const MAX_WORD_SPACING: u32 = 5;
-pub(crate) const MAX_LETTER_SPACING: u32 = 3;
-pub(crate) const MIN_TTS_SPEED: f32 = 0.1;
-pub(crate) const MAX_TTS_SPEED: f32 = 3.0;
-pub(crate) const MIN_TTS_VOLUME: f32 = 0.0;
-pub(crate) const MAX_TTS_VOLUME: f32 = 2.0;
-pub(crate) const IMAGE_PREVIEW_HEIGHT_PX: f32 = 240.0;
-pub(crate) const IMAGE_LABEL_FONT_SIZE_PX: f32 = 14.0;
-pub(crate) const IMAGE_LABEL_LINE_HEIGHT: f32 = 1.0;
-pub(crate) const IMAGE_BLOCK_SPACING_PX: f32 = 6.0;
-pub(crate) const PAGE_FLOW_SPACING_PX: f32 = 12.0;
-pub(crate) const IMAGE_FOOTER_FONT_SIZE_PX: f32 = 13.0;
-pub(crate) const IMAGE_FOOTER_LINE_HEIGHT: f32 = 1.0;
-pub(crate) static TEXT_SCROLL_ID: Lazy<ScrollId> = Lazy::new(|| ScrollId::new("text-scroll"));
-pub(crate) const FONT_FAMILIES: [FontFamily; 13] = [
-    FontFamily::Sans,
-    FontFamily::Serif,
-    FontFamily::Monospace,
-    FontFamily::Lexend,
-    FontFamily::FiraCode,
-    FontFamily::AtkinsonHyperlegible,
-    FontFamily::AtkinsonHyperlegibleNext,
-    FontFamily::LexicaUltralegible,
-    FontFamily::Courier,
-    FontFamily::FrankGothic,
-    FontFamily::Hermit,
-    FontFamily::Hasklug,
-    FontFamily::NotoSans,
-];
-pub(crate) const FONT_WEIGHTS: [FontWeight; 3] =
-    [FontWeight::Light, FontWeight::Normal, FontWeight::Bold];
+pub(in crate::app) use bookmark::{BookmarkState, TextOnlyPreview};
+pub(crate) use constants::*;
+pub(in crate::app) use reader::ReaderState;
+pub(crate) use tts::TtsLifecycle;
+pub(in crate::app) use tts::{PendingAppendBatch, TtsState};
+pub(in crate::app) use ui::{CalibreState, RecentState, SearchState};
 
-/// Reader-related model.
-pub struct ReaderState {
-    pub(super) full_text: String,
-    pub(super) pages: Vec<String>,
-    pub(super) page_sentences: Vec<Vec<String>>,
-    pub(super) page_sentence_counts: Vec<usize>,
-    pub(super) images: Vec<BookImage>,
-    pub(super) current_page: usize,
+fn tts_engine_from_config(config: &AppConfig) -> Option<TtsEngine> {
+    TtsEngine::new(
+        config.tts_model_path.clone().into(),
+        config.tts_espeak_path.clone().into(),
+    )
+    .ok()
 }
-
-/// Runtime TTS model (configuration lives in `AppConfig`).
-pub struct PendingAppendBatch {
-    pub(super) page: usize,
-    pub(super) request_id: u64,
-    pub(super) start_idx: usize,
-    pub(super) audio_sentences: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TtsLifecycle {
-    Idle,
-    Preparing {
-        page: usize,
-        sentence_idx: usize,
-        request_id: u64,
-    },
-    Playing,
-    Paused,
-}
-
-pub struct TtsState {
-    pub(super) engine: Option<TtsEngine>,
-    pub(super) playback: Option<TtsPlayback>,
-    pub(super) lifecycle: TtsLifecycle,
-    pub(super) pending_append: bool,
-    pub(super) pending_append_batch: Option<PendingAppendBatch>,
-    pub(super) resume_after_prepare: bool,
-    pub(super) last_sentences: Vec<String>,
-    pub(super) current_sentence_idx: Option<usize>,
-    pub(super) sentence_offset: usize,
-    pub(super) track: Vec<(PathBuf, Duration)>,
-    pub(super) started_at: Option<Instant>,
-    pub(super) elapsed: Duration,
-    pub(super) request_id: u64,
-    pub(super) sources_per_sentence: usize,
-    pub(super) total_sources: usize,
-    pub(super) display_to_audio: Vec<Option<usize>>,
-    pub(super) audio_to_display: Vec<usize>,
-}
-
-impl TtsState {
-    pub(super) fn is_preparing(&self) -> bool {
-        matches!(self.lifecycle, TtsLifecycle::Preparing { .. })
-    }
-
-    pub(super) fn is_playing(&self) -> bool {
-        matches!(self.lifecycle, TtsLifecycle::Playing)
-    }
-
-    pub(super) fn preparing_context(&self) -> Option<(usize, usize, u64)> {
-        match self.lifecycle {
-            TtsLifecycle::Preparing {
-                page,
-                sentence_idx,
-                request_id,
-            } => Some((page, sentence_idx, request_id)),
-            _ => None,
-        }
-    }
-}
-
-/// Bookmark and scroll tracking model.
-pub struct BookmarkState {
-    pub(super) last_scroll_offset: RelativeOffset,
-    pub(super) viewport_fraction: f32,
-    pub(super) viewport_width: f32,
-    pub(super) viewport_height: f32,
-    pub(super) content_width: f32,
-    pub(super) content_height: f32,
-    pub(super) pending_sentence_snap: Option<usize>,
-}
-
-pub struct TextOnlyPreview {
-    pub(super) page: usize,
-    pub(super) audio_sentences: Vec<String>,
-    pub(super) display_to_audio: Vec<Option<usize>>,
-    pub(super) audio_to_display: Vec<usize>,
-}
-
-pub struct SearchState {
-    pub(super) visible: bool,
-    pub(super) query: String,
-    pub(super) error: Option<String>,
-    pub(super) matches: Vec<usize>,
-    pub(super) selected_match: usize,
-}
-
-pub struct RecentState {
-    pub(super) visible: bool,
-    pub(super) books: Vec<RecentBook>,
-}
-
-pub struct CalibreState {
-    pub(super) visible: bool,
-    pub(super) loading: bool,
-    pub(super) error: Option<String>,
-    pub(super) books: Vec<CalibreBook>,
-    pub(super) search_query: String,
-    pub(super) config: CalibreConfig,
-    pub(super) sort_column: CalibreColumn,
-    pub(super) sort_desc: bool,
-}
-
 /// Core application state composed of sub-models.
 pub struct App {
     pub(super) starter_mode: bool,
@@ -197,9 +67,7 @@ impl App {
                 .pages
                 .push(String::from("This EPUB appears to contain no text."));
         }
-        if self.reader.current_page >= self.reader.pages.len() {
-            self.reader.current_page = self.reader.pages.len() - 1;
-        }
+        self.reader.set_page_clamped(self.reader.current_page);
         self.reader.page_sentences = self
             .reader
             .pages
@@ -519,39 +387,16 @@ impl App {
         self.epub_path = epub_path;
         self.reader.full_text = book.text;
         self.reader.images = book.images;
-        self.reader.current_page = 0;
+        self.reader.set_page_clamped(0);
         self.bookmark.last_scroll_offset = RelativeOffset::START;
         self.bookmark.viewport_fraction = 0.25;
         self.bookmark.pending_sentence_snap = None;
-        self.tts = TtsState {
-            engine: TtsEngine::new(
-                self.config.tts_model_path.clone().into(),
-                self.config.tts_espeak_path.clone().into(),
-            )
-            .ok(),
-            playback: None,
-            lifecycle: TtsLifecycle::Idle,
-            pending_append: false,
-            pending_append_batch: None,
-            resume_after_prepare: true,
-            last_sentences: Vec::new(),
-            current_sentence_idx: None,
-            sentence_offset: 0,
-            track: Vec::new(),
-            started_at: None,
-            elapsed: Duration::ZERO,
-            request_id: 0,
-            sources_per_sentence: 1,
-            total_sources: 0,
-            display_to_audio: Vec::new(),
-            audio_to_display: Vec::new(),
-        };
+        self.tts = TtsState::new(tts_engine_from_config(&self.config));
 
         self.repaginate();
         let mut initial_scroll: Option<RelativeOffset> = None;
         if let Some(bookmark) = bookmark {
-            let capped_page = bookmark.page.min(self.reader.pages.len().saturating_sub(1));
-            self.reader.current_page = capped_page;
+            self.reader.set_page_clamped(bookmark.page);
             let scroll_y = if bookmark.scroll_y.is_finite() {
                 bookmark.scroll_y.clamp(0.0, 1.0)
             } else {
@@ -569,8 +414,13 @@ impl App {
                 .and_then(|target| self.tts.last_sentences.iter().position(|s| s == target))
                 .or(bookmark.sentence_idx)
                 .map(|idx| idx.min(self.tts.last_sentences.len().saturating_sub(1)));
-            self.tts.current_sentence_idx = restored_idx;
-            self.bookmark.pending_sentence_snap = restored_idx;
+            if let Some(idx) = restored_idx {
+                self.tts
+                    .set_current_sentence_clamped(idx, self.tts.last_sentences.len());
+            } else {
+                self.tts.current_sentence_idx = None;
+            }
+            self.bookmark.pending_sentence_snap = self.tts.current_sentence_idx;
 
             if self.bookmark.last_scroll_offset.y > 0.0 {
                 initial_scroll = Some(self.bookmark.last_scroll_offset);
@@ -690,29 +540,7 @@ impl App {
                 pending_sentence_snap: None,
             },
             epub_path,
-            tts: TtsState {
-                engine: TtsEngine::new(
-                    config.tts_model_path.clone().into(),
-                    config.tts_espeak_path.clone().into(),
-                )
-                .ok(),
-                playback: None,
-                lifecycle: TtsLifecycle::Idle,
-                pending_append: false,
-                pending_append_batch: None,
-                resume_after_prepare: true,
-                last_sentences: Vec::new(),
-                current_sentence_idx: None,
-                sentence_offset: 0,
-                track: Vec::new(),
-                started_at: None,
-                elapsed: Duration::ZERO,
-                request_id: 0,
-                sources_per_sentence: 1,
-                total_sources: 0,
-                display_to_audio: Vec::new(),
-                audio_to_display: Vec::new(),
-            },
+            tts: TtsState::new(tts_engine_from_config(&config)),
             config,
             normalizer: TextNormalizer::load_default(),
             text_only_mode: false,
@@ -747,8 +575,7 @@ impl App {
         let mut init_task = Task::none();
         match bookmark {
             Some(bookmark) => {
-                let capped_page = bookmark.page.min(app.reader.pages.len().saturating_sub(1));
-                app.reader.current_page = capped_page;
+                app.reader.set_page_clamped(bookmark.page);
                 let scroll_y = if bookmark.scroll_y.is_finite() {
                     bookmark.scroll_y.clamp(0.0, 1.0)
                 } else {
@@ -766,8 +593,13 @@ impl App {
                     .and_then(|target| app.tts.last_sentences.iter().position(|s| s == target))
                     .or(bookmark.sentence_idx)
                     .map(|idx| idx.min(app.tts.last_sentences.len().saturating_sub(1)));
-                app.tts.current_sentence_idx = restored_idx;
-                app.bookmark.pending_sentence_snap = restored_idx;
+                if let Some(idx) = restored_idx {
+                    app.tts
+                        .set_current_sentence_clamped(idx, app.tts.last_sentences.len());
+                } else {
+                    app.tts.current_sentence_idx = None;
+                }
+                app.bookmark.pending_sentence_snap = app.tts.current_sentence_idx;
 
                 if let Some(idx) = app.tts.current_sentence_idx {
                     // Prefer persisted scroll for initial layout, then do a one-time
@@ -822,25 +654,7 @@ impl App {
                 images: Vec::new(),
                 current_page: 0,
             },
-            tts: TtsState {
-                engine: None,
-                playback: None,
-                lifecycle: TtsLifecycle::Idle,
-                pending_append: false,
-                pending_append_batch: None,
-                resume_after_prepare: true,
-                last_sentences: Vec::new(),
-                current_sentence_idx: None,
-                sentence_offset: 0,
-                track: Vec::new(),
-                started_at: None,
-                elapsed: Duration::ZERO,
-                request_id: 0,
-                sources_per_sentence: 1,
-                total_sources: 0,
-                display_to_audio: Vec::new(),
-                audio_to_display: Vec::new(),
-            },
+            tts: TtsState::new(None),
             bookmark: BookmarkState {
                 last_scroll_offset: RelativeOffset::START,
                 viewport_fraction: 0.25,

@@ -547,8 +547,8 @@ impl App {
         if sentence_count == 0 {
             return;
         }
-        let clamped = idx.min(sentence_count.saturating_sub(1));
-        self.tts.current_sentence_idx = Some(clamped);
+        self.tts.set_current_sentence_clamped(idx, sentence_count);
+        let clamped = self.tts.current_sentence_idx.unwrap_or(0);
         self.tts.sentence_offset = clamped;
         self.tts.resume_after_prepare = true;
         info!(idx = clamped, "{log_message}");

@@ -1,6 +1,5 @@
 use super::super::super::state::{App, TtsLifecycle};
 use crate::normalizer::PageNormalization;
-use std::time::Duration;
 use tracing::{debug, info, warn};
 
 #[derive(Debug)]
@@ -53,9 +52,7 @@ fn on_start_requested(app: &mut App, page: usize, sentence_idx: usize) -> Vec<Tt
     }
 
     app.stop_playback();
-    app.tts.track.clear();
-    app.tts.elapsed = Duration::ZERO;
-    app.tts.started_at = None;
+    app.tts.clear_transient_playback_state();
 
     let display_sentences = app.raw_sentences_for_page(page);
     if display_sentences.is_empty() {
@@ -83,8 +80,6 @@ fn on_start_requested(app: &mut App, page: usize, sentence_idx: usize) -> Vec<Tt
     app.tts.current_sentence_idx = Some(requested_display_idx);
     app.tts.sentence_offset = requested_display_idx;
 
-    app.tts.started_at = None;
-    app.tts.elapsed = Duration::ZERO;
     app.tts.pending_append = false;
     app.tts.pending_append_batch = None;
     app.tts.request_id = app.tts.request_id.wrapping_add(1);
@@ -154,16 +149,11 @@ fn on_plan_ready(
         return Vec::new();
     }
 
-    app.tts.display_to_audio = plan
-        .display_to_audio
-        .into_iter()
-        .map(|mapped| mapped.filter(|idx| *idx < full_audio_sentences.len()))
-        .collect();
-    app.tts.audio_to_display = plan
-        .audio_to_display
-        .into_iter()
-        .take(full_audio_sentences.len())
-        .collect();
+    app.tts.set_mappings_checked(
+        plan.display_to_audio,
+        plan.audio_to_display,
+        full_audio_sentences.len(),
+    );
 
     let Some(mut audio_start_idx) =
         app.find_audio_start_for_display_sentence(requested_display_idx)
