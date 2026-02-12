@@ -530,9 +530,39 @@ impl App {
             return;
         }
 
-        self.tts.display_to_audio = plan.display_to_audio;
-        self.tts.audio_to_display = plan.audio_to_display;
-        let Some(audio_start_idx) =
+        let mut full_audio_sentences = plan.audio_sentences;
+        if full_audio_sentences.is_empty() {
+            warn!(
+                page = page + 1,
+                display_idx = requested_display_idx,
+                "No speakable text on page after normalization"
+            );
+            self.tts.preparing = false;
+            self.tts.prepare_dispatched = false;
+            self.tts.preparing_page = None;
+            self.tts.preparing_sentence_idx = None;
+            self.tts.quick_start_display_idx = None;
+            self.tts.pending_append = false;
+            self.tts.pending_append_batch = None;
+            self.tts.current_sentence_idx = Some(requested_display_idx);
+            self.tts.sentence_offset = 0;
+            return;
+        }
+
+        // Guard against stale/corrupted mappings that can reference audio indices
+        // outside this exact normalization payload.
+        self.tts.display_to_audio = plan
+            .display_to_audio
+            .into_iter()
+            .map(|mapped| mapped.filter(|idx| *idx < full_audio_sentences.len()))
+            .collect();
+        self.tts.audio_to_display = plan
+            .audio_to_display
+            .into_iter()
+            .take(full_audio_sentences.len())
+            .collect();
+
+        let Some(mut audio_start_idx) =
             self.find_audio_start_for_display_sentence(requested_display_idx)
         else {
             warn!(
@@ -551,7 +581,7 @@ impl App {
             self.tts.sentence_offset = 0;
             return;
         };
-        let mut full_audio_sentences = plan.audio_sentences;
+        audio_start_idx = audio_start_idx.min(full_audio_sentences.len().saturating_sub(1));
         if !self.tts.prepare_dispatched {
             let display_start_idx = self
                 .display_index_for_audio_sentence(audio_start_idx)
@@ -574,7 +604,8 @@ impl App {
             .unwrap_or(requested_display_idx);
         let quick_audio_idx = self
             .find_audio_start_for_display_sentence(quick_display_idx)
-            .unwrap_or(audio_start_idx);
+            .unwrap_or(audio_start_idx)
+            .min(full_audio_sentences.len().saturating_sub(1));
         let display_start_idx = self
             .display_index_for_audio_sentence(quick_audio_idx)
             .unwrap_or(quick_display_idx);
