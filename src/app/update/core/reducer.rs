@@ -169,6 +169,7 @@ impl App {
                 &mut effects,
             ),
             Message::Tick(now) => self.handle_tick(now, &mut effects),
+            Message::PollSystemSignals => self.handle_poll_system_signals(&mut effects),
         }
 
         if self.text_only_mode {
@@ -195,6 +196,12 @@ impl App {
             return;
         }
         effects.push(Effect::ReturnToStarter);
+    }
+
+    fn handle_poll_system_signals(&mut self, effects: &mut Vec<Effect>) {
+        if crate::take_sigint_requested() {
+            effects.push(Effect::QuitSafely);
+        }
     }
 
     fn handle_search_query_changed(&mut self, query: String) {

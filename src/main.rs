@@ -24,19 +24,34 @@ use crate::epub_loader::load_book_content;
 use anyhow::{Context, Result, anyhow};
 use std::env;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{error, info, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*, reload};
 
 type ReloadHandle = reload::Handle<EnvFilter, tracing_subscriber::Registry>;
+static SIGINT_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 fn main() {
     if tts_worker::maybe_run_worker() {
         return;
     }
+    install_signal_handlers();
     let reload_handle = init_tracing();
     if let Err(err) = run(&reload_handle) {
         error!("{err:?}");
         std::process::exit(1);
+    }
+}
+
+pub(crate) fn take_sigint_requested() -> bool {
+    SIGINT_REQUESTED.swap(false, Ordering::SeqCst)
+}
+
+fn install_signal_handlers() {
+    if let Err(err) = ctrlc::set_handler(|| {
+        SIGINT_REQUESTED.store(true, Ordering::SeqCst);
+    }) {
+        eprintln!("Failed to install Ctrl+C handler: {err}");
     }
 }
 

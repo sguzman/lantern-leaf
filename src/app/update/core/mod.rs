@@ -13,6 +13,8 @@ impl App {
     pub fn subscription(app: &App) -> Subscription<Message> {
         let mut subscriptions: Vec<Subscription<Message>> =
             vec![event::listen_with(runtime::runtime_event_to_message)];
+        subscriptions
+            .push(time::every(Duration::from_millis(120)).map(|_| Message::PollSystemSignals));
 
         if app.tts.is_playing() {
             subscriptions.push(time::every(Duration::from_millis(80)).map(Message::Tick));

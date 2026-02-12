@@ -123,6 +123,7 @@ pub enum Message {
         plan: PageNormalization,
     },
     Tick(Instant),
+    PollSystemSignals,
 }
 
 #[derive(Debug, Clone, Copy)]
