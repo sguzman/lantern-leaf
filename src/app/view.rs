@@ -77,68 +77,20 @@ impl App {
             Self::control_button("Next")
         };
 
-        let controls_spacing = 10.0;
-        let controls_budget = (self.controls_layout_width() - 12.0).max(0.0);
-        let mut used_controls_width = Self::estimate_button_width_px("Previous")
-            + Self::estimate_button_width_px("Next")
-            + Self::estimate_button_width_px(theme_label)
-            + Self::estimate_button_width_px("Close Book")
-            + Self::estimate_button_width_px(if self.config.show_settings {
-                "Hide Settings"
-            } else {
-                "Show Settings"
-            })
-            + Self::estimate_button_width_px(if self.show_stats {
-                "Hide Stats"
-            } else {
-                "Show Stats"
-            })
-            + (controls_spacing * 5.0);
-        let mut add_optional = |label: &str| -> bool {
-            let extra = controls_spacing + Self::estimate_button_width_px(label);
-            if used_controls_width + extra <= controls_budget {
-                used_controls_width += extra;
-                true
-            } else {
-                false
-            }
-        };
-        let show_search_toggle = add_optional(if self.search.visible {
-            "Hide Search"
-        } else {
-            "Search"
-        });
-        let show_tts_toggle = add_optional(if self.config.show_tts {
-            "Hide TTS"
-        } else {
-            "Show TTS"
-        });
-        let show_text_only_toggle = add_optional(if self.text_only_mode {
-            "Pretty Text"
-        } else {
-            "Text Only"
-        });
-
         let mut controls = row![
             prev_button,
             next_button,
             theme_toggle,
             close_session_button,
             settings_toggle,
-            stats_toggle
+            stats_toggle,
+            search_toggle,
+            tts_toggle,
+            text_only_toggle
         ]
         .spacing(10)
         .align_y(Vertical::Center)
         .width(Length::Fill);
-        if show_search_toggle {
-            controls = controls.push(search_toggle);
-        }
-        if show_tts_toggle {
-            controls = controls.push(tts_toggle);
-        }
-        if show_text_only_toggle {
-            controls = controls.push(text_only_toggle);
-        }
         controls = controls.push(horizontal_space());
 
         let font_controls = row![
