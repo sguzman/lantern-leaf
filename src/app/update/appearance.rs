@@ -5,6 +5,7 @@ use super::super::state::{
 };
 use super::Effect;
 use crate::pagination::{MAX_FONT_SIZE, MAX_LINES_PER_PAGE, MIN_FONT_SIZE, MIN_LINES_PER_PAGE};
+use std::time::{Duration, Instant};
 use tracing::{debug, info};
 
 impl App {
@@ -282,7 +283,7 @@ impl App {
         &mut self,
         width: f32,
         height: f32,
-        effects: &mut Vec<Effect>,
+        _effects: &mut Vec<Effect>,
     ) {
         if !width.is_finite() || !height.is_finite() {
             return;
@@ -296,12 +297,12 @@ impl App {
             self.config.window_width = width;
             self.config.window_height = height;
             debug!(width, height, "Window size changed");
-            self.schedule_highlight_snap_after_layout_change(effects);
-            effects.push(Effect::SaveConfig);
+            self.pending_window_resize = true;
+            self.window_geometry_changed_at = Some(Instant::now());
         }
     }
 
-    pub(super) fn handle_window_moved(&mut self, x: f32, y: f32, effects: &mut Vec<Effect>) {
+    pub(super) fn handle_window_moved(&mut self, x: f32, y: f32, _effects: &mut Vec<Effect>) {
         if !x.is_finite() || !y.is_finite() {
             return;
         }
@@ -320,8 +321,30 @@ impl App {
             self.config.window_pos_x = Some(x);
             self.config.window_pos_y = Some(y);
             debug!(x, y, "Window position changed");
-            effects.push(Effect::SaveConfig);
+            self.pending_window_move = true;
+            self.window_geometry_changed_at = Some(Instant::now());
         }
+    }
+
+    pub(super) fn maybe_flush_window_geometry_updates(&mut self, effects: &mut Vec<Effect>) {
+        const WINDOW_GEOMETRY_SAVE_DEBOUNCE: Duration = Duration::from_millis(220);
+        if !(self.pending_window_resize || self.pending_window_move) {
+            return;
+        }
+        let Some(changed_at) = self.window_geometry_changed_at else {
+            return;
+        };
+        if Instant::now().saturating_duration_since(changed_at) < WINDOW_GEOMETRY_SAVE_DEBOUNCE {
+            return;
+        }
+
+        if self.pending_window_resize {
+            self.schedule_highlight_snap_after_layout_change(effects);
+        }
+        effects.push(Effect::SaveConfig);
+        self.pending_window_resize = false;
+        self.pending_window_move = false;
+        self.window_geometry_changed_at = None;
     }
 
     fn schedule_highlight_snap_after_layout_change(&mut self, effects: &mut Vec<Effect>) {

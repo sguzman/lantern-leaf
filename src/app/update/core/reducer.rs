@@ -202,6 +202,7 @@ impl App {
         if crate::take_sigint_requested() {
             effects.push(Effect::QuitSafely);
         }
+        self.maybe_flush_window_geometry_updates(effects);
     }
 
     fn handle_search_query_changed(&mut self, query: String) {

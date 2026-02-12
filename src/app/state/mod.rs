@@ -17,6 +17,7 @@ use iced::widget::scrollable::RelativeOffset;
 use iced::{Color, Font, Task};
 use regex::Regex;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use super::messages::{Component, Message, NumericSetting};
 
@@ -54,6 +55,9 @@ pub struct App {
     pub(super) open_path_input: String,
     pub(super) book_loading: bool,
     pub(super) book_loading_error: Option<String>,
+    pub(super) pending_window_resize: bool,
+    pub(super) pending_window_move: bool,
+    pub(super) window_geometry_changed_at: Option<Instant>,
 }
 
 impl App {
@@ -375,6 +379,9 @@ impl App {
         self.starter_mode = false;
         self.book_loading = false;
         self.book_loading_error = None;
+        self.pending_window_resize = false;
+        self.pending_window_move = false;
+        self.window_geometry_changed_at = None;
         self.text_only_mode = false;
         self.text_only_preview = None;
         self.open_path_input.clear();
@@ -580,6 +587,9 @@ impl App {
             open_path_input: String::new(),
             book_loading: false,
             book_loading_error: None,
+            pending_window_resize: false,
+            pending_window_move: false,
+            window_geometry_changed_at: None,
         };
 
         app.repaginate();
@@ -708,6 +718,9 @@ impl App {
             open_path_input: String::new(),
             book_loading: false,
             book_loading_error: None,
+            pending_window_resize: false,
+            pending_window_move: false,
+            window_geometry_changed_at: None,
         };
 
         let init_task = if app.calibre.config.enabled {
