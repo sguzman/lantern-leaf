@@ -18,7 +18,7 @@ use iced::{Color, Font, Task};
 use regex::Regex;
 use std::path::PathBuf;
 
-use super::messages::{Component, Message};
+use super::messages::{Component, Message, NumericSetting};
 
 pub(in crate::app) use bookmark::{BookmarkState, TextOnlyPreview};
 pub(crate) use constants::*;
@@ -37,6 +37,9 @@ fn tts_engine_from_config(config: &AppConfig) -> Option<TtsEngine> {
 /// Core application state composed of sub-models.
 pub struct App {
     pub(super) starter_mode: bool,
+    pub(super) show_stats: bool,
+    pub(super) active_numeric_setting: Option<NumericSetting>,
+    pub(super) numeric_setting_input: String,
     pub(super) reader: ReaderState,
     pub(super) tts: TtsState,
     pub(super) bookmark: BookmarkState,
@@ -383,6 +386,9 @@ impl App {
         self.recent.visible = false;
         self.calibre.visible = false;
         self.calibre.error = None;
+        self.show_stats = false;
+        self.active_numeric_setting = None;
+        self.numeric_setting_input.clear();
         self.config = config;
         self.epub_path = epub_path;
         self.reader.full_text = book.text;
@@ -523,6 +529,9 @@ impl App {
         clamp_config(&mut config);
         let mut app = App {
             starter_mode: false,
+            show_stats: false,
+            active_numeric_setting: None,
+            numeric_setting_input: String::new(),
             reader: ReaderState {
                 pages: Vec::new(),
                 page_sentences: Vec::new(),
@@ -648,6 +657,9 @@ impl App {
         clamp_config(&mut config);
         let app = App {
             starter_mode: true,
+            show_stats: false,
+            active_numeric_setting: None,
+            numeric_setting_input: String::new(),
             reader: ReaderState {
                 pages: vec![String::new()],
                 page_sentences: vec![Vec::new()],

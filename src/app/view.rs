@@ -1,4 +1,4 @@
-use super::messages::{Component, Message};
+use super::messages::{Component, Message, NumericSetting};
 use super::state::{
     App, IMAGE_BLOCK_SPACING_PX, IMAGE_FOOTER_FONT_SIZE_PX, IMAGE_FOOTER_LINE_HEIGHT,
     IMAGE_LABEL_FONT_SIZE_PX, IMAGE_LABEL_LINE_HEIGHT, IMAGE_PREVIEW_HEIGHT_PX,
@@ -15,7 +15,7 @@ use iced::widget::{
     Column, Row, button, checkbox, column, container, horizontal_space, image, pick_list, row,
     scrollable, slider, text, text_input,
 };
-use iced::{ContentFit, Element, Length};
+use iced::{Border, Color, ContentFit, Element, Length};
 use std::time::Duration;
 
 impl App {
@@ -25,14 +25,14 @@ impl App {
         }
 
         let total_pages = self.reader.pages.len().max(1);
-        let page_label = format!("Page {} of {}", self.reader.current_page + 1, total_pages);
-        let tts_progress_label = self.audio_progress_label();
 
         let theme_label = if matches!(self.config.theme, crate::config::ThemeMode::Night) {
             "Day Mode"
         } else {
             "Night Mode"
         };
+        let close_session_button =
+            Self::control_button("Close Book").on_press(Message::CloseReadingSession);
         let theme_toggle = Self::control_button(theme_label).on_press(Message::ToggleTheme);
         let settings_toggle = Self::control_button(if self.config.show_settings {
             "Hide Settings"
@@ -40,6 +40,12 @@ impl App {
             "Show Settings"
         })
         .on_press(Message::ToggleSettings);
+        let stats_toggle = Self::control_button(if self.show_stats {
+            "Hide Stats"
+        } else {
+            "Show Stats"
+        })
+        .on_press(Message::ToggleStats);
         let search_toggle = Self::control_button(if self.search.visible {
             "Hide Search"
         } else {
@@ -71,13 +77,23 @@ impl App {
             Self::control_button("Next")
         };
 
-        let available_width = self.controls_layout_width();
         let controls_spacing = 10.0;
-        let controls_budget = (available_width - 12.0).max(0.0);
+        let controls_budget = (self.controls_layout_width() - 12.0).max(0.0);
         let mut used_controls_width = Self::estimate_button_width_px("Previous")
             + Self::estimate_button_width_px("Next")
             + Self::estimate_button_width_px(theme_label)
-            + (controls_spacing * 2.0);
+            + Self::estimate_button_width_px("Close Book")
+            + Self::estimate_button_width_px(if self.config.show_settings {
+                "Hide Settings"
+            } else {
+                "Show Settings"
+            })
+            + Self::estimate_button_width_px(if self.show_stats {
+                "Hide Stats"
+            } else {
+                "Show Stats"
+            })
+            + (controls_spacing * 5.0);
         let mut add_optional = |label: &str| -> bool {
             let extra = controls_spacing + Self::estimate_button_width_px(label);
             if used_controls_width + extra <= controls_budget {
@@ -87,11 +103,6 @@ impl App {
                 false
             }
         };
-        let show_settings_toggle = add_optional(if self.config.show_settings {
-            "Hide Settings"
-        } else {
-            "Show Settings"
-        });
         let show_search_toggle = add_optional(if self.search.visible {
             "Hide Search"
         } else {
@@ -107,24 +118,18 @@ impl App {
         } else {
             "Text Only"
         });
-        let show_compact_status = !self.config.show_settings;
-        let mut status_budget = (controls_budget - used_controls_width - 24.0).max(0.0);
-        let page_label_width = Self::estimate_status_text_width_px(&page_label);
-        let tts_progress_label_width = Self::estimate_status_text_width_px(&tts_progress_label);
-        let show_page_label = show_compact_status && status_budget >= page_label_width;
-        if show_page_label {
-            status_budget -= page_label_width;
-        }
-        let show_tts_progress_label =
-            show_compact_status && status_budget >= (tts_progress_label_width + controls_spacing);
 
-        let mut controls = row![prev_button, next_button, theme_toggle]
-            .spacing(10)
-            .align_y(Vertical::Center)
-            .width(Length::Fill);
-        if show_settings_toggle {
-            controls = controls.push(settings_toggle);
-        }
+        let mut controls = row![
+            prev_button,
+            next_button,
+            theme_toggle,
+            close_session_button,
+            settings_toggle,
+            stats_toggle
+        ]
+        .spacing(10)
+        .align_y(Vertical::Center)
+        .width(Length::Fill);
         if show_search_toggle {
             controls = controls.push(search_toggle);
         }
@@ -135,13 +140,6 @@ impl App {
             controls = controls.push(text_only_toggle);
         }
         controls = controls.push(horizontal_space());
-
-        if show_page_label {
-            controls = controls.push(text(page_label).width(Length::Shrink));
-        }
-        if show_tts_progress_label {
-            controls = controls.push(text(tts_progress_label).width(Length::Shrink));
-        }
 
         let font_controls = row![
             column![
@@ -351,6 +349,8 @@ impl App {
 
         if self.config.show_settings {
             layout = layout.push(self.settings_panel());
+        } else if self.show_stats {
+            layout = layout.push(self.stats_panel());
         }
 
         layout.into()
@@ -429,9 +429,14 @@ impl App {
     }
 
     fn audio_progress_label(&self) -> String {
+        let percent = self.audio_progress_percent();
+        format!("TTS {percent:.3}%")
+    }
+
+    fn audio_progress_percent(&self) -> f32 {
         let total_sentences = self.reader.page_sentence_counts.iter().sum::<usize>();
         if total_sentences == 0 {
-            return "TTS 0%".to_string();
+            return 0.0;
         }
 
         let current_idx = self.tts.current_sentence_idx.unwrap_or(0);
@@ -444,23 +449,7 @@ impl App {
         let global_idx = before
             .saturating_add(current_idx)
             .min(total_sentences.saturating_sub(1));
-        let percent = (global_idx as f32 + 1.0) / total_sentences as f32 * 100.0;
-        format!("TTS {}%", Self::format_percent_up_to_two_decimals(percent))
-    }
-
-    fn format_percent_up_to_two_decimals(value: f32) -> String {
-        let mut formatted = format!("{value:.2}");
-        while formatted.ends_with('0') {
-            formatted.pop();
-        }
-        if formatted.ends_with('.') {
-            formatted.pop();
-        }
-        if formatted.is_empty() {
-            "0".to_string()
-        } else {
-            formatted
-        }
+        (global_idx as f32 + 1.0) / total_sentences as f32 * 100.0
     }
 
     fn color_row<'a>(
@@ -937,16 +926,6 @@ impl App {
             self.config.letter_spacing as f32,
             |value| Message::LetterSpacingChanged(value.round() as u32),
         );
-        let total_pages = self.reader.pages.len().max(1);
-        let page_label = format!("Page {} of {}", self.reader.current_page + 1, total_pages);
-        let status_panel = column![
-            text("Reading Status").size(18.0),
-            text(page_label),
-            text(self.audio_progress_label()),
-            text(format!("Page remaining: {}", self.page_eta_label())),
-            text(format!("Book remaining: {}", self.book_eta_label())),
-        ]
-        .spacing(4);
 
         let panel = column![
             text("Reader Settings").size(20.0),
@@ -956,14 +935,14 @@ impl App {
             row![text("Font weight"), weight_picker]
                 .spacing(8)
                 .align_y(Vertical::Center),
-            row![text("Line spacing"), line_spacing_slider]
-                .spacing(8)
-                .align_y(Vertical::Center),
             row![
-                text(format!(
-                    "Pause after sentence: {:.2} s",
-                    self.config.pause_after_sentence
-                )),
+                self.numeric_setting_editor(NumericSetting::LineSpacing),
+                line_spacing_slider
+            ]
+            .spacing(8)
+            .align_y(Vertical::Center),
+            row![
+                self.numeric_setting_editor(NumericSetting::PauseAfterSentence),
                 slider(
                     0.0..=2.0,
                     self.config.pause_after_sentence,
@@ -984,37 +963,31 @@ impl App {
             )
             .on_toggle(Message::CenterSpokenSentenceChanged),
             row![
-                text(format!("Lines per page: {}", self.config.lines_per_page)),
+                self.numeric_setting_editor(NumericSetting::LinesPerPage),
                 lines_per_page_slider
             ]
             .spacing(8)
             .align_y(Vertical::Center),
             row![
-                text(format!(
-                    "Horizontal margin: {} px",
-                    self.config.margin_horizontal
-                )),
+                self.numeric_setting_editor(NumericSetting::MarginHorizontal),
                 margin_slider
             ]
             .spacing(8)
             .align_y(Vertical::Center),
             row![
-                text(format!(
-                    "Vertical margin: {} px",
-                    self.config.margin_vertical
-                )),
+                self.numeric_setting_editor(NumericSetting::MarginVertical),
                 margin_vertical_slider
             ]
             .spacing(8)
             .align_y(Vertical::Center),
             row![
-                text(format!("Word spacing: {}", self.config.word_spacing)),
+                self.numeric_setting_editor(NumericSetting::WordSpacing),
                 word_spacing_slider
             ]
             .spacing(8)
             .align_y(Vertical::Center),
             row![
-                text(format!("Letter spacing: {}", self.config.letter_spacing)),
+                self.numeric_setting_editor(NumericSetting::LetterSpacing),
                 letter_spacing_slider
             ]
             .spacing(8)
@@ -1026,12 +999,186 @@ impl App {
             self.color_row("Night highlight", self.config.night_highlight, |c, v| {
                 Message::NightHighlightChanged(c, v)
             }),
-            status_panel,
         ]
         .spacing(12)
         .width(Length::Fixed(280.0));
 
         container(panel).padding(12).into()
+    }
+
+    fn stats_panel(&self) -> Element<'_, Message> {
+        let total_pages = self.reader.pages.len().max(1);
+        let current_page = self.reader.current_page.min(total_pages.saturating_sub(1));
+        let page_words = self.word_count_for_page(current_page);
+        let page_sentences = self.sentence_count_for_page(current_page);
+        let words_before = self.word_count_before_page(current_page);
+        let total_words = self.total_word_count();
+        let words_through = words_before + page_words;
+
+        let sentences_before: usize = self
+            .reader
+            .page_sentence_counts
+            .iter()
+            .take(current_page)
+            .sum();
+        let sentences_through = sentences_before + page_sentences;
+        let total_sentences: usize = self.reader.page_sentence_counts.iter().sum();
+
+        let percent_start = if total_words == 0 {
+            0.0
+        } else {
+            words_before as f32 / total_words as f32 * 100.0
+        };
+        let percent_end = if total_words == 0 {
+            0.0
+        } else {
+            words_through as f32 / total_words as f32 * 100.0
+        };
+
+        let panel = column![
+            text("Reading Stats").size(20.0),
+            text(format!(
+                "Page index: {} / {}",
+                current_page + 1,
+                total_pages
+            )),
+            text(self.audio_progress_label()),
+            text(format!("Page time remaining: {}", self.page_eta_label())),
+            text(format!("Book time remaining: {}", self.book_eta_label())),
+            text(format!("Words on page: {}", page_words)),
+            text(format!("Sentences on page: {}", page_sentences)),
+            text(format!("Percent at page start: {:.3}%", percent_start)),
+            text(format!("Percent at page end: {:.3}%", percent_end)),
+            text(format!(
+                "Words read through this page: {} / {}",
+                words_through, total_words
+            )),
+            text(format!(
+                "Sentences read through this page: {} / {}",
+                sentences_through, total_sentences
+            )),
+        ]
+        .spacing(8)
+        .width(Length::Fixed(280.0));
+
+        container(panel).padding(12).into()
+    }
+
+    fn numeric_setting_editor(&self, setting: NumericSetting) -> Element<'_, Message> {
+        if self.active_numeric_setting == Some(setting) {
+            let input = text_input("", &self.numeric_setting_input)
+                .on_input(Message::NumericSettingInputChanged)
+                .on_submit(Message::CommitNumericSettingInput)
+                .padding(6)
+                .size(14.0)
+                .width(Length::Fixed(170.0));
+            let input: Element<'_, Message> = if self.numeric_setting_input_valid(setting) {
+                input.into()
+            } else {
+                container(input)
+                    .padding(1)
+                    .style(|_theme| iced::widget::container::Style {
+                        border: Border {
+                            color: Color::from_rgb(0.92, 0.25, 0.25),
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    })
+                    .into()
+            };
+            return row![
+                input,
+                button("x")
+                    .on_press(Message::CancelNumericSettingInput)
+                    .width(Length::Shrink)
+            ]
+            .spacing(4)
+            .align_y(Vertical::Center)
+            .into();
+        }
+
+        button(
+            text(self.numeric_setting_label(setting))
+                .wrapping(Wrapping::None)
+                .size(14.0),
+        )
+        .on_press(Message::BeginNumericSettingEdit(setting))
+        .into()
+    }
+
+    fn numeric_setting_input_valid(&self, setting: NumericSetting) -> bool {
+        self.parse_numeric_setting_input(setting, &self.numeric_setting_input)
+            .is_some()
+    }
+
+    fn parse_numeric_setting_input(&self, setting: NumericSetting, raw: &str) -> Option<f32> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let parsed = trimmed.parse::<f32>().ok()?;
+        if !parsed.is_finite() {
+            return None;
+        }
+        if Self::numeric_setting_requires_integer(setting)
+            && (parsed - parsed.round()).abs() > f32::EPSILON
+        {
+            return None;
+        }
+        let (min, max) = Self::numeric_setting_bounds(setting);
+        if parsed < min || parsed > max {
+            return None;
+        }
+        Some(parsed)
+    }
+
+    fn numeric_setting_label(&self, setting: NumericSetting) -> String {
+        match setting {
+            NumericSetting::LineSpacing => format!("Line spacing: {:.2}", self.config.line_spacing),
+            NumericSetting::PauseAfterSentence => {
+                format!(
+                    "Pause after sentence: {:.2} s",
+                    self.config.pause_after_sentence
+                )
+            }
+            NumericSetting::LinesPerPage => {
+                format!("Lines per page: {}", self.config.lines_per_page)
+            }
+            NumericSetting::MarginHorizontal => {
+                format!("Horizontal margin: {} px", self.config.margin_horizontal)
+            }
+            NumericSetting::MarginVertical => {
+                format!("Vertical margin: {} px", self.config.margin_vertical)
+            }
+            NumericSetting::WordSpacing => format!("Word spacing: {}", self.config.word_spacing),
+            NumericSetting::LetterSpacing => {
+                format!("Letter spacing: {}", self.config.letter_spacing)
+            }
+        }
+    }
+
+    fn numeric_setting_bounds(setting: NumericSetting) -> (f32, f32) {
+        match setting {
+            NumericSetting::LineSpacing => (0.8, 2.5),
+            NumericSetting::PauseAfterSentence => (0.0, 2.0),
+            NumericSetting::LinesPerPage => (MIN_LINES_PER_PAGE as f32, MAX_LINES_PER_PAGE as f32),
+            NumericSetting::MarginHorizontal => (0.0, MAX_HORIZONTAL_MARGIN as f32),
+            NumericSetting::MarginVertical => (0.0, MAX_VERTICAL_MARGIN as f32),
+            NumericSetting::WordSpacing => (0.0, MAX_WORD_SPACING as f32),
+            NumericSetting::LetterSpacing => (0.0, MAX_LETTER_SPACING as f32),
+        }
+    }
+
+    fn numeric_setting_requires_integer(setting: NumericSetting) -> bool {
+        matches!(
+            setting,
+            NumericSetting::LinesPerPage
+                | NumericSetting::MarginHorizontal
+                | NumericSetting::MarginVertical
+                | NumericSetting::WordSpacing
+                | NumericSetting::LetterSpacing
+        )
     }
 
     pub(super) fn tts_controls(&self) -> Element<'_, Message> {
@@ -1111,9 +1258,6 @@ impl App {
             controls = controls.push(jump_button);
         }
         controls = controls.push(horizontal_space());
-        if !self.config.show_settings && (controls_budget - used_controls_width).max(0.0) >= 220.0 {
-            controls = controls.push(self.eta_trackers_view(available_width));
-        }
 
         container(
             column![text("TTS Controls"), controls]
@@ -1121,6 +1265,31 @@ impl App {
                 .padding(8),
         )
         .into()
+    }
+
+    fn word_count_for_page(&self, page: usize) -> usize {
+        self.reader
+            .pages
+            .get(page)
+            .map(|content| content.split_whitespace().count())
+            .unwrap_or(0)
+    }
+
+    fn word_count_before_page(&self, page: usize) -> usize {
+        self.reader
+            .pages
+            .iter()
+            .take(page)
+            .map(|content| content.split_whitespace().count())
+            .sum()
+    }
+
+    fn total_word_count(&self) -> usize {
+        self.reader
+            .pages
+            .iter()
+            .map(|content| content.split_whitespace().count())
+            .sum()
     }
 
     fn page_eta_label(&self) -> String {
@@ -1207,32 +1376,9 @@ impl App {
         Duration::from_secs_f64((2.5 / self.config.tts_speed.max(0.1)) as f64 + pause.as_secs_f64())
     }
 
-    fn eta_trackers_view(&self, available_width: f32) -> Element<'_, Message> {
-        let page_eta = self.page_eta_label();
-        let book_eta = self.book_eta_label();
-
-        if available_width < 1_120.0 {
-            return row![
-                text(format!("Page {page_eta}")).size(13.0),
-                text(format!("Book {book_eta}")).size(13.0)
-            ]
-            .spacing(10)
-            .align_y(Vertical::Center)
-            .into();
-        }
-
-        row![
-            column![text("Page Remaining").size(13.0), text(page_eta).size(13.0)].spacing(2),
-            column![text("Book Remaining").size(13.0), text(book_eta).size(13.0)].spacing(2),
-        ]
-        .spacing(16)
-        .align_y(Vertical::Center)
-        .into()
-    }
-
     fn estimated_controls_width(&self) -> f32 {
         let mut width = self.config.window_width.max(320.0);
-        if self.config.show_settings {
+        if self.config.show_settings || self.show_stats {
             // Settings panel is fixed width (280) plus row spacing (16).
             width = (width - 296.0).max(0.0);
         }
@@ -1253,10 +1399,6 @@ impl App {
         // Approximate intrinsic width for default text size plus button padding.
         let chars = label.chars().count() as f32;
         (chars * 7.6) + 28.0
-    }
-
-    fn estimate_status_text_width_px(value: &str) -> f32 {
-        (value.chars().count() as f32 * 7.4) + 8.0
     }
 
     fn format_duration_dhms(duration: Duration) -> String {

@@ -2,11 +2,11 @@
 theme = "day"
 font_family = "lexend"
 font_weight = "bold"
-font_size = 16
+font_size = 22
 line_spacing = 1.3
 word_spacing = 0
 letter_spacing = 0
-lines_per_page = 28
+lines_per_page = 700
 margin_horizontal = 0
 margin_vertical = 0
 day_highlight = { r = 0.2, g = 0.4, b = 0.7, a = 0.15 }

@@ -12,9 +12,11 @@ impl App {
         match message {
             Message::NextPage => self.handle_next_page(&mut effects),
             Message::PreviousPage => self.handle_previous_page(&mut effects),
+            Message::CloseReadingSession => self.handle_close_reading_session(&mut effects),
             Message::FontSizeChanged(size) => self.handle_font_size_changed(size, &mut effects),
             Message::ToggleTheme => self.handle_toggle_theme(&mut effects),
             Message::ToggleSettings => self.handle_toggle_settings(&mut effects),
+            Message::ToggleStats => self.handle_toggle_stats(&mut effects),
             Message::ToggleSearch => self.handle_toggle_search(&mut effects),
             Message::SearchQueryChanged(query) => self.handle_search_query_changed(query),
             Message::SearchSubmit => self.handle_search_submit(&mut effects),
@@ -81,6 +83,21 @@ impl App {
             }
             Message::NightHighlightChanged(component, value) => {
                 self.handle_night_highlight_changed(component, value, &mut effects);
+            }
+            Message::BeginNumericSettingEdit(setting) => {
+                self.handle_begin_numeric_setting_edit(setting);
+            }
+            Message::NumericSettingInputChanged(value) => {
+                self.handle_numeric_setting_input_changed(value);
+            }
+            Message::CommitNumericSettingInput => {
+                self.handle_commit_numeric_setting_input(&mut effects);
+            }
+            Message::CancelNumericSettingInput => {
+                self.handle_cancel_numeric_setting_input();
+            }
+            Message::AdjustNumericSettingByWheel(delta) => {
+                self.handle_adjust_numeric_setting_by_wheel(delta, &mut effects);
             }
             Message::AutoScrollTtsChanged(enabled) => {
                 self.handle_auto_scroll_tts_changed(enabled, &mut effects);
@@ -171,6 +188,13 @@ impl App {
             self.search.selected_match = 0;
         }
         effects.push(Effect::SaveBookmark);
+    }
+
+    fn handle_close_reading_session(&mut self, effects: &mut Vec<Effect>) {
+        if self.starter_mode {
+            return;
+        }
+        effects.push(Effect::ReturnToStarter);
     }
 
     fn handle_search_query_changed(&mut self, query: String) {

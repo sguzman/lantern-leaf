@@ -1,10 +1,10 @@
-use super::super::messages::Component;
+use super::super::messages::{Component, NumericSetting};
 use super::super::state::{
     App, MAX_HORIZONTAL_MARGIN, MAX_LETTER_SPACING, MAX_VERTICAL_MARGIN, MAX_WORD_SPACING,
     apply_component,
 };
 use super::Effect;
-use crate::pagination::{MAX_FONT_SIZE, MIN_FONT_SIZE};
+use crate::pagination::{MAX_FONT_SIZE, MAX_LINES_PER_PAGE, MIN_FONT_SIZE, MIN_LINES_PER_PAGE};
 use tracing::{debug, info};
 
 impl App {
@@ -72,9 +72,33 @@ impl App {
 
     pub(super) fn handle_toggle_settings(&mut self, effects: &mut Vec<Effect>) {
         debug!("Toggled settings panel");
-        self.config.show_settings = !self.config.show_settings;
+        let next = !self.config.show_settings;
+        self.config.show_settings = next;
+        if next {
+            self.show_stats = false;
+        } else {
+            self.active_numeric_setting = None;
+            self.numeric_setting_input.clear();
+        }
         self.schedule_highlight_snap_after_layout_change(effects);
         effects.push(Effect::SaveConfig);
+    }
+
+    pub(super) fn handle_toggle_stats(&mut self, effects: &mut Vec<Effect>) {
+        self.show_stats = !self.show_stats;
+        let mut changed_settings_visibility = false;
+        if self.show_stats {
+            if self.config.show_settings {
+                changed_settings_visibility = true;
+            }
+            self.config.show_settings = false;
+            self.active_numeric_setting = None;
+            self.numeric_setting_input.clear();
+        }
+        self.schedule_highlight_snap_after_layout_change(effects);
+        if changed_settings_visibility {
+            effects.push(Effect::SaveConfig);
+        }
     }
 
     pub(super) fn handle_toggle_text_only(&mut self, effects: &mut Vec<Effect>) {
@@ -168,6 +192,67 @@ impl App {
         );
         self.schedule_highlight_snap_after_layout_change(effects);
         effects.push(Effect::SaveConfig);
+    }
+
+    pub(super) fn handle_begin_numeric_setting_edit(&mut self, setting: NumericSetting) {
+        self.active_numeric_setting = Some(setting);
+        self.numeric_setting_input = self.numeric_setting_value_string(setting);
+    }
+
+    pub(super) fn handle_numeric_setting_input_changed(&mut self, value: String) {
+        if self.active_numeric_setting.is_some() {
+            self.numeric_setting_input = value;
+        }
+    }
+
+    pub(super) fn handle_commit_numeric_setting_input(&mut self, effects: &mut Vec<Effect>) {
+        let Some(setting) = self.active_numeric_setting else {
+            return;
+        };
+        let Some(value) = Self::parse_numeric_setting_value(setting, &self.numeric_setting_input)
+        else {
+            return;
+        };
+        self.apply_numeric_setting_value(setting, value, effects);
+        self.numeric_setting_input = self.numeric_setting_value_string(setting);
+    }
+
+    pub(super) fn handle_cancel_numeric_setting_input(&mut self) {
+        self.active_numeric_setting = None;
+        self.numeric_setting_input.clear();
+    }
+
+    pub(super) fn handle_adjust_numeric_setting_by_wheel(
+        &mut self,
+        delta: f32,
+        effects: &mut Vec<Effect>,
+    ) {
+        let Some(setting) = self.active_numeric_setting else {
+            return;
+        };
+        if delta.abs() < f32::EPSILON {
+            return;
+        }
+
+        let steps = if delta.abs() >= 1.0 {
+            delta.round() as i32
+        } else if delta > 0.0 {
+            1
+        } else {
+            -1
+        };
+        if steps == 0 {
+            return;
+        }
+
+        let base = Self::parse_numeric_setting_value(setting, &self.numeric_setting_input)
+            .unwrap_or_else(|| self.numeric_setting_value(setting));
+        let adjusted = Self::quantize_numeric_setting_value_update(
+            setting,
+            base + steps as f32 * Self::numeric_setting_step_update(setting),
+        );
+        self.apply_numeric_setting_value(setting, adjusted, effects);
+        self.numeric_setting_input = self.numeric_setting_value_string(setting);
     }
 
     pub(super) fn handle_day_highlight_changed(
@@ -284,6 +369,139 @@ impl App {
             self.tts.current_sentence_idx = Some(sentence_idx);
             self.tts.last_sentences = self.raw_sentences_for_page(page_idx);
             self.bookmark.pending_sentence_snap = Some(sentence_idx);
+        }
+    }
+
+    fn apply_numeric_setting_value(
+        &mut self,
+        setting: NumericSetting,
+        value: f32,
+        effects: &mut Vec<Effect>,
+    ) {
+        match setting {
+            NumericSetting::LineSpacing => self.handle_line_spacing_changed(value, effects),
+            NumericSetting::PauseAfterSentence => {
+                self.handle_pause_after_sentence_changed(value, effects);
+            }
+            NumericSetting::LinesPerPage => {
+                self.handle_lines_per_page_changed(value.round() as u32, effects);
+            }
+            NumericSetting::MarginHorizontal => {
+                self.handle_margin_horizontal_changed(value.round() as u16, effects);
+            }
+            NumericSetting::MarginVertical => {
+                self.handle_margin_vertical_changed(value.round() as u16, effects);
+            }
+            NumericSetting::WordSpacing => {
+                self.handle_word_spacing_changed(value.round() as u32, effects);
+            }
+            NumericSetting::LetterSpacing => {
+                self.handle_letter_spacing_changed(value.round() as u32, effects);
+            }
+        }
+    }
+
+    fn numeric_setting_value(&self, setting: NumericSetting) -> f32 {
+        match setting {
+            NumericSetting::LineSpacing => self.config.line_spacing,
+            NumericSetting::PauseAfterSentence => self.config.pause_after_sentence,
+            NumericSetting::LinesPerPage => self.config.lines_per_page as f32,
+            NumericSetting::MarginHorizontal => self.config.margin_horizontal as f32,
+            NumericSetting::MarginVertical => self.config.margin_vertical as f32,
+            NumericSetting::WordSpacing => self.config.word_spacing as f32,
+            NumericSetting::LetterSpacing => self.config.letter_spacing as f32,
+        }
+    }
+
+    fn numeric_setting_value_string(&self, setting: NumericSetting) -> String {
+        let value = self.numeric_setting_value(setting);
+        let decimals = Self::numeric_setting_decimals_update(setting);
+        if decimals == 0 {
+            format!("{}", value.round() as i32)
+        } else {
+            format!("{value:.*}", decimals as usize)
+        }
+    }
+
+    fn parse_numeric_setting_value(setting: NumericSetting, raw: &str) -> Option<f32> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let parsed = trimmed.parse::<f32>().ok()?;
+        if !parsed.is_finite() {
+            return None;
+        }
+        if Self::numeric_setting_requires_integer_update(setting)
+            && (parsed - parsed.round()).abs() > f32::EPSILON
+        {
+            return None;
+        }
+        let (min, max) = Self::numeric_setting_bounds_update(setting);
+        if parsed < min || parsed > max {
+            return None;
+        }
+        Some(Self::quantize_numeric_setting_value_update(setting, parsed))
+    }
+
+    fn numeric_setting_requires_integer_update(setting: NumericSetting) -> bool {
+        matches!(
+            setting,
+            NumericSetting::LinesPerPage
+                | NumericSetting::MarginHorizontal
+                | NumericSetting::MarginVertical
+                | NumericSetting::WordSpacing
+                | NumericSetting::LetterSpacing
+        )
+    }
+
+    fn quantize_numeric_setting_value_update(setting: NumericSetting, value: f32) -> f32 {
+        let (min, max) = Self::numeric_setting_bounds_update(setting);
+        let step = Self::numeric_setting_step_update(setting);
+        let clamped = value.clamp(min, max);
+        if step <= f32::EPSILON {
+            return clamped;
+        }
+        let steps = ((clamped - min) / step).round();
+        let quantized = min + steps * step;
+        let decimals = Self::numeric_setting_decimals_update(setting);
+        let factor = 10f32.powi(decimals as i32);
+        ((quantized * factor).round() / factor).clamp(min, max)
+    }
+
+    fn numeric_setting_bounds_update(setting: NumericSetting) -> (f32, f32) {
+        match setting {
+            NumericSetting::LineSpacing => (0.8, 2.5),
+            NumericSetting::PauseAfterSentence => (0.0, 2.0),
+            NumericSetting::LinesPerPage => (MIN_LINES_PER_PAGE as f32, MAX_LINES_PER_PAGE as f32),
+            NumericSetting::MarginHorizontal => (0.0, MAX_HORIZONTAL_MARGIN as f32),
+            NumericSetting::MarginVertical => (0.0, MAX_VERTICAL_MARGIN as f32),
+            NumericSetting::WordSpacing => (0.0, MAX_WORD_SPACING as f32),
+            NumericSetting::LetterSpacing => (0.0, MAX_LETTER_SPACING as f32),
+        }
+    }
+
+    fn numeric_setting_step_update(setting: NumericSetting) -> f32 {
+        match setting {
+            NumericSetting::LineSpacing => 0.05,
+            NumericSetting::PauseAfterSentence => 0.01,
+            NumericSetting::LinesPerPage => 1.0,
+            NumericSetting::MarginHorizontal => 1.0,
+            NumericSetting::MarginVertical => 1.0,
+            NumericSetting::WordSpacing => 1.0,
+            NumericSetting::LetterSpacing => 1.0,
+        }
+    }
+
+    fn numeric_setting_decimals_update(setting: NumericSetting) -> u8 {
+        match setting {
+            NumericSetting::LineSpacing => 2,
+            NumericSetting::PauseAfterSentence => 2,
+            NumericSetting::LinesPerPage
+            | NumericSetting::MarginHorizontal
+            | NumericSetting::MarginVertical
+            | NumericSetting::WordSpacing
+            | NumericSetting::LetterSpacing => 0,
         }
     }
 }

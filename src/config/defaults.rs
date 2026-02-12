@@ -1,5 +1,5 @@
 pub(crate) fn default_font_size() -> u32 {
-    16
+    22
 }
 
 pub(crate) fn default_line_spacing() -> f32 {
@@ -73,7 +73,7 @@ pub(crate) fn default_log_level() -> crate::config::LogLevel {
 }
 
 pub(crate) fn default_lines_per_page() -> usize {
-    28
+    700
 }
 
 pub(crate) fn default_pause_after_sentence() -> f32 {

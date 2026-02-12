@@ -8,6 +8,7 @@ use iced::Event;
 use iced::Task;
 use iced::event;
 use iced::keyboard;
+use iced::mouse;
 use iced::window;
 use std::path::Path;
 use std::time::Duration;
@@ -254,6 +255,14 @@ impl App {
                     |message| message,
                 )
             }
+            Effect::ReturnToStarter => {
+                self.save_epub_config();
+                self.persist_bookmark();
+                self.stop_playback();
+                let (next, init_task) = App::bootstrap_starter(self.config.clone());
+                *self = next;
+                init_task
+            }
             Effect::QuitSafely => {
                 self.save_epub_config();
                 self.persist_bookmark();
@@ -270,7 +279,12 @@ pub(super) fn runtime_event_to_message(
     _window_id: window::Id,
 ) -> Option<Message> {
     if status == event::Status::Captured {
-        return None;
+        return match event {
+            Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+                Some(Message::AdjustNumericSettingByWheel(wheel_delta_y(delta)))
+            }
+            _ => None,
+        };
     }
     match event {
         Event::Window(iced::window::Event::Resized(size)) => Some(Message::WindowResized {
@@ -284,6 +298,16 @@ pub(super) fn runtime_event_to_message(
         Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
             Some(Message::KeyPressed { key, modifiers })
         }
+        Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+            Some(Message::AdjustNumericSettingByWheel(wheel_delta_y(delta)))
+        }
         _ => None,
+    }
+}
+
+fn wheel_delta_y(delta: mouse::ScrollDelta) -> f32 {
+    match delta {
+        mouse::ScrollDelta::Lines { y, .. } => y,
+        mouse::ScrollDelta::Pixels { y, .. } => y / 40.0,
     }
 }

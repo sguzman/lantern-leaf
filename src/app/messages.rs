@@ -14,9 +14,11 @@ use std::time::{Duration, Instant};
 pub enum Message {
     NextPage,
     PreviousPage,
+    CloseReadingSession,
     FontSizeChanged(u32),
     ToggleTheme,
     ToggleSettings,
+    ToggleStats,
     ToggleSearch,
     SearchQueryChanged(String),
     SearchSubmit,
@@ -67,6 +69,11 @@ pub enum Message {
     PauseAfterSentenceChanged(f32),
     DayHighlightChanged(Component, f32),
     NightHighlightChanged(Component, f32),
+    BeginNumericSettingEdit(NumericSetting),
+    NumericSettingInputChanged(String),
+    CommitNumericSettingInput,
+    CancelNumericSettingInput,
+    AdjustNumericSettingByWheel(f32),
     AutoScrollTtsChanged(bool),
     CenterSpokenSentenceChanged(bool),
     Play,
@@ -124,4 +131,15 @@ pub enum Component {
     G,
     B,
     A,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumericSetting {
+    LineSpacing,
+    PauseAfterSentence,
+    LinesPerPage,
+    MarginHorizontal,
+    MarginVertical,
+    WordSpacing,
+    LetterSpacing,
 }
