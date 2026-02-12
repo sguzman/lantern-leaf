@@ -1230,35 +1230,40 @@ impl App {
         let show_play_from_highlight = add_optional("Play From Highlight");
         let show_jump = add_optional("Jump to Audio");
 
-        let mut controls = row![]
+        let mut controls_row = row![]
             .spacing(10)
             .align_y(Vertical::Center)
             .width(Length::Fill);
         if show_prev_sentence {
-            controls =
-                controls.push(Self::control_button("Prev Sent").on_press(Message::SeekBackward));
+            controls_row = controls_row
+                .push(Self::control_button("Prev Sent").on_press(Message::SeekBackward));
         }
-        controls = controls.push(play_button);
+        controls_row = controls_row.push(play_button);
         if show_next_sentence {
-            controls =
-                controls.push(Self::control_button("Next Sent").on_press(Message::SeekForward));
+            controls_row =
+                controls_row.push(Self::control_button("Next Sent").on_press(Message::SeekForward));
         }
         if show_play_page {
-            controls = controls.push(play_from_start);
+            controls_row = controls_row.push(play_from_start);
         }
         if show_play_from_highlight {
-            controls = controls.push(play_from_cursor);
+            controls_row = controls_row.push(play_from_cursor);
         }
         if show_jump {
-            controls = controls.push(jump_button);
+            controls_row = controls_row.push(jump_button);
         }
-        controls = controls.push(horizontal_space());
+        controls_row = controls_row.push(horizontal_space());
+        let controls = container(controls_row)
+            .height(Length::Fixed(42.0))
+            .align_y(Vertical::Center)
+            .width(Length::Fill);
 
         container(
             column![text("TTS Controls"), controls]
                 .spacing(8)
                 .padding(8),
         )
+        .height(Length::Fixed(86.0))
         .into()
     }
 
