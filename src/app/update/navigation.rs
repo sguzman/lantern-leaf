@@ -25,13 +25,13 @@ impl App {
                 .get(old_sentence_idx)
                 .cloned()
                 .or_else(|| self.raw_sentences_for_page(old_page).into_iter().next());
-            let had_tts = self.tts.playback.is_some() || self.tts.preparing;
+            let had_tts = self.tts.playback.is_some() || self.tts.is_preparing();
             let was_playing = self
                 .tts
                 .playback
                 .as_ref()
                 .map(|p| !p.is_paused())
-                .unwrap_or(self.tts.running);
+                .unwrap_or(self.tts.is_playing());
 
             let before = self.reader.current_page;
             self.config.lines_per_page = clamped;
@@ -61,9 +61,7 @@ impl App {
                     if had_tts {
                         // Invalidate any in-flight work from the old pagination before restart.
                         self.tts.request_id = self.tts.request_id.wrapping_add(1);
-                        self.tts.preparing = false;
-                        self.tts.preparing_page = None;
-                        self.tts.preparing_sentence_idx = None;
+                        self.tts.lifecycle = super::super::state::TtsLifecycle::Idle;
                         self.tts.pending_append = false;
                         self.tts.pending_append_batch = None;
                         self.tts.resume_after_prepare = was_playing;

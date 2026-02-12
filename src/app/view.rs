@@ -1035,7 +1035,7 @@ impl App {
     }
 
     pub(super) fn tts_controls(&self) -> Element<'_, Message> {
-        let play_label = if self.tts.preparing {
+        let play_label = if self.tts.is_preparing() {
             "Preparing..."
         } else if self
             .tts
@@ -1049,7 +1049,7 @@ impl App {
             "Pause"
         };
 
-        let play_button = if self.tts.preparing {
+        let play_button = if self.tts.is_preparing() {
             Self::control_button(play_label).on_press(Message::Pause)
         } else if play_label == "Play" {
             Self::control_button(play_label).on_press(Message::Play)

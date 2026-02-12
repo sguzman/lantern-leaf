@@ -1,4 +1,6 @@
-use super::super::state::{App, MAX_TTS_SPEED, MAX_TTS_VOLUME, MIN_TTS_SPEED, MIN_TTS_VOLUME};
+use super::super::state::{
+    App, MAX_TTS_SPEED, MAX_TTS_VOLUME, MIN_TTS_SPEED, MIN_TTS_VOLUME, TtsLifecycle,
+};
 use super::Effect;
 use iced::Task;
 use iced::widget::scrollable::RelativeOffset;
@@ -103,10 +105,10 @@ impl App {
     }
 
     pub(super) fn handle_play(&mut self, effects: &mut Vec<Effect>) {
-        if self.tts.preparing {
+        if let Some((page, sentence_idx, _)) = self.tts.preparing_context() {
             info!(
-                page = self.tts.preparing_page.unwrap_or(self.reader.current_page) + 1,
-                sentence_idx = self.tts.preparing_sentence_idx.unwrap_or(0),
+                page = page + 1,
+                sentence_idx,
                 "TTS batch preparation already in progress; ignoring duplicate play request"
             );
             return;
@@ -114,7 +116,7 @@ impl App {
         if let Some(playback) = &self.tts.playback {
             info!("Resuming TTS playback");
             playback.play();
-            self.tts.running = true;
+            self.tts.lifecycle = TtsLifecycle::Playing;
             self.tts.started_at = Some(Instant::now());
         } else {
             let start_idx = self.tts.current_sentence_idx.unwrap_or(0);
@@ -136,7 +138,7 @@ impl App {
             .as_ref()
             .map(|p| !p.is_paused())
             .unwrap_or(false);
-        if self.tts.preparing || currently_playing {
+        if self.tts.is_preparing() || currently_playing {
             self.handle_pause(effects);
         } else {
             self.handle_play(effects);
@@ -168,13 +170,10 @@ impl App {
     }
 
     pub(super) fn handle_pause(&mut self, _effects: &mut Vec<Effect>) {
-        if self.tts.preparing {
+        let mut paused_playback = false;
+        if self.tts.is_preparing() {
             self.tts.request_id = self.tts.request_id.wrapping_add(1);
-            self.tts.preparing = false;
-            self.tts.prepare_dispatched = false;
-            self.tts.preparing_page = None;
-            self.tts.preparing_sentence_idx = None;
-            self.tts.quick_start_display_idx = None;
+            self.tts.lifecycle = TtsLifecycle::Idle;
             self.tts.pending_append = false;
             self.tts.pending_append_batch = None;
             info!("Cancelled pending TTS batch preparation");
@@ -182,10 +181,13 @@ impl App {
         if let Some(playback) = &self.tts.playback {
             info!("Pausing TTS playback");
             playback.pause();
+            paused_playback = true;
         }
-        self.tts.running = false;
-        if let Some(started) = self.tts.started_at.take() {
-            self.tts.elapsed += Instant::now().saturating_duration_since(started);
+        if paused_playback {
+            self.tts.lifecycle = TtsLifecycle::Paused;
+            if let Some(started) = self.tts.started_at.take() {
+                self.tts.elapsed += Instant::now().saturating_duration_since(started);
+            }
         }
     }
 
@@ -248,7 +250,7 @@ impl App {
     }
 
     pub(super) fn handle_tick(&mut self, now: Instant, effects: &mut Vec<Effect>) {
-        if !self.tts.running {
+        if !self.tts.is_playing() {
             return;
         }
         if self
@@ -345,9 +347,7 @@ impl App {
             );
             return;
         }
-        self.tts.preparing = false;
-        self.tts.preparing_page = None;
-        self.tts.preparing_sentence_idx = None;
+        self.tts.lifecycle = TtsLifecycle::Idle;
         info!(
             page,
             start_idx,
@@ -366,8 +366,6 @@ impl App {
         if files.is_empty() {
             warn!("TTS batch was empty; stopping playback");
             self.stop_playback();
-            self.tts.prepare_dispatched = false;
-            self.tts.quick_start_display_idx = None;
             self.tts.current_sentence_idx = None;
             return;
         }
@@ -413,10 +411,10 @@ impl App {
                 self.tts.elapsed = Duration::ZERO;
                 if start_paused {
                     self.tts.started_at = None;
-                    self.tts.running = false;
+                    self.tts.lifecycle = TtsLifecycle::Paused;
                 } else {
                     self.tts.started_at = Some(Instant::now());
-                    self.tts.running = true;
+                    self.tts.lifecycle = TtsLifecycle::Playing;
                 }
                 self.tts.resume_after_prepare = true;
                 effects.push(Effect::AutoScrollToCurrent);
@@ -436,8 +434,7 @@ impl App {
                 );
             } else {
                 warn!("Failed to start playback from prepared files");
-                self.tts.prepare_dispatched = false;
-                self.tts.quick_start_display_idx = None;
+                self.tts.lifecycle = TtsLifecycle::Idle;
                 self.tts.pending_append = false;
                 self.tts.pending_append_batch = None;
             }
@@ -530,18 +527,14 @@ impl App {
             return;
         }
 
-        let mut full_audio_sentences = plan.audio_sentences;
+        let full_audio_sentences = plan.audio_sentences;
         if full_audio_sentences.is_empty() {
             warn!(
                 page = page + 1,
                 display_idx = requested_display_idx,
                 "No speakable text on page after normalization"
             );
-            self.tts.preparing = false;
-            self.tts.prepare_dispatched = false;
-            self.tts.preparing_page = None;
-            self.tts.preparing_sentence_idx = None;
-            self.tts.quick_start_display_idx = None;
+            self.tts.lifecycle = TtsLifecycle::Idle;
             self.tts.pending_append = false;
             self.tts.pending_append_batch = None;
             self.tts.current_sentence_idx = Some(requested_display_idx);
@@ -570,11 +563,7 @@ impl App {
                 display_idx = requested_display_idx,
                 "No speakable text on page after normalization"
             );
-            self.tts.preparing = false;
-            self.tts.prepare_dispatched = false;
-            self.tts.preparing_page = None;
-            self.tts.preparing_sentence_idx = None;
-            self.tts.quick_start_display_idx = None;
+            self.tts.lifecycle = TtsLifecycle::Idle;
             self.tts.pending_append = false;
             self.tts.pending_append_batch = None;
             self.tts.current_sentence_idx = Some(requested_display_idx);
@@ -582,118 +571,16 @@ impl App {
             return;
         };
         audio_start_idx = audio_start_idx.min(full_audio_sentences.len().saturating_sub(1));
-        if !self.tts.prepare_dispatched {
-            let display_start_idx = self
-                .display_index_for_audio_sentence(audio_start_idx)
-                .unwrap_or(requested_display_idx);
-            self.tts.sentence_offset = audio_start_idx;
-            self.tts.current_sentence_idx = Some(display_start_idx);
-            self.tts.prepare_dispatched = true;
-            effects.push(Effect::PrepareTtsBatches {
-                page,
-                request_id,
-                audio_start_idx,
-                audio_sentences: full_audio_sentences,
-            });
-            return;
-        }
-
-        let quick_display_idx = self
-            .tts
-            .quick_start_display_idx
-            .unwrap_or(requested_display_idx);
-        let quick_audio_idx = self
-            .find_audio_start_for_display_sentence(quick_display_idx)
-            .unwrap_or(audio_start_idx)
-            .min(full_audio_sentences.len().saturating_sub(1));
         let display_start_idx = self
-            .display_index_for_audio_sentence(quick_audio_idx)
-            .unwrap_or(quick_display_idx);
-        self.tts.sentence_offset = quick_audio_idx;
+            .display_index_for_audio_sentence(audio_start_idx)
+            .unwrap_or(requested_display_idx);
+        self.tts.sentence_offset = audio_start_idx;
         self.tts.current_sentence_idx = Some(display_start_idx);
-
-        let append_start = quick_audio_idx.saturating_add(1);
-        if append_start >= full_audio_sentences.len() {
-            self.tts.pending_append = false;
-            self.tts.pending_append_batch = None;
-            return;
-        }
-
-        let append_sentences = full_audio_sentences.split_off(append_start);
-        self.tts.pending_append = true;
-
-        if self.tts.playback.is_some() && !self.tts.preparing {
-            effects.push(Effect::PrepareTtsAppend {
-                page,
-                request_id,
-                start_idx: append_start,
-                audio_sentences: append_sentences,
-            });
-        } else {
-            self.tts.pending_append_batch = Some(super::super::state::PendingAppendBatch {
-                page,
-                request_id,
-                start_idx: append_start,
-                audio_sentences: append_sentences,
-            });
-        }
-    }
-
-    pub(super) fn handle_tts_initial_ready(
-        &mut self,
-        page: usize,
-        requested_display_idx: usize,
-        request_id: u64,
-        sentence_count: usize,
-        start_display_idx: Option<usize>,
-        start_audio_idx: Option<usize>,
-        audio_sentence: Option<String>,
-        effects: &mut Vec<Effect>,
-    ) {
-        if request_id != self.tts.request_id {
-            debug!(
-                request_id,
-                current = self.tts.request_id,
-                "Ignoring stale initial TTS request"
-            );
-            return;
-        }
-        if page != self.reader.current_page {
-            debug!(
-                page,
-                current = self.reader.current_page,
-                "Ignoring stale initial TTS result for different page"
-            );
-            return;
-        }
-        if self.tts.prepare_dispatched {
-            return;
-        }
-
-        let Some(audio_sentence) = audio_sentence else {
-            self.tts.quick_start_display_idx = None;
-            return;
-        };
-        let display_idx = start_display_idx.unwrap_or(requested_display_idx);
-        let _audio_idx = start_audio_idx.unwrap_or(0);
-        self.tts.quick_start_display_idx = Some(display_idx);
-        self.tts.current_sentence_idx = Some(display_idx);
-        // Quick-start batches contain only one sentence; keep indices relative
-        // to that batch and rely on `quick_start_display_idx` to re-anchor once
-        // full-page normalization arrives.
-        self.tts.sentence_offset = 0;
-        self.tts.display_to_audio = vec![None; sentence_count];
-        if display_idx < self.tts.display_to_audio.len() {
-            self.tts.display_to_audio[display_idx] = Some(0);
-        }
-        self.tts.audio_to_display = vec![display_idx];
-        self.tts.pending_append = true;
-        self.tts.prepare_dispatched = true;
         effects.push(Effect::PrepareTtsBatches {
             page,
             request_id,
-            audio_start_idx: 0,
-            audio_sentences: vec![audio_sentence],
+            audio_start_idx,
+            audio_sentences: full_audio_sentences,
         });
     }
 
@@ -713,11 +600,7 @@ impl App {
 
         let display_sentences = self.raw_sentences_for_page(page);
         if display_sentences.is_empty() {
-            self.tts.preparing = false;
-            self.tts.prepare_dispatched = false;
-            self.tts.preparing_page = None;
-            self.tts.preparing_sentence_idx = None;
-            self.tts.quick_start_display_idx = None;
+            self.tts.lifecycle = TtsLifecycle::Idle;
             self.tts.pending_append = false;
             self.tts.pending_append_batch = None;
             self.tts.current_sentence_idx = None;
@@ -728,31 +611,30 @@ impl App {
         }
 
         let requested_display_idx = sentence_idx.min(display_sentences.len().saturating_sub(1));
-        if self.tts.preparing
-            && self.tts.preparing_page == Some(page)
-            && self.tts.preparing_sentence_idx == Some(requested_display_idx)
-        {
-            info!(
-                page = page + 1,
-                sentence_idx = requested_display_idx,
-                "Skipping duplicate TTS start request while preparation is in progress"
-            );
-            return Task::none();
+        if let Some((preparing_page, preparing_sentence_idx, _)) = self.tts.preparing_context() {
+            if preparing_page == page && preparing_sentence_idx == requested_display_idx {
+                info!(
+                    page = page + 1,
+                    sentence_idx = requested_display_idx,
+                    "Skipping duplicate TTS start request while preparation is in progress"
+                );
+                return Task::none();
+            }
         }
         self.tts.current_sentence_idx = Some(requested_display_idx);
         self.tts.sentence_offset = requested_display_idx;
 
         self.tts.started_at = None;
         self.tts.elapsed = Duration::ZERO;
-        self.tts.prepare_dispatched = false;
-        self.tts.quick_start_display_idx = None;
         self.tts.pending_append = false;
         self.tts.pending_append_batch = None;
-        self.tts.preparing = true;
-        self.tts.preparing_page = Some(page);
-        self.tts.preparing_sentence_idx = Some(requested_display_idx);
         self.tts.request_id = self.tts.request_id.wrapping_add(1);
         let request_id = self.tts.request_id;
+        self.tts.lifecycle = TtsLifecycle::Preparing {
+            page,
+            sentence_idx: requested_display_idx,
+            request_id,
+        };
         info!(
             page = page + 1,
             sentence_idx = requested_display_idx,

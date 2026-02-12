@@ -69,14 +69,22 @@ pub struct PendingAppendBatch {
     pub(super) audio_sentences: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TtsLifecycle {
+    Idle,
+    Preparing {
+        page: usize,
+        sentence_idx: usize,
+        request_id: u64,
+    },
+    Playing,
+    Paused,
+}
+
 pub struct TtsState {
     pub(super) engine: Option<TtsEngine>,
     pub(super) playback: Option<TtsPlayback>,
-    pub(super) preparing: bool,
-    pub(super) prepare_dispatched: bool,
-    pub(super) preparing_page: Option<usize>,
-    pub(super) preparing_sentence_idx: Option<usize>,
-    pub(super) quick_start_display_idx: Option<usize>,
+    pub(super) lifecycle: TtsLifecycle,
     pub(super) pending_append: bool,
     pub(super) pending_append_batch: Option<PendingAppendBatch>,
     pub(super) resume_after_prepare: bool,
@@ -86,12 +94,32 @@ pub struct TtsState {
     pub(super) track: Vec<(PathBuf, Duration)>,
     pub(super) started_at: Option<Instant>,
     pub(super) elapsed: Duration,
-    pub(super) running: bool,
     pub(super) request_id: u64,
     pub(super) sources_per_sentence: usize,
     pub(super) total_sources: usize,
     pub(super) display_to_audio: Vec<Option<usize>>,
     pub(super) audio_to_display: Vec<usize>,
+}
+
+impl TtsState {
+    pub(super) fn is_preparing(&self) -> bool {
+        matches!(self.lifecycle, TtsLifecycle::Preparing { .. })
+    }
+
+    pub(super) fn is_playing(&self) -> bool {
+        matches!(self.lifecycle, TtsLifecycle::Playing)
+    }
+
+    pub(super) fn preparing_context(&self) -> Option<(usize, usize, u64)> {
+        match self.lifecycle {
+            TtsLifecycle::Preparing {
+                page,
+                sentence_idx,
+                request_id,
+            } => Some((page, sentence_idx, request_id)),
+            _ => None,
+        }
+    }
 }
 
 /// Bookmark and scroll tracking model.
@@ -192,7 +220,7 @@ impl App {
         if let Some(playback) = self.tts.playback.take() {
             playback.stop();
         }
-        self.tts.running = false;
+        self.tts.lifecycle = TtsLifecycle::Idle;
         self.tts.started_at = None;
         self.tts.total_sources = 0;
         self.tts.pending_append = false;
@@ -502,11 +530,7 @@ impl App {
             )
             .ok(),
             playback: None,
-            preparing: false,
-            prepare_dispatched: false,
-            preparing_page: None,
-            preparing_sentence_idx: None,
-            quick_start_display_idx: None,
+            lifecycle: TtsLifecycle::Idle,
             pending_append: false,
             pending_append_batch: None,
             resume_after_prepare: true,
@@ -516,7 +540,6 @@ impl App {
             track: Vec::new(),
             started_at: None,
             elapsed: Duration::ZERO,
-            running: false,
             request_id: 0,
             sources_per_sentence: 1,
             total_sources: 0,
@@ -674,11 +697,7 @@ impl App {
                 )
                 .ok(),
                 playback: None,
-                preparing: false,
-                prepare_dispatched: false,
-                preparing_page: None,
-                preparing_sentence_idx: None,
-                quick_start_display_idx: None,
+                lifecycle: TtsLifecycle::Idle,
                 pending_append: false,
                 pending_append_batch: None,
                 resume_after_prepare: true,
@@ -688,7 +707,6 @@ impl App {
                 track: Vec::new(),
                 started_at: None,
                 elapsed: Duration::ZERO,
-                running: false,
                 request_id: 0,
                 sources_per_sentence: 1,
                 total_sources: 0,
@@ -807,11 +825,7 @@ impl App {
             tts: TtsState {
                 engine: None,
                 playback: None,
-                preparing: false,
-                prepare_dispatched: false,
-                preparing_page: None,
-                preparing_sentence_idx: None,
-                quick_start_display_idx: None,
+                lifecycle: TtsLifecycle::Idle,
                 pending_append: false,
                 pending_append_batch: None,
                 resume_after_prepare: true,
@@ -821,7 +835,6 @@ impl App {
                 track: Vec::new(),
                 started_at: None,
                 elapsed: Duration::ZERO,
-                running: false,
                 request_id: 0,
                 sources_per_sentence: 1,
                 total_sources: 0,

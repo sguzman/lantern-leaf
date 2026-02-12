@@ -226,44 +226,6 @@ impl TextNormalizer {
         self.plan_page_cached_page_mode(epub_path, page_idx, display_sentences)
     }
 
-    pub fn first_speakable_sentence_cached(
-        &self,
-        epub_path: &Path,
-        display_sentences: &[String],
-        requested_display_idx: usize,
-    ) -> Option<(usize, usize, String)> {
-        if display_sentences.is_empty() {
-            return None;
-        }
-        let config_hash = self.config_hash();
-        let clamped = requested_display_idx.min(display_sentences.len().saturating_sub(1));
-
-        let mut prefix_audio = vec![0usize; display_sentences.len() + 1];
-        for (i, sentence) in display_sentences.iter().enumerate() {
-            let speakable = self
-                .normalize_sentence_cached(epub_path, &config_hash, sentence)
-                .is_some() as usize;
-            prefix_audio[i + 1] = prefix_audio[i] + speakable;
-        }
-
-        for (idx, sentence) in display_sentences.iter().enumerate().skip(clamped) {
-            if let Some(cleaned) = self.normalize_sentence_cached(epub_path, &config_hash, sentence)
-            {
-                let audio_idx = prefix_audio[idx];
-                return Some((idx, audio_idx, cleaned));
-            }
-        }
-        for (idx, sentence) in display_sentences.iter().enumerate().take(clamped + 1).rev() {
-            if let Some(cleaned) = self.normalize_sentence_cached(epub_path, &config_hash, sentence)
-            {
-                let audio_idx = prefix_audio[idx];
-                return Some((idx, audio_idx, cleaned));
-            }
-        }
-
-        None
-    }
-
     fn plan_page_cached_page_mode(
         &self,
         epub_path: &Path,

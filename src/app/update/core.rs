@@ -21,7 +21,7 @@ impl App {
         let mut subscriptions: Vec<Subscription<Message>> =
             vec![event::listen_with(runtime_event_to_message)];
 
-        if app.tts.running {
+        if app.tts.is_playing() {
             subscriptions.push(time::every(Duration::from_millis(50)).map(Message::Tick));
         }
 
@@ -182,24 +182,6 @@ impl App {
                 plan,
                 &mut effects,
             ),
-            Message::TtsInitialReady {
-                page,
-                requested_display_idx,
-                request_id,
-                sentence_count,
-                start_display_idx,
-                start_audio_idx,
-                audio_sentence,
-            } => self.handle_tts_initial_ready(
-                page,
-                requested_display_idx,
-                request_id,
-                sentence_count,
-                start_display_idx,
-                start_audio_idx,
-                audio_sentence,
-                &mut effects,
-            ),
             Message::Tick(now) => self.handle_tick(now, &mut effects),
         }
 
@@ -229,9 +211,7 @@ impl App {
                 audio_sentences,
             } => {
                 let Some(engine) = self.tts.engine.clone() else {
-                    self.tts.preparing = false;
-                    self.tts.preparing_page = None;
-                    self.tts.preparing_sentence_idx = None;
+                    self.tts.lifecycle = super::super::state::TtsLifecycle::Idle;
                     self.tts.pending_append = false;
                     return Task::none();
                 };
