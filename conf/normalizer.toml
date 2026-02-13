@@ -100,3 +100,4 @@ PostCSS = "Post C S S"
 # Arbitrary user-defined pronunciations for whole words/tokens.
 [normalization.pronunciation.custom_pronunciations]
 Cato = "Kay toe"
+Plato = "Play toe"
