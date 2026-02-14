@@ -27,6 +27,7 @@ pub enum Message {
     ToggleRecentBooks,
     OpenRecentBook(PathBuf),
     ToggleCalibreBrowser,
+    PrimeCalibreLoad,
     OpenPathInputChanged(String),
     OpenPathRequested,
     RefreshCalibreBooks,

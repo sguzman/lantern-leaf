@@ -25,6 +25,7 @@ impl App {
             Message::ToggleRecentBooks => self.handle_toggle_recent_books(),
             Message::OpenRecentBook(path) => self.handle_open_recent_book(path, &mut effects),
             Message::ToggleCalibreBrowser => self.handle_toggle_calibre_browser(&mut effects),
+            Message::PrimeCalibreLoad => self.handle_prime_calibre_load(&mut effects),
             Message::OpenPathInputChanged(path) => self.handle_open_path_input_changed(path),
             Message::OpenPathRequested => self.handle_open_path_requested(&mut effects),
             Message::RefreshCalibreBooks => self.handle_refresh_calibre_books(&mut effects),
@@ -280,6 +281,17 @@ impl App {
         }
         self.calibre.visible = !self.calibre.visible;
         if self.calibre.visible && self.calibre.books.is_empty() && !self.calibre.loading {
+            effects.push(Effect::LoadCalibreBooks {
+                force_refresh: false,
+            });
+        }
+    }
+
+    fn handle_prime_calibre_load(&mut self, effects: &mut Vec<Effect>) {
+        if !self.starter_mode || !self.calibre.config.enabled || self.calibre.loading {
+            return;
+        }
+        if self.calibre.books.is_empty() {
             effects.push(Effect::LoadCalibreBooks {
                 force_refresh: false,
             });

@@ -727,7 +727,7 @@ impl App {
         };
 
         let init_task = if app.calibre.config.enabled {
-            Task::done(Message::RefreshCalibreBooks)
+            Task::done(Message::PrimeCalibreLoad)
         } else {
             Task::none()
         };
