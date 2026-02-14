@@ -23,7 +23,7 @@ pub(crate) fn default_tts_model() -> String {
 }
 
 pub(crate) fn default_tts_speed() -> f32 {
-    2.5
+    1.75
 }
 
 pub(crate) fn default_tts_volume() -> f32 {

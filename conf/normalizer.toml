@@ -21,6 +21,12 @@ drop_word_suffix_numeric_footnotes = true
 drop_square_bracket_text = true
 drop_curly_brace_text = true
 
+# Split oversized sentence spans into multiple TTS chunks so playback stays clear
+# even when source text has long comma/semicolon chains.
+chunk_long_sentences = true
+max_audio_chars_per_chunk = 180
+max_audio_words_per_chunk = 32
+
 # Drop lines/sentences that are too short or punctuation-only after cleaning.
 min_sentence_chars = 2
 require_alphanumeric = true

@@ -24,6 +24,7 @@ static RE_SQUARE_BRACKET_BLOCK: Lazy<Regex> = Lazy::new(|| Regex::new(r"\[[^\]]*
 static RE_CURLY_BRACKET_BLOCK: Lazy<Regex> = Lazy::new(|| Regex::new(r"\{[^}]*\}").unwrap());
 static RE_HORIZONTAL_WS: Lazy<Regex> = Lazy::new(|| Regex::new(r"[ \t\u{00A0}]+").unwrap());
 static RE_SPACE_BEFORE_PUNCT: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+([,.;:!?])").unwrap());
+static RE_SOFT_BREAK_WS: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+").unwrap());
 
 #[derive(Debug, Clone)]
 pub struct TextNormalizer {
@@ -59,6 +60,9 @@ struct NormalizerConfig {
     drop_word_suffix_numeric_footnotes: bool,
     drop_square_bracket_text: bool,
     drop_curly_brace_text: bool,
+    chunk_long_sentences: bool,
+    max_audio_chars_per_chunk: usize,
+    max_audio_words_per_chunk: usize,
     min_sentence_chars: usize,
     require_alphanumeric: bool,
     replacements: BTreeMap<String, String>,
@@ -86,6 +90,9 @@ impl Default for NormalizerConfig {
             drop_word_suffix_numeric_footnotes: true,
             drop_square_bracket_text: true,
             drop_curly_brace_text: true,
+            chunk_long_sentences: true,
+            max_audio_chars_per_chunk: 180,
+            max_audio_words_per_chunk: 32,
             min_sentence_chars: 2,
             require_alphanumeric: true,
             replacements,
@@ -295,10 +302,16 @@ impl TextNormalizer {
         for (display_idx, sentence) in display_sentences.iter().enumerate() {
             if let Some(cleaned) = self.normalize_sentence_cached(epub_path, &config_hash, sentence)
             {
-                let audio_idx = audio_sentences.len();
-                audio_sentences.push(cleaned);
-                display_to_audio[display_idx] = Some(audio_idx);
-                audio_to_display.push(display_idx);
+                let chunks = self.chunk_sentence_for_tts(&cleaned);
+                if chunks.is_empty() {
+                    continue;
+                }
+                let first_audio_idx = audio_sentences.len();
+                display_to_audio[display_idx] = Some(first_audio_idx);
+                for chunk in chunks {
+                    audio_to_display.push(display_idx);
+                    audio_sentences.push(chunk);
+                }
             }
         }
 
@@ -343,10 +356,16 @@ impl TextNormalizer {
 
         for (display_idx, sentence) in cleaned_sentences.into_iter().enumerate() {
             if let Some(cleaned) = self.finalize_sentence(&sentence) {
-                let audio_idx = audio_sentences.len();
-                audio_sentences.push(cleaned);
-                display_to_audio[display_idx] = Some(audio_idx);
-                audio_to_display.push(display_idx);
+                let chunks = self.chunk_sentence_for_tts(&cleaned);
+                if chunks.is_empty() {
+                    continue;
+                }
+                let first_audio_idx = audio_sentences.len();
+                display_to_audio[display_idx] = Some(first_audio_idx);
+                for chunk in chunks {
+                    audio_to_display.push(display_idx);
+                    audio_sentences.push(chunk);
+                }
             }
         }
 
@@ -381,7 +400,8 @@ impl TextNormalizer {
     }
 
     fn clean_text_core(&self, input: &str) -> String {
-        let mut text = input.to_string();
+        let mut text = normalize_unicode_punctuation(input);
+        text = text.replace('"', "");
 
         if self.config.strip_markdown_links {
             text = RE_MARKDOWN_LINK.replace_all(&text, "$1").to_string();
@@ -467,7 +487,7 @@ impl TextNormalizer {
     }
 
     fn finalize_sentence(&self, sentence: &str) -> Option<String> {
-        let trimmed = sentence.trim();
+        let trimmed = trim_boundary_noise(sentence);
         if trimmed.is_empty() {
             return None;
         }
@@ -481,6 +501,102 @@ impl TextNormalizer {
         }
 
         Some(trimmed.to_string())
+    }
+
+    fn chunk_sentence_for_tts(&self, sentence: &str) -> Vec<String> {
+        let cleaned = trim_boundary_noise(sentence);
+        if cleaned.is_empty() {
+            return Vec::new();
+        }
+        if !self.config.chunk_long_sentences {
+            return vec![cleaned.to_string()];
+        }
+
+        let max_chars = self.config.max_audio_chars_per_chunk.max(40);
+        let max_words = self.config.max_audio_words_per_chunk.max(8);
+        if !exceeds_chunk_limits(cleaned, max_chars, max_words) {
+            return vec![cleaned.to_string()];
+        }
+
+        let mut chunks = Vec::new();
+        let mut current = String::new();
+        for segment in split_for_chunking(cleaned) {
+            self.push_segment_into_chunks(
+                &mut chunks,
+                &mut current,
+                &segment,
+                max_chars,
+                max_words,
+            );
+        }
+        if !current.is_empty() {
+            chunks.push(current);
+        }
+        if chunks.is_empty() {
+            chunks.push(cleaned.to_string());
+        }
+
+        tracing::warn!(
+            original_chars = cleaned.chars().count(),
+            original_words = cleaned.split_whitespace().count(),
+            chunk_count = chunks.len(),
+            max_chars,
+            max_words,
+            "Split oversized normalized sentence into multiple TTS chunks"
+        );
+
+        for chunk in &chunks {
+            if exceeds_chunk_limits(chunk, max_chars, max_words) {
+                tracing::warn!(
+                    chunk_chars = chunk.chars().count(),
+                    chunk_words = chunk.split_whitespace().count(),
+                    max_chars,
+                    max_words,
+                    "Generated TTS chunk still exceeds configured limits"
+                );
+            }
+        }
+
+        chunks
+    }
+
+    fn push_segment_into_chunks(
+        &self,
+        chunks: &mut Vec<String>,
+        current: &mut String,
+        segment: &str,
+        max_chars: usize,
+        max_words: usize,
+    ) {
+        let segment = trim_boundary_noise(segment);
+        if segment.is_empty() {
+            return;
+        }
+
+        if exceeds_chunk_limits(segment, max_chars, max_words) {
+            if !current.is_empty() {
+                chunks.push(std::mem::take(current));
+            }
+            for sub in split_segment_by_words(segment, max_chars, max_words) {
+                chunks.push(sub);
+            }
+            return;
+        }
+
+        let candidate = if current.is_empty() {
+            segment.to_string()
+        } else {
+            format!("{current} {segment}")
+        };
+        if !exceeds_chunk_limits(&candidate, max_chars, max_words) {
+            *current = candidate;
+            return;
+        }
+
+        if !current.is_empty() {
+            chunks.push(std::mem::take(current));
+        }
+        *current = segment.to_string();
     }
 
     fn config_hash(&self) -> String {
@@ -800,6 +916,104 @@ fn hash_sentences(sentences: &[String]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+fn normalize_unicode_punctuation(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '\u{2018}' | '\u{2019}' => out.push('\''),
+            '\u{201C}' | '\u{201D}' => out.push('"'),
+            '\u{2013}' | '\u{2014}' => {
+                out.push(' ');
+                out.push('-');
+                out.push(' ');
+            }
+            '\u{2026}' => out.push_str("..."),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn trim_boundary_noise(input: &str) -> &str {
+    input.trim_matches(|ch: char| {
+        ch.is_whitespace()
+            || matches!(
+                ch,
+                '"' | '\''
+                    | '\u{2018}'
+                    | '\u{2019}'
+                    | '\u{201C}'
+                    | '\u{201D}'
+                    | '\u{00AB}'
+                    | '\u{00BB}'
+            )
+    })
+}
+
+fn exceeds_chunk_limits(text: &str, max_chars: usize, max_words: usize) -> bool {
+    text.chars().count() > max_chars || text.split_whitespace().count() > max_words
+}
+
+fn split_for_chunking(text: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+
+    for ch in text.chars() {
+        current.push(ch);
+        if matches!(ch, ',' | ';' | ':' | '.' | '!' | '?' | '\n') {
+            let segment = RE_SOFT_BREAK_WS
+                .replace_all(trim_boundary_noise(&current), " ")
+                .to_string();
+            if !segment.is_empty() {
+                segments.push(segment);
+            }
+            current.clear();
+        }
+    }
+
+    let tail = RE_SOFT_BREAK_WS
+        .replace_all(trim_boundary_noise(&current), " ")
+        .to_string();
+    if !tail.is_empty() {
+        segments.push(tail);
+    }
+    if segments.is_empty() {
+        vec![text.trim().to_string()]
+    } else {
+        segments
+    }
+}
+
+fn split_segment_by_words(segment: &str, max_chars: usize, max_words: usize) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    let mut current_words = 0usize;
+
+    for word in segment.split_whitespace() {
+        let word_chars = word.chars().count();
+        let candidate_chars = if current.is_empty() {
+            word_chars
+        } else {
+            current.chars().count() + 1 + word_chars
+        };
+        let candidate_words = current_words + 1;
+        if !current.is_empty() && (candidate_chars > max_chars || candidate_words > max_words) {
+            chunks.push(std::mem::take(&mut current));
+            current_words = 0;
+        }
+        if !current.is_empty() {
+            current.push(' ');
+        }
+        current.push_str(word);
+        current_words += 1;
+    }
+
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
 fn hash_sentence(sentence: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(sentence.as_bytes());
@@ -868,5 +1082,44 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&cache_root);
+    }
+
+    #[test]
+    fn splits_oversized_sentence_into_audio_chunks_with_stable_mapping() {
+        let normalizer = TextNormalizer::default();
+        let page = vec![String::from(
+            "In the word lists of Cheshire, Derbyshire, Lancashire and Yorkshire we find the \
+            following terms, all of which took root in the Delaware Valley: abide as in cannot \
+            abide it, all out for entirely, apple-pie order to mean very good order, bamboozle \
+            for deceive, black and white for writing, blather for empty talk, boggle for take \
+            fright, brat for child, budge for move, burying for funeral, by golly as an \
+            expletive, by gum for another expletive.",
+        )];
+
+        let plan = normalizer.plan_page(&page);
+        assert!(
+            plan.audio_sentences.len() > 1,
+            "long comma-heavy sentence should be split into multiple audio chunks"
+        );
+        assert_eq!(plan.display_to_audio, vec![Some(0)]);
+        assert!(
+            plan.audio_to_display.iter().all(|idx| *idx == 0),
+            "all generated chunks should map back to the original display sentence"
+        );
+        assert!(
+            plan.audio_sentences
+                .iter()
+                .all(|chunk| chunk.chars().count() <= 180 && chunk.split_whitespace().count() <= 32),
+            "chunking should enforce configured max chunk size"
+        );
+    }
+
+    #[test]
+    fn normalizes_unicode_quotes_and_dashes_for_tts() {
+        let normalizer = TextNormalizer::default();
+        let page = vec![String::from("“Quote”—and ‘apostrophe’ … done.")];
+        let plan = normalizer.plan_page(&page);
+        assert_eq!(plan.audio_sentences.len(), 1);
+        assert_eq!(plan.audio_sentences[0], "Quote - and 'apostrophe'... done.");
     }
 }
