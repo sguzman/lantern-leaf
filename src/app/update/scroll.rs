@@ -55,16 +55,22 @@ impl App {
             }
         }
 
-        if let Some(idx) = self.bookmark.pending_sentence_snap.take() {
-            if let Some(offset) = self.scroll_offset_for_sentence(idx) {
-                let offset = Self::sanitize_offset(offset);
-                if offset != self.bookmark.last_scroll_offset {
-                    self.bookmark.last_scroll_offset = offset;
-                    effects.push(Effect::ScrollTo(offset));
-                    effects.push(Effect::SaveBookmark);
-                    self.bookmark.last_scroll_bookmark_save_at = Some(Instant::now());
+        if let Some(idx) = self.bookmark.pending_sentence_snap {
+            if !self.pending_window_resize {
+                if let Some(offset) = self.scroll_offset_for_sentence(idx) {
+                    let offset = Self::sanitize_offset(offset);
+                    if offset != self.bookmark.last_scroll_offset {
+                        self.bookmark.last_scroll_offset = offset;
+                        effects.push(Effect::ScrollTo(offset));
+                        effects.push(Effect::SaveBookmark);
+                        self.bookmark.last_scroll_bookmark_save_at = Some(Instant::now());
+                    }
                 }
+                self.bookmark.pending_sentence_snap = None;
+                self.bookmark.defer_sentence_snap_until_scroll = false;
             }
+        } else if self.bookmark.defer_sentence_snap_until_scroll && !self.pending_window_resize {
+            self.bookmark.defer_sentence_snap_until_scroll = false;
         }
     }
 
@@ -211,13 +217,24 @@ impl App {
         let target_idx = model
             .target_idx
             .min(model.sentences.len().saturating_sub(1));
-        let separator_units = Self::text_units(model.sentence_separator);
+        let chars_per_line = self.estimated_chars_per_line_for_model(model);
+        let separator_units = if model.sentence_separator.is_empty() {
+            0.0
+        } else if let Some(chars_per_line) = chars_per_line {
+            Self::wrapped_line_units(model.sentence_separator, chars_per_line)
+        } else {
+            Self::text_units(model.sentence_separator)
+        };
         let mut total_units = 0.0f32;
         let mut target_start_units = 0.0f32;
         let mut target_units = 1.0f32;
 
         for (idx, sentence) in model.sentences.iter().enumerate() {
-            let sentence_units = Self::text_units(sentence);
+            let sentence_units = if let Some(chars_per_line) = chars_per_line {
+                Self::wrapped_line_units(sentence, chars_per_line)
+            } else {
+                Self::text_units(sentence)
+            };
             if idx < target_idx {
                 target_start_units += sentence_units;
             } else if idx == target_idx {
@@ -238,6 +255,27 @@ impl App {
         let middle = ((target_start_units + target_units * 0.5) / total_units).clamp(start, 1.0);
 
         Some(SentenceProgress { start, middle })
+    }
+
+    fn estimated_chars_per_line_for_model(&self, model: &ScrollTargetModel) -> Option<f32> {
+        if model.sentences.is_empty() || !model.sentence_separator.is_empty() {
+            return None;
+        }
+        let total_chars: usize = model.sentences.iter().map(|s| s.chars().count()).sum();
+        if total_chars == 0 {
+            return None;
+        }
+
+        let content_height = self.bookmark.content_height.max(1.0);
+        let (_, text_height_px) = self.estimated_text_geometry_px(content_height);
+        let line_height_px = (self.config.font_size as f32 * self.config.line_spacing).max(1.0);
+        let estimated_line_count = (text_height_px / line_height_px).max(1.0);
+        let chars_per_line = total_chars as f32 / estimated_line_count;
+        if chars_per_line.is_finite() && chars_per_line >= 6.0 {
+            Some(chars_per_line)
+        } else {
+            None
+        }
     }
 
     fn scroll_target_model(&self, display_sentence_idx: usize) -> Option<ScrollTargetModel> {
@@ -336,6 +374,18 @@ impl App {
         // Use exact character counts for sentence progress to avoid drift from
         // punctuation/whitespace-heavy prose where weighted heuristics skew jumps.
         text.chars().count().max(1) as f32
+    }
+
+    fn wrapped_line_units(text: &str, chars_per_line: f32) -> f32 {
+        if !chars_per_line.is_finite() || chars_per_line <= 0.0 {
+            return Self::text_units(text);
+        }
+        let mut lines = 0.0f32;
+        for segment in text.split('\n') {
+            let chars = segment.chars().count().max(1) as f32;
+            lines += (chars / chars_per_line).ceil().max(1.0);
+        }
+        lines.max(1.0)
     }
 
     fn current_page_image_count(&self) -> usize {
@@ -554,6 +604,51 @@ mod tests {
         assert!(
             (y_spaced - y_dense).abs() < 0.12,
             "changing line spacing should not severely move jump/auto-scroll targets"
+        );
+    }
+
+    #[test]
+    fn pending_sentence_snap_waits_for_resize_to_finish() {
+        let mut app = build_test_app(180, 0);
+        let idx = 72usize;
+        app.bookmark.pending_sentence_snap = Some(idx);
+        app.bookmark.defer_sentence_snap_until_scroll = true;
+        app.pending_window_resize = true;
+
+        let mut effects = Vec::new();
+        app.handle_scrolled(
+            RelativeOffset { x: 0.0, y: 0.4 },
+            900.0,
+            620.0,
+            900.0,
+            3600.0,
+            &mut effects,
+        );
+
+        assert_eq!(app.bookmark.pending_sentence_snap, Some(idx));
+        assert!(
+            effects
+                .iter()
+                .all(|effect| !matches!(effect, Effect::ScrollTo(_)))
+        );
+
+        app.pending_window_resize = false;
+        let mut post_resize_effects = Vec::new();
+        app.handle_scrolled(
+            RelativeOffset { x: 0.0, y: 0.4 },
+            900.0,
+            620.0,
+            900.0,
+            3600.0,
+            &mut post_resize_effects,
+        );
+
+        assert_eq!(app.bookmark.pending_sentence_snap, None);
+        assert!(!app.bookmark.defer_sentence_snap_until_scroll);
+        assert!(
+            post_resize_effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::ScrollTo(_)))
         );
     }
 }

@@ -298,6 +298,9 @@ impl App {
             self.config.window_height = height;
             debug!(width, height, "Window size changed");
             self.pending_window_resize = true;
+            if self.config.auto_scroll_tts && self.tts.current_sentence_idx.is_some() {
+                self.bookmark.defer_sentence_snap_until_scroll = true;
+            }
             self.window_geometry_changed_at = Some(Instant::now());
         }
     }
@@ -339,7 +342,10 @@ impl App {
         }
 
         if self.pending_window_resize {
-            self.schedule_highlight_snap_after_layout_change(effects);
+            self.schedule_highlight_snap_after_layout_change_with_mode(effects, false);
+            effects.push(Effect::ScrollTo(Self::sanitize_offset(
+                self.bookmark.last_scroll_offset,
+            )));
         }
         effects.push(Effect::SaveConfig);
         self.pending_window_resize = false;
@@ -348,6 +354,14 @@ impl App {
     }
 
     fn schedule_highlight_snap_after_layout_change(&mut self, effects: &mut Vec<Effect>) {
+        self.schedule_highlight_snap_after_layout_change_with_mode(effects, true);
+    }
+
+    fn schedule_highlight_snap_after_layout_change_with_mode(
+        &mut self,
+        effects: &mut Vec<Effect>,
+        dispatch_autoscroll: bool,
+    ) {
         if !self.config.auto_scroll_tts {
             return;
         }
@@ -361,7 +375,10 @@ impl App {
         let clamped = idx.min(sentence_count.saturating_sub(1));
         self.tts.current_sentence_idx = Some(clamped);
         self.bookmark.pending_sentence_snap = Some(clamped);
-        effects.push(Effect::AutoScrollToCurrent);
+        self.bookmark.defer_sentence_snap_until_scroll = true;
+        if dispatch_autoscroll {
+            effects.push(Effect::AutoScrollToCurrent);
+        }
         effects.push(Effect::SaveBookmark);
     }
 
@@ -635,6 +652,30 @@ mod tests {
             effects
                 .iter()
                 .any(|effect| matches!(effect, Effect::SaveConfig))
+        );
+    }
+
+    #[test]
+    fn resize_flush_defers_sentence_snap_until_next_scroll_metrics() {
+        let mut app = build_test_app(120);
+        app.tts.current_sentence_idx = Some(9);
+        app.pending_window_resize = true;
+        app.window_geometry_changed_at = Some(Instant::now() - Duration::from_millis(500));
+        let mut effects = Vec::new();
+
+        app.maybe_flush_window_geometry_updates(&mut effects);
+
+        assert_eq!(app.bookmark.pending_sentence_snap, Some(9));
+        assert!(app.bookmark.defer_sentence_snap_until_scroll);
+        assert!(
+            effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::ScrollTo(_)))
+        );
+        assert!(
+            effects
+                .iter()
+                .all(|effect| !matches!(effect, Effect::AutoScrollToCurrent))
         );
     }
 }

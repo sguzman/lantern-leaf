@@ -10,6 +10,7 @@ pub struct BookmarkState {
     pub(in crate::app) content_width: f32,
     pub(in crate::app) content_height: f32,
     pub(in crate::app) pending_sentence_snap: Option<usize>,
+    pub(in crate::app) defer_sentence_snap_until_scroll: bool,
     pub(in crate::app) last_scroll_bookmark_save_at: Option<Instant>,
 }
 

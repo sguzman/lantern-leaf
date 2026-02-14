@@ -404,6 +404,7 @@ impl App {
         self.bookmark.last_scroll_offset = RelativeOffset::START;
         self.bookmark.viewport_fraction = 0.25;
         self.bookmark.pending_sentence_snap = None;
+        self.bookmark.defer_sentence_snap_until_scroll = false;
         self.bookmark.last_scroll_bookmark_save_at = None;
         self.tts = TtsState::new(tts_engine_from_config(&self.config));
 
@@ -555,6 +556,7 @@ impl App {
                 content_width: 0.0,
                 content_height: 0.0,
                 pending_sentence_snap: None,
+                defer_sentence_snap_until_scroll: false,
                 last_scroll_bookmark_save_at: None,
             },
             epub_path,
@@ -687,6 +689,7 @@ impl App {
                 content_width: 0.0,
                 content_height: 0.0,
                 pending_sentence_snap: None,
+                defer_sentence_snap_until_scroll: false,
                 last_scroll_bookmark_save_at: None,
             },
             config,

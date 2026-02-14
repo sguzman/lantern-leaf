@@ -169,6 +169,10 @@ impl App {
                 }
                 if let Some(idx) = self.tts.current_sentence_idx {
                     self.bookmark.pending_sentence_snap = Some(idx);
+                    if self.pending_window_resize || self.bookmark.defer_sentence_snap_until_scroll
+                    {
+                        return Task::none();
+                    }
                     if let Some(offset) = self.scroll_offset_for_sentence(idx) {
                         self.bookmark.last_scroll_offset = offset;
                         return iced::widget::scrollable::snap_to(TEXT_SCROLL_ID.clone(), offset);

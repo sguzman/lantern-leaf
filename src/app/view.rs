@@ -192,9 +192,7 @@ impl App {
                             .link(Message::SentenceClicked(display_idx));
 
                     if Some(idx) == highlight_idx {
-                        span = span
-                            .background(iced::Background::Color(highlight))
-                            .padding(iced::Padding::from(2u16));
+                        span = span.background(iced::Background::Color(highlight));
                     }
                     spans.push(span);
 
@@ -261,9 +259,7 @@ impl App {
                                 .link(Message::SentenceClicked(idx));
 
                         if Some(idx) == highlight_idx {
-                            span = span
-                                .background(iced::Background::Color(highlight))
-                                .padding(iced::Padding::from(2u16));
+                            span = span.background(iced::Background::Color(highlight));
                         }
 
                         span
