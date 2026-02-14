@@ -287,8 +287,9 @@ impl App {
     }
 
     fn handle_refresh_calibre_books(&mut self, effects: &mut Vec<Effect>) {
-        let force_refresh = !self.calibre.books.is_empty();
-        effects.push(Effect::LoadCalibreBooks { force_refresh });
+        effects.push(Effect::LoadCalibreBooks {
+            force_refresh: true,
+        });
     }
 
     fn handle_calibre_search_query_changed(&mut self, query: String) {

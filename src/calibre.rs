@@ -211,7 +211,7 @@ pub fn load_books(config: &CalibreConfig, force_refresh: bool) -> Result<Vec<Cal
 
     let signature = cache_signature(config);
     if !force_refresh {
-        if let Some(mut cached) = try_load_cache(config, &signature)? {
+        if let Some(mut cached) = try_load_cache(config, &signature, false)? {
             info!(book_count = cached.len(), "Using cached calibre catalog");
             let changed = hydrate_book_thumbnails(
                 config,
@@ -229,6 +229,7 @@ pub fn load_books(config: &CalibreConfig, force_refresh: bool) -> Result<Vec<Cal
             );
             return Ok(cached);
         }
+        info!("Calibre cache missing/incompatible; fetching from source");
     }
 
     let mut books = fetch_books(config)?;
@@ -979,7 +980,11 @@ fn write_thumbnail_file(path: &Path, raw_image: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn try_load_cache(config: &CalibreConfig, signature: &str) -> Result<Option<Vec<CalibreBook>>> {
+fn try_load_cache(
+    config: &CalibreConfig,
+    signature: &str,
+    check_ttl: bool,
+) -> Result<Option<Vec<CalibreBook>>> {
     let cache_path = PathBuf::from(CALIBRE_CACHE_PATH);
     let contents = match fs::read_to_string(&cache_path) {
         Ok(contents) => contents,
@@ -993,9 +998,11 @@ fn try_load_cache(config: &CalibreConfig, signature: &str) -> Result<Option<Vec<
         return Ok(None);
     }
 
-    let now = now_unix_secs();
-    if now.saturating_sub(parsed.generated_unix_secs) > config.list_cache_ttl_secs {
-        return Ok(None);
+    if check_ttl {
+        let now = now_unix_secs();
+        if now.saturating_sub(parsed.generated_unix_secs) > config.list_cache_ttl_secs {
+            return Ok(None);
+        }
     }
 
     Ok(Some(parsed.books))
