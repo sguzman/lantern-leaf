@@ -130,27 +130,31 @@ impl<E: Engine> Pipeline<E> {
             };
 
             if matches!(decision.chosen_engine.as_str(), "native_text") {
-                let needs_fallback = match &out {
-                    Ok(o) => {
-                        !o.ok
-                            || o.warnings
-                                .iter()
-                                .any(|w| w.contains("missing pypdf import"))
-                    }
-                    Err(e) => e.to_string().contains("missing pypdf import"),
+                let fallback_reason = match &out {
+                    Ok(o) if o.ok => None,
+                    Ok(o) => Some(format!(
+                        "native_text returned ok=false warnings={:?}",
+                        o.warnings
+                    )),
+                    Err(e) => Some(format!("native_text error: {e}")),
                 };
 
-                if needs_fallback {
+                if let Some(reason) = fallback_reason {
                     warn!(
-                        "native_text failed; falling back to docling for chunk {}",
-                        i
+                        "native_text failed for chunk {}; falling back to docling: {}",
+                        i, reason
                     );
                     out = self.engine.convert_docling(&req);
                     used_fallback = true;
                 }
             }
 
-            let mut out = out.with_context(|| format!("convert failed for chunk {}", i))?;
+            let mut out = out.with_context(|| {
+                format!(
+                    "convert failed for chunk {} pages {}-{}",
+                    i, ch.start_page, ch.end_page
+                )
+            })?;
 
             if !out.ok {
                 return Err(anyhow!("chunk {} failed; warnings={:?}", i, out.warnings));
