@@ -32,7 +32,7 @@ cache_dir = ".cache/quack-check-cache"
 # is not set and Docling will resolve models via HF_HOME/Hugging Face cache.
 docling_artifacts_dir = ""
 # Python scripts directory (repo-local).
-scripts_dir = "tmp/quack-check/scripts"
+scripts_dir = "scripts/quack-check"
 
 [hashing]
 # How to hash the input PDF for job-id:

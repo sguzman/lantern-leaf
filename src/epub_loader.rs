@@ -12,9 +12,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Command;
 use std::time::UNIX_EPOCH;
 use tracing::{debug, info, warn};
 
@@ -25,7 +24,6 @@ const PANDOC_PIPELINE_REV: &str = "pandoc-clean-v1";
 const QUACK_CHECK_CONFIG_REL_PATH: &str = "conf/quack-check.toml";
 const QUACK_CHECK_PIPELINE_REV: &str = "quack-check-pdf-v1";
 const QUACK_CHECK_TEXT_FILENAME_DEFAULT: &str = "transcript.txt";
-const QUACK_CHECK_MANIFEST_REL_PATH: &str = "tmp/quack-check/Cargo.toml";
 
 #[derive(Debug, Clone)]
 pub struct BookImage {
@@ -208,226 +206,29 @@ fn load_pdf_with_quack_check(path: &Path) -> Result<String> {
     }
 
     let (_, _, run_out_dir) = pdf_cache_paths(path);
-    run_quack_check(path, &config_path, &run_out_dir)?;
-    let transcript_path = find_quack_check_transcript(&run_out_dir, &text_filename)?;
-    let text = fs::read_to_string(&transcript_path).with_context(|| {
-        format!(
-            "Failed to read quack-check transcript at {}",
-            transcript_path.display()
-        )
-    })?;
-    let text = if text.trim().is_empty() {
+    let run = crate::quack_check::run_pdf_to_text(&config_path, path, &run_out_dir).with_context(
+        || {
+            format!(
+                "Failed to transcribe PDF with in-process quack-check module for {}",
+                path.display()
+            )
+        },
+    )?;
+    let text = if run.text.trim().is_empty() {
         "No textual content found in this file.".to_string()
     } else {
-        text
+        run.text
     };
 
     write_pdf_cache(path, &signature, &text)?;
     info!(
         path = %path.display(),
         total_chars = text.len(),
-        transcript = %transcript_path.display(),
+        job_id = %run.job_id,
+        job_dir = %run.job_dir.display(),
         "Finished quack-check PDF transcription"
     );
     Ok(text)
-}
-
-fn run_quack_check(input: &Path, config_path: &Path, out_dir: &Path) -> Result<()> {
-    if out_dir.exists() {
-        fs::remove_dir_all(out_dir)
-            .with_context(|| format!("Failed to clear {}", out_dir.display()))?;
-    }
-    fs::create_dir_all(out_dir)
-        .with_context(|| format!("Failed to create {}", out_dir.display()))?;
-
-    let cwd = project_root();
-    let mut last_not_found = Vec::new();
-    for bin in quack_check_binary_candidates() {
-        if binary_path_is_missing(&bin) {
-            continue;
-        }
-        let output = quack_check_process_output(&bin, input, config_path, out_dir, &cwd);
-        match output {
-            Ok(output) => {
-                if output.status.success() {
-                    info!(
-                        path = %input.display(),
-                        binary = %bin.display(),
-                        out_dir = %out_dir.display(),
-                        "Ran quack-check PDF transcription"
-                    );
-                    return Ok(());
-                }
-                anyhow::bail!(
-                    "quack-check failed with {}: {}",
-                    bin.display(),
-                    format_command_failure(&output)
-                );
-            }
-            Err(err) if err.kind() == ErrorKind::NotFound => {
-                last_not_found.push(bin.display().to_string());
-            }
-            Err(err) => {
-                return Err(err).with_context(|| {
-                    format!("Failed to launch quack-check candidate {}", bin.display())
-                });
-            }
-        }
-    }
-
-    let manifest_path = project_root().join(QUACK_CHECK_MANIFEST_REL_PATH);
-    if manifest_path.exists() {
-        let output = Command::new("cargo")
-            .arg("run")
-            .arg("--quiet")
-            .arg("--manifest-path")
-            .arg(&manifest_path)
-            .arg("--")
-            .arg("--config")
-            .arg(config_path)
-            .arg("run")
-            .arg("--input")
-            .arg(input)
-            .arg("--out-dir")
-            .arg(out_dir)
-            .current_dir(&cwd)
-            .output()
-            .with_context(|| {
-                format!(
-                    "Failed to run quack-check via cargo at {}",
-                    manifest_path.display()
-                )
-            })?;
-        if output.status.success() {
-            info!(
-                path = %input.display(),
-                manifest = %manifest_path.display(),
-                out_dir = %out_dir.display(),
-                "Ran quack-check PDF transcription via cargo"
-            );
-            return Ok(());
-        }
-        anyhow::bail!(
-            "cargo-run quack-check failed at {}: {}",
-            manifest_path.display(),
-            format_command_failure(&output)
-        );
-    }
-
-    anyhow::bail!(
-        "quack-check binary not found. Tried {:?}; also looked for {}. Set QUACK_CHECK_BIN or build quack-check.",
-        last_not_found,
-        manifest_path.display()
-    );
-}
-
-fn quack_check_process_output(
-    binary: &Path,
-    input: &Path,
-    config_path: &Path,
-    out_dir: &Path,
-    cwd: &Path,
-) -> std::io::Result<Output> {
-    Command::new(binary)
-        .arg("--config")
-        .arg(config_path)
-        .arg("run")
-        .arg("--input")
-        .arg(input)
-        .arg("--out-dir")
-        .arg(out_dir)
-        .current_dir(cwd)
-        .output()
-}
-
-fn binary_path_is_missing(candidate: &Path) -> bool {
-    candidate.components().count() > 1 && !candidate.exists()
-}
-
-fn quack_check_binary_candidates() -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(value) = std::env::var_os("QUACK_CHECK_BIN") {
-        let path = PathBuf::from(value);
-        if !path.as_os_str().is_empty() {
-            candidates.push(path);
-        }
-    }
-    let root = project_root();
-    candidates.push(root.join("tmp/quack-check/target/release/quack-check"));
-    candidates.push(root.join("tmp/quack-check/target/debug/quack-check"));
-    candidates.push(PathBuf::from("quack-check"));
-    candidates
-}
-
-fn project_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
-
-fn find_quack_check_transcript(out_dir: &Path, text_filename: &str) -> Result<PathBuf> {
-    let direct = out_dir.join("final").join(text_filename);
-    let mut candidates = if direct.exists() {
-        vec![direct]
-    } else {
-        Vec::new()
-    };
-
-    let entries = fs::read_dir(out_dir)
-        .with_context(|| format!("Failed to list quack-check out dir {}", out_dir.display()))?;
-    for entry in entries.flatten() {
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if !file_type.is_dir() {
-            continue;
-        }
-        let candidate = entry.path().join("final").join(text_filename);
-        if candidate.exists() {
-            candidates.push(candidate);
-        }
-    }
-
-    candidates.sort_by(|a, b| {
-        let a_mtime = fs::metadata(a)
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let b_mtime = fs::metadata(b)
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        a_mtime.cmp(&b_mtime)
-    });
-
-    candidates.into_iter().last().with_context(|| {
-        format!(
-            "quack-check completed but no final transcript '{}' found under {}",
-            text_filename,
-            out_dir.display()
-        )
-    })
-}
-
-fn format_command_failure(output: &Output) -> String {
-    let stdout = truncate_text(String::from_utf8_lossy(&output.stdout).trim(), 2_000);
-    let stderr = truncate_text(String::from_utf8_lossy(&output.stderr).trim(), 2_000);
-    format!(
-        "status={} stdout=\"{}\" stderr=\"{}\"",
-        output.status, stdout, stderr
-    )
-}
-
-fn truncate_text(input: &str, max_chars: usize) -> String {
-    let mut iter = input.chars();
-    let truncated: String = iter.by_ref().take(max_chars).collect();
-    if iter.next().is_some() {
-        format!("{truncated}...[truncated]")
-    } else {
-        truncated
-    }
 }
 
 fn load_with_pandoc(path: &Path) -> Result<String> {
@@ -911,6 +712,10 @@ fn quack_check_config_path() -> Result<PathBuf> {
         relative.display(),
         rooted.display()
     );
+}
+
+fn project_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
 fn quack_check_text_filename(config_path: &Path) -> Result<String> {

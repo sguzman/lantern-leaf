@@ -13,6 +13,7 @@ mod config;
 mod epub_loader;
 mod normalizer;
 mod pagination;
+mod quack_check;
 mod text_utils;
 mod tts;
 mod tts_worker;
