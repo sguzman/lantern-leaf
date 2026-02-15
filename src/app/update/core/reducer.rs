@@ -258,6 +258,12 @@ impl App {
     }
 
     fn handle_open_recent_book(&mut self, path: std::path::PathBuf, effects: &mut Vec<Effect>) {
+        if self.book_loading {
+            return;
+        }
+        self.book_loading = true;
+        self.book_loading_error = None;
+        info!(path = %path.display(), "Opening recent book");
         effects.push(Effect::LoadBook(path));
     }
 
@@ -266,11 +272,17 @@ impl App {
     }
 
     fn handle_open_path_requested(&mut self, effects: &mut Vec<Effect>) {
+        if self.book_loading {
+            return;
+        }
         let candidate = std::path::PathBuf::from(self.open_path_input.trim());
         if candidate.as_os_str().is_empty() {
             return;
         }
         if candidate.exists() {
+            self.book_loading = true;
+            self.book_loading_error = None;
+            info!(path = %candidate.display(), "Opening path from starter input");
             effects.push(Effect::LoadBook(candidate));
         }
     }
@@ -320,15 +332,22 @@ impl App {
     }
 
     fn handle_open_calibre_book(&mut self, book_id: u64, effects: &mut Vec<Effect>) {
+        if self.book_loading {
+            return;
+        }
         let Some(book) = self.calibre.books.iter().find(|b| b.id == book_id).cloned() else {
             self.calibre.error = Some(format!("Book id {book_id} not found in loaded catalogue"));
             return;
         };
 
+        self.book_loading = true;
+        self.book_loading_error = None;
         if let Some(path) = book.path.clone().filter(|path| path.exists()) {
+            info!(book_id, path = %path.display(), "Opening Calibre book from resolved path");
             effects.push(Effect::LoadBook(path));
         } else {
             self.calibre.error = None;
+            info!(book_id, "Resolving Calibre book path before open");
             effects.push(Effect::ResolveCalibreBook {
                 book,
                 config: self.calibre.config.clone(),
@@ -344,11 +363,13 @@ impl App {
         effects: &mut Vec<Effect>,
     ) {
         if let Some(err) = error {
+            self.book_loading = false;
             self.calibre.error = Some(format!("Failed to open book {book_id}: {err}"));
             return;
         }
 
         let Some(path) = path else {
+            self.book_loading = false;
             self.calibre.error = Some(format!("Book {book_id} could not be resolved"));
             return;
         };
@@ -357,6 +378,7 @@ impl App {
             entry.path = Some(path.clone());
         }
         self.calibre.error = None;
+        info!(book_id, path = %path.display(), "Calibre book resolved; starting load");
         effects.push(Effect::LoadBook(path));
     }
 
