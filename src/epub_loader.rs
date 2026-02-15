@@ -12,8 +12,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 use std::time::UNIX_EPOCH;
 use tracing::{debug, info, warn};
 
@@ -21,6 +22,10 @@ static RE_MARKDOWN_IMAGE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").expect("valid markdown image regex"));
 const PANDOC_FILTER_REL_PATH: &str = "conf/pandoc/strip-nontext.lua";
 const PANDOC_PIPELINE_REV: &str = "pandoc-clean-v1";
+const QUACK_CHECK_CONFIG_REL_PATH: &str = "conf/quack-check.toml";
+const QUACK_CHECK_PIPELINE_REV: &str = "quack-check-pdf-v1";
+const QUACK_CHECK_TEXT_FILENAME_DEFAULT: &str = "transcript.txt";
+const QUACK_CHECK_MANIFEST_REL_PATH: &str = "tmp/quack-check/Cargo.toml";
 
 #[derive(Debug, Clone)]
 pub struct BookImage {
@@ -69,6 +74,10 @@ fn load_source_text(path: &Path) -> Result<String> {
         return Ok(text);
     }
 
+    if is_pdf(path) {
+        return load_pdf_with_quack_check(path);
+    }
+
     match load_with_pandoc(path) {
         Ok(text) => return Ok(text),
         Err(err) => {
@@ -87,8 +96,8 @@ fn load_source_text(path: &Path) -> Result<String> {
 
     if !is_epub(path) {
         anyhow::bail!(
-            "Unsupported source format without successful pandoc conversion: {}",
-            path.display()
+            "Unsupported source format for {}. Supported source types are .epub, .pdf, .md, .markdown, and .txt (other formats require successful pandoc conversion).",
+            path.display(),
         );
     }
 
@@ -167,6 +176,258 @@ fn is_epub(path: &Path) -> bool {
             .map(|ext| ext.to_ascii_lowercase()),
         Some(ext) if ext == "epub"
     )
+}
+
+fn is_pdf(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase()),
+        Some(ext) if ext == "pdf"
+    )
+}
+
+fn load_pdf_with_quack_check(path: &Path) -> Result<String> {
+    let config_path = quack_check_config_path()?;
+    let config_sha256 = hash_file(&config_path).with_context(|| {
+        format!(
+            "Failed to hash quack-check config {}",
+            config_path.display()
+        )
+    })?;
+    let text_filename = quack_check_text_filename(&config_path)?;
+    let signature = pdf_signature(path, &config_sha256, &text_filename)?;
+
+    if let Some(cached) = try_read_pdf_cache(path, &signature)? {
+        info!(
+            path = %path.display(),
+            total_chars = cached.len(),
+            "Using cached quack-check PDF transcript"
+        );
+        return Ok(cached);
+    }
+
+    let (_, _, run_out_dir) = pdf_cache_paths(path);
+    run_quack_check(path, &config_path, &run_out_dir)?;
+    let transcript_path = find_quack_check_transcript(&run_out_dir, &text_filename)?;
+    let text = fs::read_to_string(&transcript_path).with_context(|| {
+        format!(
+            "Failed to read quack-check transcript at {}",
+            transcript_path.display()
+        )
+    })?;
+    let text = if text.trim().is_empty() {
+        "No textual content found in this file.".to_string()
+    } else {
+        text
+    };
+
+    write_pdf_cache(path, &signature, &text)?;
+    info!(
+        path = %path.display(),
+        total_chars = text.len(),
+        transcript = %transcript_path.display(),
+        "Finished quack-check PDF transcription"
+    );
+    Ok(text)
+}
+
+fn run_quack_check(input: &Path, config_path: &Path, out_dir: &Path) -> Result<()> {
+    if out_dir.exists() {
+        fs::remove_dir_all(out_dir)
+            .with_context(|| format!("Failed to clear {}", out_dir.display()))?;
+    }
+    fs::create_dir_all(out_dir)
+        .with_context(|| format!("Failed to create {}", out_dir.display()))?;
+
+    let cwd = project_root();
+    let mut last_not_found = Vec::new();
+    for bin in quack_check_binary_candidates() {
+        if binary_path_is_missing(&bin) {
+            continue;
+        }
+        let output = quack_check_process_output(&bin, input, config_path, out_dir, &cwd);
+        match output {
+            Ok(output) => {
+                if output.status.success() {
+                    info!(
+                        path = %input.display(),
+                        binary = %bin.display(),
+                        out_dir = %out_dir.display(),
+                        "Ran quack-check PDF transcription"
+                    );
+                    return Ok(());
+                }
+                anyhow::bail!(
+                    "quack-check failed with {}: {}",
+                    bin.display(),
+                    format_command_failure(&output)
+                );
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => {
+                last_not_found.push(bin.display().to_string());
+            }
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!("Failed to launch quack-check candidate {}", bin.display())
+                });
+            }
+        }
+    }
+
+    let manifest_path = project_root().join(QUACK_CHECK_MANIFEST_REL_PATH);
+    if manifest_path.exists() {
+        let output = Command::new("cargo")
+            .arg("run")
+            .arg("--quiet")
+            .arg("--manifest-path")
+            .arg(&manifest_path)
+            .arg("--")
+            .arg("--config")
+            .arg(config_path)
+            .arg("run")
+            .arg("--input")
+            .arg(input)
+            .arg("--out-dir")
+            .arg(out_dir)
+            .current_dir(&cwd)
+            .output()
+            .with_context(|| {
+                format!(
+                    "Failed to run quack-check via cargo at {}",
+                    manifest_path.display()
+                )
+            })?;
+        if output.status.success() {
+            info!(
+                path = %input.display(),
+                manifest = %manifest_path.display(),
+                out_dir = %out_dir.display(),
+                "Ran quack-check PDF transcription via cargo"
+            );
+            return Ok(());
+        }
+        anyhow::bail!(
+            "cargo-run quack-check failed at {}: {}",
+            manifest_path.display(),
+            format_command_failure(&output)
+        );
+    }
+
+    anyhow::bail!(
+        "quack-check binary not found. Tried {:?}; also looked for {}. Set QUACK_CHECK_BIN or build quack-check.",
+        last_not_found,
+        manifest_path.display()
+    );
+}
+
+fn quack_check_process_output(
+    binary: &Path,
+    input: &Path,
+    config_path: &Path,
+    out_dir: &Path,
+    cwd: &Path,
+) -> std::io::Result<Output> {
+    Command::new(binary)
+        .arg("--config")
+        .arg(config_path)
+        .arg("run")
+        .arg("--input")
+        .arg(input)
+        .arg("--out-dir")
+        .arg(out_dir)
+        .current_dir(cwd)
+        .output()
+}
+
+fn binary_path_is_missing(candidate: &Path) -> bool {
+    candidate.components().count() > 1 && !candidate.exists()
+}
+
+fn quack_check_binary_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(value) = std::env::var_os("QUACK_CHECK_BIN") {
+        let path = PathBuf::from(value);
+        if !path.as_os_str().is_empty() {
+            candidates.push(path);
+        }
+    }
+    let root = project_root();
+    candidates.push(root.join("tmp/quack-check/target/release/quack-check"));
+    candidates.push(root.join("tmp/quack-check/target/debug/quack-check"));
+    candidates.push(PathBuf::from("quack-check"));
+    candidates
+}
+
+fn project_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn find_quack_check_transcript(out_dir: &Path, text_filename: &str) -> Result<PathBuf> {
+    let direct = out_dir.join("final").join(text_filename);
+    let mut candidates = if direct.exists() {
+        vec![direct]
+    } else {
+        Vec::new()
+    };
+
+    let entries = fs::read_dir(out_dir)
+        .with_context(|| format!("Failed to list quack-check out dir {}", out_dir.display()))?;
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let candidate = entry.path().join("final").join(text_filename);
+        if candidate.exists() {
+            candidates.push(candidate);
+        }
+    }
+
+    candidates.sort_by(|a, b| {
+        let a_mtime = fs::metadata(a)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let b_mtime = fs::metadata(b)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        a_mtime.cmp(&b_mtime)
+    });
+
+    candidates.into_iter().last().with_context(|| {
+        format!(
+            "quack-check completed but no final transcript '{}' found under {}",
+            text_filename,
+            out_dir.display()
+        )
+    })
+}
+
+fn format_command_failure(output: &Output) -> String {
+    let stdout = truncate_text(String::from_utf8_lossy(&output.stdout).trim(), 2_000);
+    let stderr = truncate_text(String::from_utf8_lossy(&output.stderr).trim(), 2_000);
+    format!(
+        "status={} stdout=\"{}\" stderr=\"{}\"",
+        output.status, stdout, stderr
+    )
+}
+
+fn truncate_text(input: &str, max_chars: usize) -> String {
+    let mut iter = input.chars();
+    let truncated: String = iter.by_ref().take(max_chars).collect();
+    if iter.next().is_some() {
+        format!("{truncated}...[truncated]")
+    } else {
+        truncated
+    }
 }
 
 fn load_with_pandoc(path: &Path) -> Result<String> {
@@ -406,6 +667,28 @@ struct PandocCacheMeta {
     filter_sha256: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PdfCacheMeta {
+    source_len: u64,
+    source_modified_unix_secs: Option<u64>,
+    #[serde(default)]
+    pipeline_rev: String,
+    #[serde(default)]
+    quack_config_sha256: String,
+    #[serde(default)]
+    quack_text_filename: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct QuackCheckConfigToml {
+    output: Option<QuackCheckOutputToml>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct QuackCheckOutputToml {
+    text_filename: Option<String>,
+}
+
 fn source_signature(path: &Path) -> Result<PandocCacheMeta> {
     let meta = fs::metadata(path)
         .with_context(|| format!("Failed to read source metadata for {}", path.display()))?;
@@ -428,11 +711,38 @@ fn source_signature(path: &Path) -> Result<PandocCacheMeta> {
     })
 }
 
+fn pdf_signature(path: &Path, config_sha256: &str, text_filename: &str) -> Result<PdfCacheMeta> {
+    let meta = fs::metadata(path)
+        .with_context(|| format!("Failed to read source metadata for {}", path.display()))?;
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs());
+
+    Ok(PdfCacheMeta {
+        source_len: meta.len(),
+        source_modified_unix_secs: modified,
+        pipeline_rev: QUACK_CHECK_PIPELINE_REV.to_string(),
+        quack_config_sha256: config_sha256.to_string(),
+        quack_text_filename: text_filename.to_string(),
+    })
+}
+
 fn pandoc_cache_paths(path: &Path) -> (PathBuf, PathBuf) {
     let dir = hash_dir(path);
     (
         dir.join("source-plain.txt"),
         dir.join("source-plain.meta.toml"),
+    )
+}
+
+fn pdf_cache_paths(path: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let dir = hash_dir(path).join("pdf");
+    (
+        dir.join("source-plain.txt"),
+        dir.join("source-plain.meta.toml"),
+        dir.join("quack-check-out"),
     )
 }
 
@@ -466,6 +776,36 @@ fn try_read_pandoc_cache(path: &Path, signature: &PandocCacheMeta) -> Result<Opt
     Ok(Some(text))
 }
 
+fn try_read_pdf_cache(path: &Path, signature: &PdfCacheMeta) -> Result<Option<String>> {
+    let (text_path, meta_path, _) = pdf_cache_paths(path);
+    let meta_str = match fs::read_to_string(&meta_path) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+
+    let cached_meta: PdfCacheMeta = match toml::from_str(&meta_str) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+
+    if cached_meta.source_len != signature.source_len
+        || cached_meta.source_modified_unix_secs != signature.source_modified_unix_secs
+        || cached_meta.pipeline_rev != signature.pipeline_rev
+        || cached_meta.quack_config_sha256 != signature.quack_config_sha256
+        || cached_meta.quack_text_filename != signature.quack_text_filename
+    {
+        return Ok(None);
+    }
+
+    let text = fs::read_to_string(&text_path).with_context(|| {
+        format!(
+            "Failed to read PDF transcript cache text at {}",
+            text_path.display()
+        )
+    })?;
+    Ok(Some(text))
+}
+
 fn write_pandoc_cache(path: &Path, signature: &PandocCacheMeta, text: &str) -> Result<()> {
     let (text_path, meta_path) = pandoc_cache_paths(path);
     if let Some(parent) = text_path.parent() {
@@ -485,6 +825,32 @@ fn write_pandoc_cache(path: &Path, signature: &PandocCacheMeta, text: &str) -> R
     fs::write(&meta_path, meta_toml).with_context(|| {
         format!(
             "Failed to write pandoc cache metadata at {}",
+            meta_path.display()
+        )
+    })?;
+
+    Ok(())
+}
+
+fn write_pdf_cache(path: &Path, signature: &PdfCacheMeta, text: &str) -> Result<()> {
+    let (text_path, meta_path, _) = pdf_cache_paths(path);
+    if let Some(parent) = text_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create cache dir {}", parent.display()))?;
+    }
+
+    fs::write(&text_path, text).with_context(|| {
+        format!(
+            "Failed to write PDF transcript cache text at {}",
+            text_path.display()
+        )
+    })?;
+
+    let meta_toml =
+        toml::to_string(signature).context("Failed to serialize PDF transcript cache metadata")?;
+    fs::write(&meta_path, meta_toml).with_context(|| {
+        format!(
+            "Failed to write PDF transcript cache metadata at {}",
             meta_path.display()
         )
     })?;
@@ -516,4 +882,58 @@ fn pandoc_filter_path() -> Result<PathBuf> {
         relative.display(),
         rooted.display()
     );
+}
+
+fn quack_check_config_path() -> Result<PathBuf> {
+    if let Some(value) = std::env::var_os("QUACK_CHECK_CONFIG") {
+        let candidate = PathBuf::from(value);
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+        anyhow::bail!(
+            "QUACK_CHECK_CONFIG is set but file does not exist: {}",
+            candidate.display()
+        );
+    }
+
+    let relative = PathBuf::from(QUACK_CHECK_CONFIG_REL_PATH);
+    if relative.exists() {
+        return Ok(relative);
+    }
+
+    let rooted = project_root().join(QUACK_CHECK_CONFIG_REL_PATH);
+    if rooted.exists() {
+        return Ok(rooted);
+    }
+
+    anyhow::bail!(
+        "quack-check config not found at {} or {}",
+        relative.display(),
+        rooted.display()
+    );
+}
+
+fn quack_check_text_filename(config_path: &Path) -> Result<String> {
+    let raw = fs::read_to_string(config_path).with_context(|| {
+        format!(
+            "Failed to read quack-check config {}",
+            config_path.display()
+        )
+    })?;
+    let parsed: QuackCheckConfigToml = toml::from_str(&raw).with_context(|| {
+        format!(
+            "Invalid quack-check config TOML at {}",
+            config_path.display()
+        )
+    })?;
+    let name = parsed
+        .output
+        .and_then(|out| out.text_filename)
+        .unwrap_or_else(|| QUACK_CHECK_TEXT_FILENAME_DEFAULT.to_string());
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        Ok(QUACK_CHECK_TEXT_FILENAME_DEFAULT.to_string())
+    } else {
+        Ok(trimmed.to_string())
+    }
 }

@@ -22,8 +22,8 @@ password = "admin"
 # If true, fallback to local library path when no server target is reachable.
 allow_local_library_fallback = false
 
-# Allowed reader formats (only epub/markdown/txt are accepted).
-allowed_extensions = ["epub", "md", "txt"]
+# Allowed reader formats.
+allowed_extensions = ["epub", "pdf", "md", "txt"]
 
 # Configurable calibre browser columns.
 columns = ["title", "extension", "author", "year", "size"]

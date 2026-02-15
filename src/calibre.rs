@@ -65,7 +65,12 @@ impl Default for CalibreConfig {
             server_username: None,
             server_password: None,
             allow_local_library_fallback: false,
-            allowed_extensions: vec!["epub".to_string(), "md".to_string(), "txt".to_string()],
+            allowed_extensions: vec![
+                "epub".to_string(),
+                "pdf".to_string(),
+                "md".to_string(),
+                "txt".to_string(),
+            ],
             columns: vec![
                 "title".to_string(),
                 "extension".to_string(),
@@ -150,6 +155,7 @@ impl CalibreConfig {
             let normalized = ext.trim().trim_start_matches('.').to_ascii_lowercase();
             let mapped = match normalized.as_str() {
                 "epub" => "epub",
+                "pdf" => "pdf",
                 "txt" => "txt",
                 "md" | "markdown" => "md",
                 _ => continue,
@@ -159,7 +165,12 @@ impl CalibreConfig {
             }
         }
         if out.is_empty() {
-            vec!["epub".to_string(), "md".to_string(), "txt".to_string()]
+            vec![
+                "epub".to_string(),
+                "pdf".to_string(),
+                "md".to_string(),
+                "txt".to_string(),
+            ]
         } else {
             out
         }

@@ -364,7 +364,7 @@ impl App {
             text("Welcome").size(28.0),
             text("Open a local file or choose a book from Calibre / Recent.").size(14.0),
             row![
-                text_input("Path to .epub/.txt/.md", &self.open_path_input)
+                text_input("Path to .epub/.pdf/.txt/.md", &self.open_path_input)
                     .on_input(Message::OpenPathInputChanged)
                     .on_submit(Message::OpenPathRequested)
                     .padding(10)
