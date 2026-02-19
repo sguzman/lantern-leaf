@@ -140,9 +140,9 @@ struct AppearanceConfig {
     letter_spacing: u32,
     #[serde(default = "defaults::default_lines_per_page")]
     lines_per_page: usize,
-    #[serde(default = "defaults::default_margin")]
+    #[serde(default = "defaults::default_margin_horizontal")]
     margin_horizontal: u16,
-    #[serde(default = "defaults::default_margin")]
+    #[serde(default = "defaults::default_margin_vertical")]
     margin_vertical: u16,
     #[serde(default = "defaults::default_day_highlight")]
     day_highlight: HighlightColor,
@@ -161,8 +161,8 @@ impl Default for AppearanceConfig {
             word_spacing: 0,
             letter_spacing: 0,
             lines_per_page: defaults::default_lines_per_page(),
-            margin_horizontal: defaults::default_margin(),
-            margin_vertical: defaults::default_margin(),
+            margin_horizontal: defaults::default_margin_horizontal(),
+            margin_vertical: defaults::default_margin_vertical(),
             day_highlight: defaults::default_day_highlight(),
             night_highlight: defaults::default_night_highlight(),
         }

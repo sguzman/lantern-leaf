@@ -6,7 +6,11 @@ pub(crate) fn default_line_spacing() -> f32 {
     1.2
 }
 
-pub(crate) fn default_margin() -> u16 {
+pub(crate) fn default_margin_horizontal() -> u16 {
+    100
+}
+
+pub(crate) fn default_margin_vertical() -> u16 {
     12
 }
 
@@ -77,7 +81,7 @@ pub(crate) fn default_lines_per_page() -> usize {
 }
 
 pub(crate) fn default_pause_after_sentence() -> f32 {
-    0.2
+    0.06
 }
 
 pub(crate) fn default_auto_scroll_tts() -> bool {
