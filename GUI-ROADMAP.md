@@ -93,20 +93,20 @@
 - [x] P7-01 Port welcome/open path/open clipboard controls.
 - [x] P7-02 Port recent list embedded under welcome section (2-column behavior).
 - [x] P7-03 Port recent delete action with source+cache deletion semantics.
-- [ ] P7-04 Port calibre visibility toggle, refresh, search, sorting, open behavior.
-- [ ] P7-05 Implement list virtualization for large calibre catalogs.
+- [x] P7-04 Port calibre visibility toggle, refresh, search, sorting, open behavior.
+- [x] P7-05 Implement list virtualization for large calibre catalogs.
 - [x] P7-06 Preserve “book loading lock” behavior that prevents concurrent opens.
 - [x] P7-07 Preserve starter-level error/status reporting messages.
 
 **Phase 8: Reader View Port**
 
-- [ ] P8-01 Port text rendering modes (pretty/text-only) and sentence click interactions.
-- [ ] P8-02 Port top bar policies (no vertical compression, hide when too tight).
-- [ ] P8-03 Port settings panel and stats panel mutual exclusivity.
-- [ ] P8-04 Port numeric slider/textbox hybrid editing with validation + wheel adjust.
-- [ ] P8-05 Port search bar and regex navigation behavior.
-- [ ] P8-06 Port keyboard shortcuts and shortcut configurability.
-- [ ] P8-07 Port close session behavior back to starter with save housekeeping.
+- [x] P8-01 Port text rendering modes (pretty/text-only) and sentence click interactions.
+- [x] P8-02 Port top bar policies (no vertical compression, hide when too tight).
+- [x] P8-03 Port settings panel and stats panel mutual exclusivity.
+- [x] P8-04 Port numeric slider/textbox hybrid editing with validation + wheel adjust.
+- [x] P8-05 Port search bar and regex navigation behavior.
+- [x] P8-06 Port keyboard shortcuts and shortcut configurability.
+- [x] P8-07 Port close session behavior back to starter with save housekeeping.
 
 **Phase 9: TTS Control And Highlight Fidelity**
 

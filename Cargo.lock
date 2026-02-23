@@ -1430,15 +1430,22 @@ dependencies = [
 name = "ebup-viewer-tauri"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "epub",
+ "html2text",
  "image 0.25.9",
+ "once_cell",
+ "regex",
+ "reqwest 0.12.28",
  "serde",
+ "serde_json",
  "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-log",
  "toml 1.0.3+spec-1.1.0",
  "tracing",
+ "unicode-normalization",
 ]
 
 [[package]]
