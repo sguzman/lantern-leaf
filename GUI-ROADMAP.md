@@ -152,7 +152,7 @@
 - [x] P13-02 Add bridge command tests for all critical command paths.
 - [x] P13-03 Add frontend unit tests for reducers/store actions and command adapters.
 - [ ] P13-04 Add E2E scenarios (Playwright + Tauri runner) for core reading/TTS flows.
-- [ ] P13-05 Add explicit regression scenarios from your prior incidents (sentence click halt, highlight drift, duplicate PDF jobs, close-during-tts).
+- [x] P13-05 Add explicit regression scenarios from your prior incidents (sentence click halt, highlight drift, duplicate PDF jobs, close-during-tts).
 - [ ] P13-06 Add large calibre dataset performance scenario and verify non-blocking UX.
 - [ ] P13-07 Add PDF edge corpus tests with degraded pages and fallback paths.
 - [ ] P13-08 Create migration parity report that compares iced vs new shell outputs for key workflows.

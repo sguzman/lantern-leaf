@@ -254,4 +254,22 @@ describe("appStore event handling", () => {
     expect(state.toast?.message).toContain("superseded");
     expect(state.busy).toBe(false);
   });
+
+  it("shows informational toast for source-open cancelled events", async () => {
+    const { backend, hooks } = createBackend();
+    const store = createTestStore(backend);
+    await store.getState().bootstrap();
+
+    hooks.source?.({
+      request_id: 11,
+      phase: "cancelled",
+      source_path: "/tmp/book.pdf",
+      message: "Source open request cancelled by session close"
+    });
+
+    const state = store.getState();
+    expect(state.toast?.severity).toBe("info");
+    expect(state.toast?.message).toContain("session close");
+    expect(state.error).toBeNull();
+  });
 });

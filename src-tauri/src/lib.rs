@@ -145,6 +145,7 @@ struct BridgeError {
 struct BackendState {
     mode: UiMode,
     active_source_path: Option<PathBuf>,
+    active_open_source_path: Option<PathBuf>,
     open_in_flight: bool,
     active_open_request: Option<u64>,
     next_request_id: u64,
@@ -167,6 +168,7 @@ impl BackendState {
         Self {
             mode: UiMode::Starter,
             active_source_path: None,
+            active_open_source_path: None,
             open_in_flight: false,
             active_open_request: None,
             next_request_id: 1,
@@ -277,7 +279,12 @@ fn persist_active_reader(state: &mut BackendState) {
     }
 }
 
-fn cleanup_for_shutdown(state: &mut BackendState) {
+fn cleanup_for_shutdown(state: &mut BackendState) -> Option<u64> {
+    let cancelled_open_request = if state.open_in_flight {
+        state.active_open_request
+    } else {
+        None
+    };
     if let Some(reader) = state.reader.as_mut() {
         reader.tts_stop();
     }
@@ -285,13 +292,17 @@ fn cleanup_for_shutdown(state: &mut BackendState) {
     state.reader = None;
     state.mode = UiMode::Starter;
     state.active_source_path = None;
+    state.active_open_source_path = None;
     state.open_in_flight = false;
     state.active_open_request = None;
+    cancelled_open_request
 }
 
 fn finalize_shutdown_from_mutex(state: &Mutex<BackendState>) {
     match state.lock() {
-        Ok(mut guard) => cleanup_for_shutdown(&mut guard),
+        Ok(mut guard) => {
+            let _ = cleanup_for_shutdown(&mut guard);
+        }
         Err(_) => warn!("Skipping shutdown housekeeping: backend state lock poisoned"),
     }
 }
@@ -300,6 +311,20 @@ fn allocate_request_id(state: &mut BackendState) -> u64 {
     let request_id = state.next_request_id;
     state.next_request_id = state.next_request_id.wrapping_add(1).max(1);
     request_id
+}
+
+fn begin_open_request(state: &mut BackendState, source_path: &Path) -> Result<u64, BridgeError> {
+    if state.open_in_flight {
+        return Err(bridge_error(
+            "operation_conflict",
+            "A book open operation is already in progress",
+        ));
+    }
+    let request_id = allocate_request_id(state);
+    state.open_in_flight = true;
+    state.active_open_request = Some(request_id);
+    state.active_open_source_path = Some(source_path.to_path_buf());
+    Ok(request_id)
 }
 
 fn emit_session_state(
@@ -403,15 +428,7 @@ async fn open_resolved_source(
         let mut guard = state
             .lock()
             .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-        if guard.open_in_flight {
-            return Err(bridge_error(
-                "operation_conflict",
-                "A book open operation is already in progress",
-            ));
-        }
-        let request_id = allocate_request_id(&mut guard);
-        guard.open_in_flight = true;
-        guard.active_open_request = Some(request_id);
+        let request_id = begin_open_request(&mut guard, &source_path)?;
         let started_session = to_session_state(&guard);
         (request_id, started_session)
     };
@@ -454,16 +471,19 @@ async fn open_resolved_source(
         .lock()
         .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
     if guard.active_open_request != Some(request_id) {
+        let should_emit_cancelled = guard.open_in_flight || guard.active_open_source_path.is_some();
         drop(guard);
-        let _ = app.emit(
-            "source-open",
-            SourceOpenEvent {
-                request_id,
-                phase: "cancelled".to_string(),
-                source_path: Some(source_path.to_string_lossy().to_string()),
-                message: Some("Source open request was superseded or cancelled".to_string()),
-            },
-        );
+        if should_emit_cancelled {
+            let _ = app.emit(
+                "source-open",
+                SourceOpenEvent {
+                    request_id,
+                    phase: "cancelled".to_string(),
+                    source_path: Some(source_path.to_string_lossy().to_string()),
+                    message: Some("Source open request was superseded or cancelled".to_string()),
+                },
+            );
+        }
         info!(
             request_id,
             path = %source_path.display(),
@@ -476,6 +496,7 @@ async fn open_resolved_source(
     }
     guard.open_in_flight = false;
     guard.active_open_request = None;
+    guard.active_open_source_path = None;
     let reader_result = match reader_result {
         Ok(result) => result,
         Err(err) => {
@@ -613,15 +634,40 @@ fn session_return_to_starter(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<SessionState, BridgeError> {
-    let (session, request_id) = {
+    let (session, request_id, cancelled_request, cancelled_source_path) = {
         let mut guard = state
             .lock()
             .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
         let request_id = allocate_request_id(&mut guard);
-        cleanup_for_shutdown(&mut guard);
-        (to_session_state(&guard), request_id)
+        let cancelled_request = if guard.open_in_flight {
+            guard.active_open_request
+        } else {
+            None
+        };
+        let cancelled_source_path = guard
+            .active_open_source_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string());
+        let _ = cleanup_for_shutdown(&mut guard);
+        (
+            to_session_state(&guard),
+            request_id,
+            cancelled_request,
+            cancelled_source_path,
+        )
     };
     emit_session_state(&app, request_id, "session_return_to_starter", &session);
+    if let Some(cancelled_request) = cancelled_request {
+        let _ = app.emit(
+            "source-open",
+            SourceOpenEvent {
+                request_id: cancelled_request,
+                phase: "cancelled".to_string(),
+                source_path: cancelled_source_path,
+                message: Some("Source open request cancelled by return-to-starter".to_string()),
+            },
+        );
+    }
     Ok(session)
 }
 
@@ -977,15 +1023,40 @@ fn reader_close_session(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<SessionState, BridgeError> {
-    let (session, request_id) = {
+    let (session, request_id, cancelled_request, cancelled_source_path) = {
         let mut guard = state
             .lock()
             .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
         let request_id = allocate_request_id(&mut guard);
-        cleanup_for_shutdown(&mut guard);
-        (to_session_state(&guard), request_id)
+        let cancelled_request = if guard.open_in_flight {
+            guard.active_open_request
+        } else {
+            None
+        };
+        let cancelled_source_path = guard
+            .active_open_source_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string());
+        let _ = cleanup_for_shutdown(&mut guard);
+        (
+            to_session_state(&guard),
+            request_id,
+            cancelled_request,
+            cancelled_source_path,
+        )
     };
     emit_session_state(&app, request_id, "reader_close_session", &session);
+    if let Some(cancelled_request) = cancelled_request {
+        let _ = app.emit(
+            "source-open",
+            SourceOpenEvent {
+                request_id: cancelled_request,
+                phase: "cancelled".to_string(),
+                source_path: cancelled_source_path,
+                message: Some("Source open request cancelled by session close".to_string()),
+            },
+        );
+    }
     Ok(session)
 }
 
@@ -1436,5 +1507,61 @@ mod tests {
             .expect_err("unsupported extension must fail");
         assert_eq!(err.code, "unsupported_source");
         let _ = fs::remove_file(unsupported);
+    }
+
+    #[test]
+    fn cleanup_for_shutdown_clears_inflight_open_request() {
+        let mut state = BackendState::new();
+        state.mode = UiMode::Reader;
+        state.active_source_path = Some(PathBuf::from("/tmp/active.epub"));
+        state.active_open_source_path = Some(PathBuf::from("/tmp/opening.pdf"));
+        state.open_in_flight = true;
+        state.active_open_request = Some(77);
+
+        let cancelled = cleanup_for_shutdown(&mut state);
+
+        assert_eq!(cancelled, Some(77));
+        assert!(matches!(state.mode, UiMode::Starter));
+        assert!(state.active_source_path.is_none());
+        assert!(state.active_open_source_path.is_none());
+        assert!(!state.open_in_flight);
+        assert!(state.active_open_request.is_none());
+        assert!(state.reader.is_none());
+    }
+
+    #[test]
+    fn cleanup_for_shutdown_without_inflight_open_returns_none() {
+        let mut state = BackendState::new();
+        state.mode = UiMode::Reader;
+        state.active_source_path = Some(PathBuf::from("/tmp/active.epub"));
+        state.open_in_flight = false;
+        state.active_open_request = None;
+
+        let cancelled = cleanup_for_shutdown(&mut state);
+
+        assert_eq!(cancelled, None);
+        assert!(matches!(state.mode, UiMode::Starter));
+        assert!(state.active_source_path.is_none());
+        assert!(!state.open_in_flight);
+        assert!(state.active_open_request.is_none());
+    }
+
+    #[test]
+    fn begin_open_request_rejects_duplicates_and_tracks_path() {
+        let mut state = BackendState::new();
+        let first_source = PathBuf::from("/tmp/first.epub");
+        let second_source = PathBuf::from("/tmp/second.pdf");
+
+        let request_id = begin_open_request(&mut state, &first_source).expect("first open request");
+        assert_eq!(request_id, 1);
+        assert!(state.open_in_flight);
+        assert_eq!(state.active_open_request, Some(1));
+        assert_eq!(state.active_open_source_path.as_deref(), Some(first_source.as_path()));
+
+        let duplicate = begin_open_request(&mut state, &second_source)
+            .expect_err("duplicate open should fail");
+        assert_eq!(duplicate.code, "operation_conflict");
+        assert_eq!(state.active_open_request, Some(1));
+        assert_eq!(state.active_open_source_path.as_deref(), Some(first_source.as_path()));
     }
 }

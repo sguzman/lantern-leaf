@@ -1079,4 +1079,16 @@ mod tests {
         assert!((session.config.tts_speed - 4.0).abs() < f32::EPSILON);
         assert!((session.config.tts_volume - 0.0).abs() < f32::EPSILON);
     }
+
+    #[test]
+    fn tts_stop_forces_idle_state() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = build_test_session(&[&["A.", "B."]]);
+        session.tts_play(&normalizer);
+        assert_eq!(session.tts_state, TtsPlaybackState::Playing);
+
+        session.tts_stop();
+
+        assert_eq!(session.tts_state, TtsPlaybackState::Idle);
+    }
 }
