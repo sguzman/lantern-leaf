@@ -128,12 +128,18 @@ describe("tauri command adapter", () => {
     await api.backendApi.onCalibreLoad(noop);
     await api.backendApi.onSessionState(noop);
     await api.backendApi.onReaderState(noop);
+    await api.backendApi.onTtsState(noop);
+    await api.backendApi.onPdfTranscription(noop);
+    await api.backendApi.onLogLevel(noop);
 
     expect(listenMock.mock.calls.map((call) => call[0])).toEqual([
       "source-open",
       "calibre-load",
       "session-state",
-      "reader-state"
+      "reader-state",
+      "tts-state",
+      "pdf-transcription",
+      "log-level"
     ]);
   });
 
@@ -153,6 +159,7 @@ describe("tauri command adapter", () => {
     await api.backendApi.panelToggleSettings();
     await api.backendApi.panelToggleStats();
     await api.backendApi.panelToggleTts();
+    await api.backendApi.loggingSetLevel("warn");
 
     expect(invokeMock.mock.calls).toEqual([
       ["source_open_path", { path: "/tmp/book.epub" }],
@@ -173,7 +180,8 @@ describe("tauri command adapter", () => {
       ["calibre_open_book", { bookId: 42 }],
       ["panel_toggle_settings", undefined],
       ["panel_toggle_stats", undefined],
-      ["panel_toggle_tts", undefined]
+      ["panel_toggle_tts", undefined],
+      ["logging_set_level", { level: "warn" }]
     ]);
   });
 });

@@ -16,7 +16,12 @@ import {
 } from "@mui/material";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { ReaderSettingsPatch, ReaderSnapshot } from "../types";
+import {
+  computeReaderTopBarVisibility,
+  computeReaderTtsControlVisibility
+} from "./layoutPolicies";
+import { computeReaderTypographyLayout } from "./readerTypography";
+import type { ReaderSettingsPatch, ReaderSnapshot, TtsStateEvent } from "../types";
 
 interface ReaderShellProps {
   reader: ReaderSnapshot;
@@ -44,6 +49,7 @@ interface ReaderShellProps {
   onTtsSeekPrev: () => Promise<void>;
   onTtsRepeatSentence: () => Promise<void>;
   onApplySettings: (patch: ReaderSettingsPatch) => Promise<void>;
+  ttsStateEvent: TtsStateEvent | null;
 }
 
 interface NumericSettingControlProps {
@@ -233,14 +239,17 @@ export function ReaderShell({
   onTtsSeekNext,
   onTtsSeekPrev,
   onTtsRepeatSentence,
-  onApplySettings
+  onApplySettings,
+  ttsStateEvent
 }: ReaderShellProps) {
   const [pageInput, setPageInput] = useState(String(reader.current_page + 1));
   const [searchInput, setSearchInput] = useState(reader.search_query);
   const sentenceRefs = useRef<Record<number, HTMLButtonElement | null>>({});
   const sentenceScrollRef = useRef<HTMLDivElement | null>(null);
   const topBarRef = useRef<HTMLDivElement | null>(null);
+  const ttsControlRowRef = useRef<HTMLDivElement | null>(null);
   const [topBarWidth, setTopBarWidth] = useState(0);
+  const [ttsControlRowWidth, setTtsControlRowWidth] = useState(0);
 
   useEffect(() => {
     const node = topBarRef.current;
@@ -260,6 +269,23 @@ export function ReaderShell({
 
     return () => resizeObserver.disconnect();
   }, []);
+
+  useEffect(() => {
+    const node = ttsControlRowRef.current;
+    if (!node) {
+      return;
+    }
+    const resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) {
+        return;
+      }
+      setTtsControlRowWidth(entry.contentRect.width);
+    });
+    resizeObserver.observe(node);
+    setTtsControlRowWidth(node.getBoundingClientRect().width);
+    return () => resizeObserver.disconnect();
+  }, [reader.panels.show_tts]);
 
   useEffect(() => {
     setPageInput(String(reader.current_page + 1));
@@ -358,11 +384,18 @@ export function ReaderShell({
     return null;
   }, [reader.panels.show_settings, reader.panels.show_stats, reader.panels.show_tts]);
 
-  const showSentenceButtons = topBarWidth >= 860;
-  const showTextModeButton = topBarWidth >= 980;
-  const showSettingsButton = topBarWidth >= 1090;
-  const showStatsButton = topBarWidth >= 1200;
-  const showTtsButton = topBarWidth >= 1310;
+  const topBarVisibility = useMemo(
+    () => computeReaderTopBarVisibility(topBarWidth),
+    [topBarWidth]
+  );
+  const ttsControlVisibility = useMemo(
+    () => computeReaderTtsControlVisibility(ttsControlRowWidth),
+    [ttsControlRowWidth]
+  );
+  const readerTypography = useMemo(
+    () => computeReaderTypographyLayout(reader.settings),
+    [reader.settings]
+  );
   const playbackLabel = reader.tts.state === "playing" ? "Pause" : "Play";
   const hasHighlightSentence = reader.tts.current_sentence_idx !== null;
 
@@ -387,6 +420,7 @@ export function ReaderShell({
               startIcon={<ArrowBackIcon />}
               onClick={() => void onCloseSession()}
               disabled={busy}
+              data-testid="reader-close-session-button"
               sx={{ flexShrink: 0 }}
             >
               Close Session
@@ -410,7 +444,7 @@ export function ReaderShell({
             >
               Next Page
             </Button>
-            {showSentenceButtons ? (
+            {topBarVisibility.showSentenceButtons ? (
               <>
                 <Button
                   variant="outlined"
@@ -446,7 +480,7 @@ export function ReaderShell({
               sx={{ width: 90, flexShrink: 0 }}
               label="Page"
             />
-            {showTextModeButton ? (
+            {topBarVisibility.showTextModeButton ? (
               <Button
                 variant={reader.text_only_mode ? "contained" : "outlined"}
                 onClick={() => void onToggleTextOnly()}
@@ -456,7 +490,7 @@ export function ReaderShell({
                 {reader.text_only_mode ? "Pretty Text" : "Text-only"}
               </Button>
             ) : null}
-            {showSettingsButton ? (
+            {topBarVisibility.showSettingsButton ? (
               <Button
                 variant={reader.panels.show_settings ? "contained" : "outlined"}
                 startIcon={<TuneIcon />}
@@ -467,7 +501,7 @@ export function ReaderShell({
                 Settings
               </Button>
             ) : null}
-            {showStatsButton ? (
+            {topBarVisibility.showStatsButton ? (
               <Button
                 variant={reader.panels.show_stats ? "contained" : "outlined"}
                 onClick={() => void onToggleStatsPanel()}
@@ -477,7 +511,7 @@ export function ReaderShell({
                 Show Stats
               </Button>
             ) : null}
-            {showTtsButton ? (
+            {topBarVisibility.showTtsButton ? (
               <Button
                 variant={reader.panels.show_tts ? "contained" : "outlined"}
                 onClick={() => void onToggleTtsPanel()}
@@ -519,7 +553,13 @@ export function ReaderShell({
             <div className="min-h-[62vh] flex-1 overflow-hidden rounded-2xl border border-slate-200">
               <div
                 ref={sentenceScrollRef}
-                className="h-full overflow-y-auto px-3 py-3 md:px-5 md:py-4"
+                className="h-full overflow-y-auto"
+                style={{
+                  paddingLeft: `${readerTypography.horizontalMarginPx}px`,
+                  paddingRight: `${readerTypography.horizontalMarginPx}px`,
+                  paddingTop: `${readerTypography.verticalMarginPx}px`,
+                  paddingBottom: `${readerTypography.verticalMarginPx}px`
+                }}
               >
                 <Stack spacing={0.75}>
                   {reader.sentences.map((sentence, idx) => {
@@ -533,8 +573,10 @@ export function ReaderShell({
                         }}
                         type="button"
                         onClick={() => void onSentenceClick(idx)}
-                        className="w-full rounded-lg border px-3 py-1.5 text-left text-[1.03rem] leading-7 transition-colors"
+                        className="w-full rounded-lg border px-3 py-1.5 text-left transition-colors"
                         style={{
+                          fontSize: `${readerTypography.fontSizePx}px`,
+                          lineHeight: readerTypography.lineSpacing,
                           borderColor: highlighted
                             ? "var(--reader-highlight-border)"
                             : searchMatch
@@ -691,56 +733,90 @@ export function ReaderShell({
                       <Typography variant="caption" color="text.secondary">
                         Progress: {reader.tts.progress_pct.toFixed(3)}%
                       </Typography>
-                      <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
-                        <Button variant="contained" size="small" onClick={() => void onTtsTogglePlayPause()}>
+                      {ttsStateEvent ? (
+                        <Typography variant="caption" color="text.secondary">
+                          Last TTS event #{ttsStateEvent.request_id}: {ttsStateEvent.action}
+                        </Typography>
+                      ) : null}
+                      <Stack
+                        ref={ttsControlRowRef}
+                        direction="row"
+                        spacing={1}
+                        sx={{
+                          flexWrap: "nowrap",
+                          overflow: "hidden",
+                          whiteSpace: "nowrap",
+                          minHeight: 36
+                        }}
+                      >
+                        <Button
+                          variant="contained"
+                          size="small"
+                          onClick={() => void onTtsTogglePlayPause()}
+                          data-testid="reader-tts-toggle-button"
+                        >
                           {playbackLabel}
                         </Button>
-                        <Button variant="outlined" size="small" onClick={() => void onTtsPlay()}>
-                          Play
-                        </Button>
-                        <Button variant="outlined" size="small" onClick={() => void onTtsPause()}>
-                          Pause
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          onClick={() => void onTtsPlayFromPageStart()}
-                          disabled={reader.tts.sentence_count === 0}
-                        >
-                          Play Page
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          onClick={() => void onTtsPlayFromHighlight()}
-                          disabled={!hasHighlightSentence}
-                        >
-                          Play Highlight
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          onClick={() => void onTtsSeekPrev()}
-                          disabled={!reader.tts.can_seek_prev}
-                        >
-                          Prev Sentence
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          onClick={() => void onTtsSeekNext()}
-                          disabled={!reader.tts.can_seek_next}
-                        >
-                          Next Sentence
-                        </Button>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          onClick={() => void onTtsRepeatSentence()}
-                          disabled={!hasHighlightSentence}
-                        >
-                          Repeat
-                        </Button>
+                        {ttsControlVisibility.showPlayButton ? (
+                          <Button variant="outlined" size="small" onClick={() => void onTtsPlay()}>
+                            Play
+                          </Button>
+                        ) : null}
+                        {ttsControlVisibility.showPauseButton ? (
+                          <Button variant="outlined" size="small" onClick={() => void onTtsPause()}>
+                            Pause
+                          </Button>
+                        ) : null}
+                        {ttsControlVisibility.showPlayPageButton ? (
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => void onTtsPlayFromPageStart()}
+                            disabled={reader.tts.sentence_count === 0}
+                          >
+                            Play Page
+                          </Button>
+                        ) : null}
+                        {ttsControlVisibility.showPlayHighlightButton ? (
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => void onTtsPlayFromHighlight()}
+                            disabled={!hasHighlightSentence}
+                          >
+                            Play Highlight
+                          </Button>
+                        ) : null}
+                        {ttsControlVisibility.showPrevSentenceButton ? (
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => void onTtsSeekPrev()}
+                            disabled={!reader.tts.can_seek_prev}
+                          >
+                            Prev Sentence
+                          </Button>
+                        ) : null}
+                        {ttsControlVisibility.showNextSentenceButton ? (
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => void onTtsSeekNext()}
+                            disabled={!reader.tts.can_seek_next}
+                          >
+                            Next Sentence
+                          </Button>
+                        ) : null}
+                        {ttsControlVisibility.showRepeatButton ? (
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => void onTtsRepeatSentence()}
+                            disabled={!hasHighlightSentence}
+                          >
+                            Repeat
+                          </Button>
+                        ) : null}
                       </Stack>
                       <Divider />
                       <NumericSettingControl

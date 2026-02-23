@@ -6,11 +6,14 @@ import type {
   BridgeError,
   CalibreBook,
   CalibreLoadEvent,
+  LogLevelEvent,
+  PdfTranscriptionEvent,
   ReaderSettingsPatch,
   ReaderSnapshot,
   RecentBook,
+  SessionState,
   SourceOpenEvent,
-  SessionState
+  TtsStateEvent
 } from "../types";
 
 type ToastSeverity = "info" | "success" | "error";
@@ -46,8 +49,15 @@ export interface AppStore {
   toast: ToastMessage | null;
   sourceOpenEvent: SourceOpenEvent | null;
   calibreLoadEvent: CalibreLoadEvent | null;
+  ttsStateEvent: TtsStateEvent | null;
+  pdfTranscriptionEvent: PdfTranscriptionEvent | null;
+  logLevelEvent: LogLevelEvent | null;
+  runtimeLogLevel: string;
   sourceOpenSubscribed: boolean;
   calibreSubscribed: boolean;
+  ttsStateSubscribed: boolean;
+  pdfTranscriptionSubscribed: boolean;
+  logLevelSubscribed: boolean;
   sessionStateSubscribed: boolean;
   readerStateSubscribed: boolean;
   lastSessionEventRequestId: number;
@@ -85,6 +95,7 @@ export interface AppStore {
   toggleTtsPanel: () => Promise<void>;
   loadCalibreBooks: (forceRefresh?: boolean) => Promise<void>;
   openCalibreBook: (bookId: number) => Promise<void>;
+  setRuntimeLogLevel: (level: string) => Promise<void>;
   clearError: () => void;
   dismissToast: () => void;
   clearTelemetry: () => void;
@@ -208,8 +219,15 @@ export function createAppStoreState(backend: BackendApi): StateCreator<AppStore>
   toast: null,
   sourceOpenEvent: null,
   calibreLoadEvent: null,
+  ttsStateEvent: null,
+  pdfTranscriptionEvent: null,
+  logLevelEvent: null,
+  runtimeLogLevel: "info",
   sourceOpenSubscribed: false,
   calibreSubscribed: false,
+  ttsStateSubscribed: false,
+  pdfTranscriptionSubscribed: false,
+  logLevelSubscribed: false,
   sessionStateSubscribed: false,
   readerStateSubscribed: false,
   lastSessionEventRequestId: 0,
@@ -272,6 +290,36 @@ export function createAppStoreState(backend: BackendApi): StateCreator<AppStore>
           }
         });
         set({ calibreSubscribed: true });
+      }
+      if (!get().ttsStateSubscribed) {
+        await backend.onTtsState((event) => {
+          set({ ttsStateEvent: event });
+        });
+        set({ ttsStateSubscribed: true });
+      }
+      if (!get().pdfTranscriptionSubscribed) {
+        await backend.onPdfTranscription((event) => {
+          set({ pdfTranscriptionEvent: event });
+          if (event.phase === "failed") {
+            const suffix = event.request_id > 0 ? ` (request ${event.request_id})` : "";
+            set({
+              toast: buildToast(
+                "error",
+                `${event.message ?? "PDF transcription failed"}${suffix}`
+              )
+            });
+          }
+        });
+        set({ pdfTranscriptionSubscribed: true });
+      }
+      if (!get().logLevelSubscribed) {
+        await backend.onLogLevel((event) => {
+          set({
+            logLevelEvent: event,
+            runtimeLogLevel: event.level
+          });
+        });
+        set({ logLevelSubscribed: true });
       }
       if (!get().sessionStateSubscribed) {
         await backend.onSessionState((event) => {
@@ -348,7 +396,8 @@ export function createAppStoreState(backend: BackendApi): StateCreator<AppStore>
         bootstrapState,
         session,
         recents,
-        reader
+        reader,
+        runtimeLogLevel: bootstrapState.config.log_level
       });
       finishTelemetry(set, get, "bootstrap", startedAt, true, null);
     } catch (error) {
@@ -782,6 +831,25 @@ export function createAppStoreState(backend: BackendApi): StateCreator<AppStore>
           reader: result.reader,
           recents,
           toast: buildToast("success", "Book opened from calibre")
+        });
+      } catch (error) {
+        const bridgeError = toBridgeError(error);
+        set({
+          error: bridgeError.message,
+          toast: buildToast("error", bridgeError.message)
+        });
+        throw bridgeError;
+      }
+    });
+  },
+
+  setRuntimeLogLevel: async (level) => {
+    await withBusy(set, get, "setRuntimeLogLevel", async () => {
+      try {
+        const normalized = await backend.loggingSetLevel(level);
+        set({
+          runtimeLogLevel: normalized,
+          toast: buildToast("success", `Log level set to ${normalized}`)
         });
       } catch (error) {
         const bridgeError = toBridgeError(error);

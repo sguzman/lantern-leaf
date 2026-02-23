@@ -1039,11 +1039,16 @@ mod tests {
     #[test]
     fn text_only_sentence_click_uses_audio_index_mapping() {
         let normalizer = normalizer::TextNormalizer::default();
-        let mut session = build_test_session(&[&[r#"In the word lists of Cheshire, Derbyshire, Lancashire and Yorkshire we find the following terms, all of which took root in the Delaware Valley: abide as in cannot abide it, all out for entirely, apple-pie order to mean very good order, bamboozle for deceive, black and white for writing, blather for empty talk, boggle for take fright, brat for child, budge for move, burying for funeral, by golly as an expletive, by gum for another expletive."#]]);
+        let mut session = build_test_session(&[&[
+            r#"In the word lists of Cheshire, Derbyshire, Lancashire and Yorkshire we find the following terms, all of which took root in the Delaware Valley: abide as in cannot abide it, all out for entirely, apple-pie order to mean very good order, bamboozle for deceive, black and white for writing, blather for empty talk, boggle for take fright, brat for child, budge for move, burying for funeral, by golly as an expletive, by gum for another expletive."#,
+        ]]);
         session.tts_state = TtsPlaybackState::Paused;
         session.toggle_text_only(&normalizer);
         let audio_count = session.current_sentences(&normalizer).len();
-        assert!(audio_count > 1, "expected long sentence to split into multiple audio chunks");
+        assert!(
+            audio_count > 1,
+            "expected long sentence to split into multiple audio chunks"
+        );
 
         let target_audio_idx = audio_count - 1;
         session.sentence_click(target_audio_idx, &normalizer);

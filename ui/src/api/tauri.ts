@@ -6,14 +6,17 @@ import type {
   BridgeError,
   CalibreBook,
   CalibreLoadEvent,
+  LogLevelEvent,
   OpenSourceResult,
+  PdfTranscriptionEvent,
   ReaderStateEvent,
   ReaderSettingsPatch,
   ReaderSnapshot,
   RecentBook,
   SessionStateEvent,
   SessionState,
-  SourceOpenEvent
+  SourceOpenEvent,
+  TtsStateEvent
 } from "../types";
 
 const MAX_RECENT_LIMIT = 512;
@@ -71,6 +74,7 @@ type MockBackendState = {
   recents: RecentBook[];
   calibreBooks: CalibreBook[];
   reader: ReaderSnapshot | null;
+  logLevel: string;
 };
 
 const mockReaderSnapshot = (): ReaderSnapshot => ({
@@ -142,6 +146,7 @@ const mockState: MockBackendState = {
       font_weight: "bold",
       day_highlight: { r: 0.2, g: 0.4, b: 0.7, a: 0.15 },
       night_highlight: { r: 0.8, g: 0.8, b: 0.5, a: 0.2 },
+      log_level: "debug",
       default_font_size: 22,
       default_lines_per_page: 700,
       default_tts_speed: 2.5,
@@ -169,7 +174,8 @@ const mockState: MockBackendState = {
   },
   recents: [],
   calibreBooks: [],
-  reader: null
+  reader: null,
+  logLevel: "debug"
 };
 
 function ensureMockReader(): ReaderSnapshot {
@@ -424,6 +430,54 @@ async function mockOnReaderState(handler: (event: ReaderStateEvent) => void): Pr
   return () => Promise.resolve();
 }
 
+async function mockOnTtsState(handler: (event: TtsStateEvent) => void): Promise<UnlistenFn> {
+  queueMicrotask(() => {
+    const reader = ensureMockReader();
+    handler({
+      request_id: 0,
+      action: "ready",
+      tts: structuredClone(reader.tts)
+    });
+  });
+  return () => Promise.resolve();
+}
+
+async function mockOnPdfTranscription(
+  handler: (event: PdfTranscriptionEvent) => void
+): Promise<UnlistenFn> {
+  queueMicrotask(() =>
+    handler({
+      request_id: 0,
+      phase: "ready",
+      source_path: "",
+      message: "Using mock backend adapter"
+    })
+  );
+  return () => Promise.resolve();
+}
+
+async function mockOnLogLevel(handler: (event: LogLevelEvent) => void): Promise<UnlistenFn> {
+  queueMicrotask(() =>
+    handler({
+      request_id: 0,
+      level: mockState.logLevel
+    })
+  );
+  return () => Promise.resolve();
+}
+
+async function mockLoggingSetLevel(level: string): Promise<string> {
+  const normalized = level.trim().toLowerCase();
+  if (!["trace", "debug", "info", "warn", "error"].includes(normalized)) {
+    throw {
+      code: "invalid_input",
+      message: `Unsupported log level '${level}'`
+    } satisfies BridgeError;
+  }
+  mockState.logLevel = normalized;
+  return mockState.logLevel;
+}
+
 export interface BackendApi {
   appSafeQuit: () => Promise<void>;
   sessionGetBootstrap: () => Promise<BootstrapState>;
@@ -457,12 +511,16 @@ export interface BackendApi {
   readerTtsSeekPrev: () => Promise<ReaderSnapshot>;
   readerTtsRepeatSentence: () => Promise<ReaderSnapshot>;
   readerCloseSession: () => Promise<SessionState>;
+  loggingSetLevel: (level: string) => Promise<string>;
   calibreLoadBooks: (forceRefresh?: boolean) => Promise<CalibreBook[]>;
   calibreOpenBook: (bookId: number) => Promise<OpenSourceResult>;
   onSourceOpen: (handler: (event: SourceOpenEvent) => void) => Promise<UnlistenFn>;
   onCalibreLoad: (handler: (event: CalibreLoadEvent) => void) => Promise<UnlistenFn>;
   onSessionState: (handler: (event: SessionStateEvent) => void) => Promise<UnlistenFn>;
   onReaderState: (handler: (event: ReaderStateEvent) => void) => Promise<UnlistenFn>;
+  onTtsState: (handler: (event: TtsStateEvent) => void) => Promise<UnlistenFn>;
+  onPdfTranscription: (handler: (event: PdfTranscriptionEvent) => void) => Promise<UnlistenFn>;
+  onLogLevel: (handler: (event: LogLevelEvent) => void) => Promise<UnlistenFn>;
 }
 
 function createTauriBackendApi(): BackendApi {
@@ -503,6 +561,7 @@ function createTauriBackendApi(): BackendApi {
     readerTtsSeekPrev: () => invokeCommand<ReaderSnapshot>("reader_tts_seek_prev"),
     readerTtsRepeatSentence: () => invokeCommand<ReaderSnapshot>("reader_tts_repeat_sentence"),
     readerCloseSession: () => invokeCommand<SessionState>("reader_close_session"),
+    loggingSetLevel: (level) => invokeCommand<string>("logging_set_level", { level }),
     calibreLoadBooks: (forceRefresh) =>
       invokeCommand<CalibreBook[]>("calibre_load_books", { forceRefresh }),
     calibreOpenBook: (bookId) => invokeCommand<OpenSourceResult>("calibre_open_book", { bookId }),
@@ -517,6 +576,15 @@ function createTauriBackendApi(): BackendApi {
     },
     onReaderState: async (handler) => {
       return listen<ReaderStateEvent>("reader-state", (event) => handler(event.payload));
+    },
+    onTtsState: async (handler) => {
+      return listen<TtsStateEvent>("tts-state", (event) => handler(event.payload));
+    },
+    onPdfTranscription: async (handler) => {
+      return listen<PdfTranscriptionEvent>("pdf-transcription", (event) => handler(event.payload));
+    },
+    onLogLevel: async (handler) => {
+      return listen<LogLevelEvent>("log-level", (event) => handler(event.payload));
     }
   };
 }
@@ -555,12 +623,16 @@ function createMockBackendApi(): BackendApi {
     readerTtsSeekPrev: mockReaderTtsSeekPrev,
     readerTtsRepeatSentence: mockReaderTtsRepeatSentence,
     readerCloseSession: mockSessionReturnToStarter,
+    loggingSetLevel: mockLoggingSetLevel,
     calibreLoadBooks: mockCalibreLoadBooks,
     calibreOpenBook: mockCalibreOpenBook,
     onSourceOpen: mockOnSourceOpen,
     onCalibreLoad: mockOnCalibreLoad,
     onSessionState: mockOnSessionState,
-    onReaderState: mockOnReaderState
+    onReaderState: mockOnReaderState,
+    onTtsState: mockOnTtsState,
+    onPdfTranscription: mockOnPdfTranscription,
+    onLogLevel: mockOnLogLevel
   };
 }
 

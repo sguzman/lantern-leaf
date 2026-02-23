@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State};
@@ -49,6 +50,7 @@ struct BootstrapConfig {
     font_weight: config::FontWeight,
     day_highlight: config::HighlightColor,
     night_highlight: config::HighlightColor,
+    log_level: String,
     default_font_size: u32,
     default_lines_per_page: usize,
     default_tts_speed: f32,
@@ -119,6 +121,27 @@ struct CalibreLoadEvent {
     phase: String,
     count: Option<usize>,
     message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TtsStateEvent {
+    request_id: u64,
+    action: String,
+    tts: session::ReaderTtsView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PdfTranscriptionEvent {
+    request_id: u64,
+    phase: String,
+    source_path: String,
+    message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LogLevelEvent {
+    request_id: u64,
+    level: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -198,6 +221,27 @@ fn bridge_error(code: &str, message: impl Into<String>) -> BridgeError {
     BridgeError {
         code: code.to_string(),
         message: message.into(),
+    }
+}
+
+fn parse_log_level_label(label: &str) -> Option<config::LogLevel> {
+    match label.trim().to_ascii_lowercase().as_str() {
+        "trace" => Some(config::LogLevel::Trace),
+        "debug" => Some(config::LogLevel::Debug),
+        "info" => Some(config::LogLevel::Info),
+        "warn" | "warning" => Some(config::LogLevel::Warn),
+        "error" => Some(config::LogLevel::Error),
+        _ => None,
+    }
+}
+
+fn log_level_to_filter(level: config::LogLevel) -> LevelFilter {
+    match level {
+        config::LogLevel::Trace => LevelFilter::Trace,
+        config::LogLevel::Debug => LevelFilter::Debug,
+        config::LogLevel::Info => LevelFilter::Info,
+        config::LogLevel::Warn => LevelFilter::Warn,
+        config::LogLevel::Error => LevelFilter::Error,
     }
 }
 
@@ -359,6 +403,22 @@ fn emit_reader_state(
     );
 }
 
+fn emit_tts_state(
+    app: &tauri::AppHandle,
+    request_id: u64,
+    action: &str,
+    tts: &session::ReaderTtsView,
+) {
+    let _ = app.emit(
+        "tts-state",
+        TtsStateEvent {
+            request_id,
+            action: action.to_string(),
+            tts: tts.clone(),
+        },
+    );
+}
+
 fn apply_reader_update<F>(
     app: &tauri::AppHandle,
     state: &State<'_, Mutex<BackendState>>,
@@ -383,6 +443,7 @@ where
         (reader.snapshot(panels, &normalizer), request_id)
     };
     emit_reader_state(app, request_id, action, &snapshot);
+    emit_tts_state(app, request_id, action, &snapshot.tts);
     Ok(snapshot)
 }
 
@@ -415,6 +476,7 @@ where
     emit_session_state(app, request_id, action, &session);
     if let Some(snapshot) = &reader_snapshot {
         emit_reader_state(app, request_id, action, snapshot);
+        emit_tts_state(app, request_id, action, &snapshot.tts);
     }
     Ok(session)
 }
@@ -435,6 +497,12 @@ async fn open_resolved_source(
 
     emit_session_state(app, request_id, "source_open_started", &started_session);
 
+    let source_is_pdf = source_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false);
+
     info!(
         request_id,
         path = %source_path.display(),
@@ -450,6 +518,18 @@ async fn open_resolved_source(
             message: None,
         },
     );
+
+    if source_is_pdf {
+        let _ = app.emit(
+            "pdf-transcription",
+            PdfTranscriptionEvent {
+                request_id,
+                phase: "started".to_string(),
+                source_path: source_path.to_string_lossy().to_string(),
+                message: None,
+            },
+        );
+    }
 
     cache::remember_source_path(&source_path);
 
@@ -483,6 +563,19 @@ async fn open_resolved_source(
                     message: Some("Source open request was superseded or cancelled".to_string()),
                 },
             );
+            if source_is_pdf {
+                let _ = app.emit(
+                    "pdf-transcription",
+                    PdfTranscriptionEvent {
+                        request_id,
+                        phase: "cancelled".to_string(),
+                        source_path: source_path.to_string_lossy().to_string(),
+                        message: Some(
+                            "PDF transcription cancelled by request supersession".to_string(),
+                        ),
+                    },
+                );
+            }
         }
         info!(
             request_id,
@@ -519,6 +612,17 @@ async fn open_resolved_source(
                     message: Some(message.clone()),
                 },
             );
+            if source_is_pdf {
+                let _ = app.emit(
+                    "pdf-transcription",
+                    PdfTranscriptionEvent {
+                        request_id,
+                        phase: "failed".to_string(),
+                        source_path: source_path.to_string_lossy().to_string(),
+                        message: Some(message.clone()),
+                    },
+                );
+            }
             return Err(bridge_error("task_join_error", message));
         }
     };
@@ -545,6 +649,7 @@ async fn open_resolved_source(
             drop(guard);
             emit_session_state(app, request_id, "source_open", &session);
             emit_reader_state(app, request_id, "source_open", &snapshot);
+            emit_tts_state(app, request_id, "source_open", &snapshot.tts);
 
             let _ = app.emit(
                 "source-open",
@@ -555,6 +660,17 @@ async fn open_resolved_source(
                     message: None,
                 },
             );
+            if source_is_pdf {
+                let _ = app.emit(
+                    "pdf-transcription",
+                    PdfTranscriptionEvent {
+                        request_id,
+                        phase: "finished".to_string(),
+                        source_path: source_path.to_string_lossy().to_string(),
+                        message: None,
+                    },
+                );
+            }
             info!(
                 request_id,
                 path = %source_path.display(),
@@ -583,6 +699,17 @@ async fn open_resolved_source(
                     message: Some(err.clone()),
                 },
             );
+            if source_is_pdf {
+                let _ = app.emit(
+                    "pdf-transcription",
+                    PdfTranscriptionEvent {
+                        request_id,
+                        phase: "failed".to_string(),
+                        source_path: source_path.to_string_lossy().to_string(),
+                        message: Some(err.clone()),
+                    },
+                );
+            }
             Err(bridge_error("open_failed", err))
         }
     }
@@ -604,6 +731,7 @@ fn session_get_bootstrap(
             font_weight: guard.base_config.font_weight,
             day_highlight: guard.base_config.day_highlight,
             night_highlight: guard.base_config.night_highlight,
+            log_level: guard.base_config.log_level.as_filter_str().to_string(),
             default_font_size: guard.base_config.font_size,
             default_lines_per_page: guard.base_config.lines_per_page,
             default_tts_speed: guard.base_config.tts_speed,
@@ -1071,6 +1199,53 @@ fn app_safe_quit(
 }
 
 #[tauri::command]
+fn logging_set_level(
+    app: tauri::AppHandle,
+    state: State<'_, Mutex<BackendState>>,
+    level: String,
+) -> Result<String, BridgeError> {
+    let parsed = parse_log_level_label(&level).ok_or_else(|| {
+        bridge_error(
+            "invalid_input",
+            format!("Unsupported log level '{level}'. Use trace/debug/info/warn/error."),
+        )
+    })?;
+
+    let request_id = {
+        let mut guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        let request_id = allocate_request_id(&mut guard);
+        guard.base_config.log_level = parsed;
+        let serialized = config::serialize_config(&guard.base_config).map_err(|err| {
+            bridge_error(
+                "config_serialize_failed",
+                format!("Failed to serialize config for log level update: {err}"),
+            )
+        })?;
+        fs::write("conf/config.toml", serialized).map_err(|err| {
+            bridge_error(
+                "io_error",
+                format!("Failed to persist log level to conf/config.toml: {err}"),
+            )
+        })?;
+        request_id
+    };
+
+    tauri_plugin_log::log::set_max_level(log_level_to_filter(parsed));
+    let level_label = parsed.as_filter_str().to_string();
+    let _ = app.emit(
+        "log-level",
+        LogLevelEvent {
+            request_id,
+            level: level_label.clone(),
+        },
+    );
+    info!(request_id, level = %level_label, "Updated runtime log level");
+    Ok(level_label)
+}
+
+#[tauri::command]
 async fn calibre_load_books(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
@@ -1194,8 +1369,9 @@ async fn calibre_open_book(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let startup_config = config::load_config(Path::new("conf/config.toml"));
     let log_plugin = tauri_plugin_log::Builder::new()
-        .level(LevelFilter::Info)
+        .level(log_level_to_filter(startup_config.log_level))
         .target(Target::new(TargetKind::Stdout))
         .target(Target::new(TargetKind::Webview))
         .build();
@@ -1255,6 +1431,7 @@ pub fn run() {
             reader_tts_repeat_sentence,
             reader_close_session,
             app_safe_quit,
+            logging_set_level,
             calibre_load_books,
             calibre_open_book
         ]);
@@ -1300,6 +1477,7 @@ mod tests {
                     b: 0.5,
                     a: 0.2,
                 },
+                log_level: "debug".to_string(),
                 default_font_size: 22,
                 default_lines_per_page: 700,
                 default_tts_speed: 2.5,
@@ -1479,7 +1657,10 @@ mod tests {
         assert_eq!(normalize_recent_limit(None), DEFAULT_RECENT_LIMIT);
         assert_eq!(normalize_recent_limit(Some(0)), 1);
         assert_eq!(normalize_recent_limit(Some(1)), 1);
-        assert_eq!(normalize_recent_limit(Some(MAX_RECENT_LIMIT + 123)), MAX_RECENT_LIMIT);
+        assert_eq!(
+            normalize_recent_limit(Some(MAX_RECENT_LIMIT + 123)),
+            MAX_RECENT_LIMIT
+        );
     }
 
     #[test]
@@ -1507,6 +1688,29 @@ mod tests {
             .expect_err("unsupported extension must fail");
         assert_eq!(err.code, "unsupported_source");
         let _ = fs::remove_file(unsupported);
+    }
+
+    #[test]
+    fn parse_log_level_label_accepts_supported_values() {
+        assert_eq!(
+            parse_log_level_label("trace"),
+            Some(config::LogLevel::Trace)
+        );
+        assert_eq!(
+            parse_log_level_label("DEBUG"),
+            Some(config::LogLevel::Debug)
+        );
+        assert_eq!(parse_log_level_label("info"), Some(config::LogLevel::Info));
+        assert_eq!(
+            parse_log_level_label("warning"),
+            Some(config::LogLevel::Warn)
+        );
+        assert_eq!(parse_log_level_label("warn"), Some(config::LogLevel::Warn));
+        assert_eq!(
+            parse_log_level_label("error"),
+            Some(config::LogLevel::Error)
+        );
+        assert_eq!(parse_log_level_label("verbose"), None);
     }
 
     #[test]
@@ -1556,12 +1760,18 @@ mod tests {
         assert_eq!(request_id, 1);
         assert!(state.open_in_flight);
         assert_eq!(state.active_open_request, Some(1));
-        assert_eq!(state.active_open_source_path.as_deref(), Some(first_source.as_path()));
+        assert_eq!(
+            state.active_open_source_path.as_deref(),
+            Some(first_source.as_path())
+        );
 
-        let duplicate = begin_open_request(&mut state, &second_source)
-            .expect_err("duplicate open should fail");
+        let duplicate =
+            begin_open_request(&mut state, &second_source).expect_err("duplicate open should fail");
         assert_eq!(duplicate.code, "operation_conflict");
         assert_eq!(state.active_open_request, Some(1));
-        assert_eq!(state.active_open_source_path.as_deref(), Some(first_source.as_path()));
+        assert_eq!(
+            state.active_open_source_path.as_deref(),
+            Some(first_source.as_path())
+        );
     }
 }

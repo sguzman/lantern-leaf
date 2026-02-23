@@ -21,6 +21,7 @@ export interface BootstrapConfig {
   font_weight: string;
   day_highlight: HighlightColor;
   night_highlight: HighlightColor;
+  log_level: string;
   default_font_size: number;
   default_lines_per_page: number;
   default_tts_speed: number;
@@ -164,6 +165,24 @@ export interface ReaderStateEvent {
   request_id: number;
   action: string;
   reader: ReaderSnapshot;
+}
+
+export interface TtsStateEvent {
+  request_id: number;
+  action: string;
+  tts: ReaderTtsView;
+}
+
+export interface PdfTranscriptionEvent {
+  request_id: number;
+  phase: string;
+  source_path: string;
+  message: string | null;
+}
+
+export interface LogLevelEvent {
+  request_id: number;
+  level: string;
 }
 
 export interface ReaderSettingsPatch {

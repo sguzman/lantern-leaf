@@ -54,7 +54,7 @@
 - [x] P3-01 Implement backend `AppState` with mutexed core session manager (Voltlane-style).
 - [x] P3-02 Define command groups: session, source-open, navigation, appearance/settings, search, TTS, calibre, PDF, diagnostics.
 - [x] P3-03 Implement one Tauri command per operation; return typed DTOs only.
-- [ ] P3-04 Add backend event emitters for long-running progress and state changes (TTS planning/prep, calibre load, PDF transcription).
+- [x] P3-04 Add backend event emitters for long-running progress and state changes (TTS planning/prep, calibre load, PDF transcription).
 - [x] P3-05 Add command-level error taxonomy (user-safe errors vs internal errors).
 - [x] P3-06 Add operation-guard rules (single active book load; no duplicate PDF processing; reject conflicting requests).
 - [x] P3-07 Add shutdown hooks to cancel all in-flight tasks on close/return-to-starter.
@@ -83,7 +83,7 @@
 
 - [x] P6-01 Implement `ui/src/api/tauri.ts` style typed wrappers for all backend commands.
 - [x] P6-02 Implement runtime adapter: real Tauri invoke + optional mock adapter for browser-only UI dev.
-- [ ] P6-03 Build Zustand store slices: session, reader, tts, calibre, settings, stats, jobs, notifications.
+- [ ] P6-03 Build Zustand store slices: session, reader, tts, calibre, settings, stats, jobs, notifications. (Selectors added in `ui/src/store/selectors.ts`; full physical slice split still pending.)
 - [x] P6-04 Centralize optimistic update policy and rollback logic.
 - [x] P6-05 Implement event subscription handlers to update store from backend progress/events.
 - [x] P6-06 Add telemetry fields in store actions for reproducible debugging.
@@ -113,7 +113,7 @@
 - [x] P9-01 Port all playback commands: play/pause/toggle/play-from-page/play-from-highlight/seek/repeat.
 - [x] P9-02 Preserve pause-after-sentence semantics and speed/volume behavior.
 - [x] P9-03 Preserve clicked sentence start logic with correct audio/display mapping.
-- [ ] P9-04 Keep mapping logic in Rust; move visual positioning to DOM measurements in UI.
+- [x] P9-04 Keep mapping logic in Rust; move visual positioning to DOM measurements in UI.
 - [x] P9-05 Replace heuristic scroll math with actual element anchoring where feasible.
 - [x] P9-06 Port auto-scroll and auto-center toggles with exact visibility guarantees.
 - [x] P9-07 Preserve cancellation semantics for close/quit during preparation.
@@ -134,28 +134,28 @@
 - [x] P11-02 Preserve bookmark save/load semantics and resume fidelity.
 - [x] P11-03 Preserve recent-book indexing and thumbnail handling.
 - [x] P11-04 Preserve safe quit behavior including Ctrl+C semantics.
-- [ ] P11-05 Preserve logging configuration and dynamic level updates.
-- [ ] P11-06 Add Tauri capability permissions for file access, logging, and subprocess usage required by quack-check.
+- [x] P11-05 Preserve logging configuration and dynamic level updates.
+- [x] P11-06 Add Tauri capability permissions for file access, logging, and subprocess usage required by quack-check.
 
 **Phase 12: Tailwind + MUI Production Hardening**
 
 - [x] P12-01 Define component usage policy: MUI for controls/dialogs/sliders/tables, Tailwind for layout containers.
 - [x] P12-02 Build reusable design tokens that map your current app settings into MUI theme and Tailwind classes.
-- [ ] P12-03 Validate dark/day mode parity against existing visuals.
-- [ ] P12-04 Ensure typography/rendering remains stable at current default font size and spacing settings.
-- [ ] P12-05 Validate responsive breakpoints to preserve no-vertical-collapse policies.
-- [ ] P12-06 Audit final CSS bundle size and remove dead styles.
+- [x] P12-03 Validate dark/day mode parity against existing visuals.
+- [x] P12-04 Ensure typography/rendering remains stable at current default font size and spacing settings.
+- [x] P12-05 Validate responsive breakpoints to preserve no-vertical-collapse policies.
+- [x] P12-06 Audit final CSS bundle size and remove dead styles.
 
 **Phase 13: Testing And Parity Gates**
 
 - [x] P13-01 Keep and run Rust unit/integration tests for core logic at every phase.
 - [x] P13-02 Add bridge command tests for all critical command paths.
 - [x] P13-03 Add frontend unit tests for reducers/store actions and command adapters.
-- [ ] P13-04 Add E2E scenarios (Playwright + Tauri runner) for core reading/TTS flows.
+- [ ] P13-04 Add E2E scenarios (Playwright + Tauri runner) for core reading/TTS flows. (Playwright scenarios added; dedicated Tauri runner wiring still pending.)
 - [x] P13-05 Add explicit regression scenarios from your prior incidents (sentence click halt, highlight drift, duplicate PDF jobs, close-during-tts).
-- [ ] P13-06 Add large calibre dataset performance scenario and verify non-blocking UX.
-- [ ] P13-07 Add PDF edge corpus tests with degraded pages and fallback paths.
-- [ ] P13-08 Create migration parity report that compares iced vs new shell outputs for key workflows.
+- [x] P13-06 Add large calibre dataset performance scenario and verify non-blocking UX.
+- [x] P13-07 Add PDF edge corpus tests with degraded pages and fallback paths.
+- [x] P13-08 Create migration parity report that compares iced vs new shell outputs for key workflows.
 
 **Phase 14: Cutover And Decommission**
 

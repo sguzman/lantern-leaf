@@ -21,6 +21,7 @@ This groups the current bridge surface into stable domains so frontend and backe
 - `source_open_clipboard_text`
 - events:
   - `source-open`
+  - `pdf-transcription`
   - `session-state`
   - `reader-state`
 
@@ -58,6 +59,14 @@ This groups the current bridge surface into stable domains so frontend and backe
 - `reader_tts_seek_prev`
 - `reader_tts_repeat_sentence`
 - `reader_close_session`
+- event:
+  - `tts-state`
+
+## Logging
+
+- `logging_set_level`
+- event:
+  - `log-level`
 
 ## Calibre
 

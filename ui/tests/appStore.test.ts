@@ -12,9 +12,12 @@ import type {
   ReaderSnapshot,
   ReaderStateEvent,
   RecentBook,
+  LogLevelEvent,
+  PdfTranscriptionEvent,
   SessionState,
   SessionStateEvent,
-  SourceOpenEvent
+  SourceOpenEvent,
+  TtsStateEvent
 } from "../src/types";
 
 function makeBootstrapState(): BootstrapState {
@@ -27,6 +30,7 @@ function makeBootstrapState(): BootstrapState {
       font_weight: "bold",
       day_highlight: { r: 0.2, g: 0.4, b: 0.7, a: 0.15 },
       night_highlight: { r: 0.8, g: 0.8, b: 0.5, a: 0.2 },
+      log_level: "debug",
       default_font_size: 22,
       default_lines_per_page: 700,
       default_tts_speed: 2.5,
@@ -124,6 +128,9 @@ function createBackend(overrides: Partial<BackendApi> = {}) {
     calibre?: (event: CalibreLoadEvent) => void;
     session?: (event: SessionStateEvent) => void;
     reader?: (event: ReaderStateEvent) => void;
+    tts?: (event: TtsStateEvent) => void;
+    pdf?: (event: PdfTranscriptionEvent) => void;
+    logLevel?: (event: LogLevelEvent) => void;
   } = {};
 
   const defaultReader = makeReaderSnapshot("/tmp/default.epub", "Default");
@@ -165,6 +172,7 @@ function createBackend(overrides: Partial<BackendApi> = {}) {
     readerTtsSeekPrev: async () => defaultReader,
     readerTtsRepeatSentence: async () => defaultReader,
     readerCloseSession: async () => makeSessionState("starter"),
+    loggingSetLevel: async () => "debug",
     calibreLoadBooks: async () => [] as CalibreBook[],
     calibreOpenBook: async () => defaultOpenResult,
     onSourceOpen: async (handler) => {
@@ -181,6 +189,18 @@ function createBackend(overrides: Partial<BackendApi> = {}) {
     },
     onReaderState: async (handler) => {
       hooks.reader = handler;
+      return async () => {};
+    },
+    onTtsState: async (handler) => {
+      hooks.tts = handler;
+      return async () => {};
+    },
+    onPdfTranscription: async (handler) => {
+      hooks.pdf = handler;
+      return async () => {};
+    },
+    onLogLevel: async (handler) => {
+      hooks.logLevel = handler;
       return async () => {};
     }
   };
@@ -271,5 +291,45 @@ describe("appStore event handling", () => {
     expect(state.toast?.severity).toBe("info");
     expect(state.toast?.message).toContain("session close");
     expect(state.error).toBeNull();
+  });
+
+  it("tracks tts/pdf/log-level events from bridge subscriptions", async () => {
+    const { backend, hooks } = createBackend();
+    const store = createTestStore(backend);
+    await store.getState().bootstrap();
+
+    hooks.tts?.({
+      request_id: 21,
+      action: "reader_tts_play",
+      tts: makeReaderSnapshot("/tmp/tts.epub", "TTS").tts
+    });
+    hooks.pdf?.({
+      request_id: 22,
+      phase: "started",
+      source_path: "/tmp/book.pdf",
+      message: null
+    });
+    hooks.logLevel?.({
+      request_id: 23,
+      level: "warn"
+    });
+
+    const state = store.getState();
+    expect(state.ttsStateEvent?.request_id).toBe(21);
+    expect(state.pdfTranscriptionEvent?.source_path).toBe("/tmp/book.pdf");
+    expect(state.runtimeLogLevel).toBe("warn");
+  });
+
+  it("updates runtime log level via backend command", async () => {
+    const { backend } = createBackend({
+      loggingSetLevel: async (level) => level.toLowerCase()
+    });
+    const store = createTestStore(backend);
+
+    await store.getState().setRuntimeLogLevel("ERROR");
+
+    const state = store.getState();
+    expect(state.runtimeLogLevel).toBe("error");
+    expect(state.toast?.message).toContain("error");
   });
 });

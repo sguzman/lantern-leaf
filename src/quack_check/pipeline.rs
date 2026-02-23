@@ -273,3 +273,238 @@ struct ChunkInput {
     use_page_range: bool,
     temp_file: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::quack_check::engine::{ConvertOut, DocDiag, ProbeOut, SplitChunk};
+    use anyhow::Result;
+    use serde_json::json;
+    use std::sync::{Arc, Mutex};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[derive(Clone, Copy)]
+    enum NativeMode {
+        Success,
+        OkFalse,
+    }
+
+    #[derive(Clone)]
+    struct MockEngine {
+        probe: ProbeOut,
+        fail_split: bool,
+        native_mode: NativeMode,
+        split_calls: Arc<Mutex<usize>>,
+        native_requests: Arc<Mutex<Vec<ConvertIn>>>,
+        docling_requests: Arc<Mutex<Vec<ConvertIn>>>,
+    }
+
+    impl MockEngine {
+        fn new(probe: ProbeOut) -> Self {
+            Self {
+                probe,
+                fail_split: false,
+                native_mode: NativeMode::Success,
+                split_calls: Arc::new(Mutex::new(0)),
+                native_requests: Arc::new(Mutex::new(Vec::new())),
+                docling_requests: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn split_call_count(&self) -> usize {
+            *self
+                .split_calls
+                .lock()
+                .expect("split_calls lock should be available")
+        }
+
+        fn native_requests(&self) -> Vec<ConvertIn> {
+            self.native_requests
+                .lock()
+                .expect("native_requests lock should be available")
+                .clone()
+        }
+
+        fn docling_requests(&self) -> Vec<ConvertIn> {
+            self.docling_requests
+                .lock()
+                .expect("docling_requests lock should be available")
+                .clone()
+        }
+    }
+
+    impl Engine for MockEngine {
+        fn doctor(&self) -> Result<DocDiag> {
+            Ok(DocDiag {
+                python_exe: "python".to_string(),
+                python_version: "3.12".to_string(),
+                docling_version: Some("test".to_string()),
+                ok: true,
+                error: None,
+            })
+        }
+
+        fn probe_pdf(&self, _input: &Path, _sample_pages: u32) -> Result<ProbeOut> {
+            Ok(self.probe.clone())
+        }
+
+        fn split_pdf(
+            &self,
+            _input: &Path,
+            _out_dir: &Path,
+            ranges: &[crate::quack_check::chunk_plan::PageRange],
+        ) -> Result<Vec<SplitChunk>> {
+            if let Ok(mut calls) = self.split_calls.lock() {
+                *calls += 1;
+            }
+            if self.fail_split {
+                anyhow::bail!("simulated split failure");
+            }
+            Ok(ranges
+                .iter()
+                .enumerate()
+                .map(|(i, range)| SplitChunk {
+                    chunk_index: i as u32,
+                    start_page: range.start_page,
+                    end_page: range.end_page,
+                    path: format!("/tmp/mock-split-{i}.pdf"),
+                })
+                .collect())
+        }
+
+        fn convert_docling(&self, req: &ConvertIn) -> Result<ConvertOut> {
+            if let Ok(mut requests) = self.docling_requests.lock() {
+                requests.push(req.clone());
+            }
+            Ok(ConvertOut {
+                ok: true,
+                markdown: format!(
+                    "docling chunk {} [{}-{}]",
+                    req.chunk_index, req.start_page, req.end_page
+                ),
+                warnings: vec![],
+                meta: json!({ "engine": "docling" }),
+            })
+        }
+
+        fn convert_native_text(&self, req: &ConvertIn) -> Result<ConvertOut> {
+            if let Ok(mut requests) = self.native_requests.lock() {
+                requests.push(req.clone());
+            }
+            match self.native_mode {
+                NativeMode::Success => Ok(ConvertOut {
+                    ok: true,
+                    markdown: format!(
+                        "native chunk {} [{}-{}]",
+                        req.chunk_index, req.start_page, req.end_page
+                    ),
+                    warnings: vec![],
+                    meta: json!({ "engine": "native_text" }),
+                }),
+                NativeMode::OkFalse => Ok(ConvertOut {
+                    ok: false,
+                    markdown: String::new(),
+                    warnings: vec!["simulated native_text failure".to_string()],
+                    meta: json!({ "engine": "native_text" }),
+                }),
+            }
+        }
+    }
+
+    fn unique_temp_path(prefix: &str) -> PathBuf {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("ebup_viewer_quack_check_{prefix}_{now}"))
+    }
+
+    fn create_dummy_pdf_file() -> PathBuf {
+        let path = unique_temp_path("input").with_extension("pdf");
+        std::fs::write(&path, b"%PDF-1.4\n% dummy test payload\n")
+            .expect("dummy pdf should be written");
+        path
+    }
+
+    fn high_text_probe(page_count: u32) -> ProbeOut {
+        ProbeOut {
+            page_count,
+            sampled_pages: page_count.min(12),
+            avg_chars_per_page: 2500,
+            garbage_ratio: 0.0,
+            whitespace_ratio: 0.15,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn run_job_falls_back_to_docling_when_native_text_returns_ok_false() {
+        let mut cfg = Config::default();
+        cfg.classification.forced_tier = "HIGH_TEXT".to_string();
+        cfg.output.write_chunk_json = false;
+
+        let mut engine = MockEngine::new(high_text_probe(1));
+        engine.native_mode = NativeMode::OkFalse;
+        let pipeline = Pipeline::new(&cfg, engine.clone());
+
+        let input = create_dummy_pdf_file();
+        let job_dir = unique_temp_path("job_docling_fallback");
+        ensure_dir(&job_dir).expect("job dir should exist");
+
+        let result = pipeline
+            .run_job(&input, &job_dir)
+            .expect("pipeline should recover with docling fallback");
+
+        assert!(
+            result
+                .report
+                .chunk_reports
+                .iter()
+                .flat_map(|chunk| chunk.warnings.iter())
+                .any(|warning| warning.contains("fell back to docling")),
+            "report should include fallback warning"
+        );
+        assert_eq!(engine.native_requests().len(), 1);
+        assert_eq!(engine.docling_requests().len(), 1);
+        assert!(result.markdown.contains("docling chunk"));
+
+        let _ = std::fs::remove_file(input);
+        let _ = std::fs::remove_dir_all(job_dir);
+    }
+
+    #[test]
+    fn run_job_falls_back_to_page_range_when_physical_split_fails() {
+        let mut cfg = Config::default();
+        cfg.classification.forced_tier = "HIGH_TEXT".to_string();
+        cfg.chunking.strategy = "physical_split".to_string();
+        cfg.chunking.target_pages_per_chunk = 1;
+        cfg.chunking.max_pages_per_chunk = 1;
+        cfg.chunking.min_pages_per_chunk = 1;
+        cfg.limits.require_chunking_over_pages = 0;
+        cfg.output.write_chunk_json = false;
+
+        let mut engine = MockEngine::new(high_text_probe(3));
+        engine.fail_split = true;
+        let pipeline = Pipeline::new(&cfg, engine.clone());
+
+        let input = create_dummy_pdf_file();
+        let job_dir = unique_temp_path("job_page_range_fallback");
+        ensure_dir(&job_dir).expect("job dir should exist");
+
+        let result = pipeline
+            .run_job(&input, &job_dir)
+            .expect("pipeline should recover with page_range fallback");
+
+        assert_eq!(engine.split_call_count(), 1);
+        assert_eq!(result.report.chunk_reports.len(), 3);
+        let native_requests = engine.native_requests();
+        assert_eq!(native_requests.len(), 3);
+        assert!(
+            native_requests.iter().all(|request| request.use_page_range),
+            "fallback conversions should use page-range mode"
+        );
+
+        let _ = std::fs::remove_file(input);
+        let _ = std::fs::remove_dir_all(job_dir);
+    }
+}

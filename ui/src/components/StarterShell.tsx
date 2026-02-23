@@ -19,10 +19,16 @@ import {
 } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 
+import {
+  computeVirtualWindow,
+  filterAndSortCalibreBooks,
+  type CalibreSort
+} from "./calibreList";
 import type {
   BootstrapState,
   CalibreBook,
   CalibreLoadEvent,
+  PdfTranscriptionEvent,
   RecentBook,
   SourceOpenEvent
 } from "../types";
@@ -40,8 +46,11 @@ interface StarterShellProps {
   onRefreshRecents: () => Promise<void>;
   onLoadCalibre: (forceRefresh?: boolean) => Promise<void>;
   onOpenCalibreBook: (bookId: number) => Promise<void>;
+  onSetRuntimeLogLevel: (level: string) => Promise<void>;
   sourceOpenEvent: SourceOpenEvent | null;
   calibreLoadEvent: CalibreLoadEvent | null;
+  pdfTranscriptionEvent: PdfTranscriptionEvent | null;
+  runtimeLogLevel: string;
 }
 
 export function StarterShell({
@@ -57,15 +66,19 @@ export function StarterShell({
   onRefreshRecents,
   onLoadCalibre,
   onOpenCalibreBook,
+  onSetRuntimeLogLevel,
   sourceOpenEvent,
-  calibreLoadEvent
+  calibreLoadEvent,
+  pdfTranscriptionEvent,
+  runtimeLogLevel
 }: StarterShellProps) {
   const [path, setPath] = useState("");
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   const [calibreSearch, setCalibreSearch] = useState("");
   const [showCalibre, setShowCalibre] = useState(true);
-  const [calibreSort, setCalibreSort] = useState("title_asc");
+  const [calibreSort, setCalibreSort] = useState<CalibreSort>("title_asc");
   const [calibreScrollTop, setCalibreScrollTop] = useState(0);
+  const [logLevelValue, setLogLevelValue] = useState(runtimeLogLevel);
 
   const calibreRowHeight = 58;
   const calibreViewportHeight = 384;
@@ -79,60 +92,17 @@ export function StarterShell({
   }, [bootstrap]);
 
   const filteredCalibre = useMemo(() => {
-    const query = calibreSearch.trim().toLowerCase();
-    const filtered = calibreBooks.filter((book) => {
-      if (!query) {
-        return true;
-      }
-      return (
-        book.title.toLowerCase().includes(query) ||
-        book.authors.toLowerCase().includes(query) ||
-        book.extension.toLowerCase().includes(query)
-      );
-    });
-
-    const sorted = [...filtered];
-    sorted.sort((left, right) => {
-      switch (calibreSort) {
-        case "title_desc":
-          return right.title.localeCompare(left.title);
-        case "author_asc":
-          return left.authors.localeCompare(right.authors);
-        case "author_desc":
-          return right.authors.localeCompare(left.authors);
-        case "year_desc":
-          return (right.year ?? 0) - (left.year ?? 0);
-        case "year_asc":
-          return (left.year ?? 0) - (right.year ?? 0);
-        case "id_asc":
-          return left.id - right.id;
-        case "id_desc":
-          return right.id - left.id;
-        case "title_asc":
-        default:
-          return left.title.localeCompare(right.title);
-      }
-    });
-    return sorted;
+    return filterAndSortCalibreBooks(calibreBooks, calibreSearch, calibreSort);
   }, [calibreBooks, calibreSearch, calibreSort]);
 
   const virtualWindow = useMemo(() => {
-    const totalCount = filteredCalibre.length;
-    if (totalCount === 0) {
-      return {
-        items: [] as CalibreBook[],
-        topSpacerPx: 0,
-        bottomSpacerPx: 0
-      };
-    }
-    const start = Math.max(0, Math.floor(calibreScrollTop / calibreRowHeight) - calibreOverscan);
-    const maxVisible = Math.ceil(calibreViewportHeight / calibreRowHeight) + calibreOverscan * 2;
-    const end = Math.min(totalCount, start + maxVisible);
-    return {
-      items: filteredCalibre.slice(start, end),
-      topSpacerPx: start * calibreRowHeight,
-      bottomSpacerPx: Math.max(0, (totalCount - end) * calibreRowHeight)
-    };
+    return computeVirtualWindow(
+      filteredCalibre,
+      calibreScrollTop,
+      calibreRowHeight,
+      calibreViewportHeight,
+      calibreOverscan
+    );
   }, [
     calibreOverscan,
     calibreRowHeight,
@@ -144,6 +114,10 @@ export function StarterShell({
   useEffect(() => {
     setCalibreScrollTop(0);
   }, [calibreSearch, calibreSort, showCalibre]);
+
+  useEffect(() => {
+    setLogLevelValue(runtimeLogLevel);
+  }, [runtimeLogLevel]);
 
   const handleOpenPath = async () => {
     await onOpenPath(path);
@@ -176,6 +150,12 @@ export function StarterShell({
           calibreLoadEvent.count !== null ? ` · ${calibreLoadEvent.count.toLocaleString()} books` : ""
         }${calibreLoadEvent.message ? ` · ${calibreLoadEvent.message}` : ""}`
       : null;
+  const pdfStatus =
+    pdfTranscriptionEvent && pdfTranscriptionEvent.phase !== "ready"
+      ? `PDF #${pdfTranscriptionEvent.request_id}: ${pdfTranscriptionEvent.phase}${
+          pdfTranscriptionEvent.source_path ? ` · ${pdfTranscriptionEvent.source_path}` : ""
+        }${pdfTranscriptionEvent.message ? ` · ${pdfTranscriptionEvent.message}` : ""}`
+      : null;
 
   return (
     <Card className="w-full max-w-7xl rounded-3xl border border-slate-200 shadow-sm">
@@ -195,6 +175,35 @@ export function StarterShell({
           <Typography variant="body2" color="text.secondary">
             {summaryText}
           </Typography>
+          <Typography variant="caption" color="text.secondary">
+            Runtime log level: {runtimeLogLevel}
+          </Typography>
+          <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems="center">
+            <FormControl size="small" className="md:min-w-44">
+              <InputLabel id="runtime-log-level-label">Log Level</InputLabel>
+              <Select
+                labelId="runtime-log-level-label"
+                label="Log Level"
+                value={logLevelValue}
+                onChange={(event) => setLogLevelValue(String(event.target.value))}
+                disabled={busy}
+              >
+                <MenuItem value="trace">trace</MenuItem>
+                <MenuItem value="debug">debug</MenuItem>
+                <MenuItem value="info">info</MenuItem>
+                <MenuItem value="warn">warn</MenuItem>
+                <MenuItem value="error">error</MenuItem>
+              </Select>
+            </FormControl>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => void onSetRuntimeLogLevel(logLevelValue)}
+              disabled={busy || runtimeLogLevel === logLevelValue}
+            >
+              Apply Log Level
+            </Button>
+          </Stack>
           {sourceOpenStatus ? (
             <Typography variant="caption" color="text.secondary">
               {sourceOpenStatus}
@@ -205,6 +214,11 @@ export function StarterShell({
               {calibreStatus}
             </Typography>
           ) : null}
+          {pdfStatus ? (
+            <Typography variant="caption" color="text.secondary">
+              {pdfStatus}
+            </Typography>
+          ) : null}
 
           <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
             <TextField
@@ -212,6 +226,7 @@ export function StarterShell({
               size="small"
               label="Open Path (.epub/.pdf/.txt/.md/.markdown)"
               value={path}
+              inputProps={{ "data-testid": "starter-open-path-input" }}
               onChange={(event) => setPath(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
@@ -225,6 +240,7 @@ export function StarterShell({
               startIcon={<FolderOpenIcon />}
               onClick={() => void handleOpenPath()}
               disabled={busy}
+              data-testid="starter-open-path-button"
             >
               Open
             </Button>
@@ -366,7 +382,7 @@ export function StarterShell({
                     labelId="calibre-sort-label"
                     label="Sort"
                     value={calibreSort}
-                    onChange={(event) => setCalibreSort(event.target.value)}
+                    onChange={(event) => setCalibreSort(event.target.value as CalibreSort)}
                     disabled={busy || loadingCalibre}
                   >
                     <MenuItem value="title_asc">Title (A-Z)</MenuItem>
