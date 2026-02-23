@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 use tauri_plugin_log::{Target, TargetKind, log::LevelFilter};
 use tracing::{info, warn};
 
@@ -53,8 +53,10 @@ struct BootstrapConfig {
     default_lines_per_page: usize,
     default_tts_speed: f32,
     default_pause_after_sentence: f32,
+    key_toggle_play_pause: String,
     key_next_sentence: String,
     key_prev_sentence: String,
+    key_repeat_sentence: String,
     key_toggle_search: String,
     key_safe_quit: String,
     key_toggle_settings: String,
@@ -182,7 +184,9 @@ fn bridge_error(code: &str, message: impl Into<String>) -> BridgeError {
 }
 
 fn normalize_recent_limit(limit: Option<usize>) -> usize {
-    limit.unwrap_or(DEFAULT_RECENT_LIMIT).clamp(1, MAX_RECENT_LIMIT)
+    limit
+        .unwrap_or(DEFAULT_RECENT_LIMIT)
+        .clamp(1, MAX_RECENT_LIMIT)
 }
 
 fn is_supported_source(path: &Path) -> bool {
@@ -228,7 +232,10 @@ fn resolve_source_path(path: &str) -> Result<PathBuf, BridgeError> {
     candidate.canonicalize().map_err(|err| {
         bridge_error(
             "io_error",
-            format!("Failed to canonicalize source path {}: {err}", candidate.display()),
+            format!(
+                "Failed to canonicalize source path {}: {err}",
+                candidate.display()
+            ),
         )
     })
 }
@@ -251,6 +258,24 @@ fn map_calibre_book(book: calibre::CalibreBook) -> CalibreBookDto {
 fn persist_active_reader(state: &mut BackendState) {
     if let Some(reader) = &state.reader {
         session::persist_session_housekeeping(reader);
+    }
+}
+
+fn cleanup_for_shutdown(state: &mut BackendState) {
+    if let Some(reader) = state.reader.as_mut() {
+        reader.tts_stop();
+    }
+    persist_active_reader(state);
+    state.reader = None;
+    state.mode = UiMode::Starter;
+    state.active_source_path = None;
+    state.open_in_flight = false;
+}
+
+fn finalize_shutdown_from_mutex(state: &Mutex<BackendState>) {
+    match state.lock() {
+        Ok(mut guard) => cleanup_for_shutdown(&mut guard),
+        Err(_) => warn!("Skipping shutdown housekeeping: backend state lock poisoned"),
     }
 }
 
@@ -317,8 +342,12 @@ async fn open_resolved_source(
         .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
     guard.open_in_flight = false;
 
-    let reader_result = reader_result
-        .map_err(|err| bridge_error("task_join_error", format!("Failed to join load task: {err}")))?;
+    let reader_result = reader_result.map_err(|err| {
+        bridge_error(
+            "task_join_error",
+            format!("Failed to join load task: {err}"),
+        )
+    })?;
 
     match reader_result {
         Ok(mut reader) => {
@@ -378,7 +407,9 @@ async fn open_resolved_source(
 }
 
 #[tauri::command]
-fn session_get_bootstrap(state: State<'_, Mutex<BackendState>>) -> Result<BootstrapState, BridgeError> {
+fn session_get_bootstrap(
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<BootstrapState, BridgeError> {
     let guard = state
         .lock()
         .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
@@ -395,8 +426,10 @@ fn session_get_bootstrap(state: State<'_, Mutex<BackendState>>) -> Result<Bootst
             default_lines_per_page: guard.base_config.lines_per_page,
             default_tts_speed: guard.base_config.tts_speed,
             default_pause_after_sentence: guard.base_config.pause_after_sentence,
+            key_toggle_play_pause: guard.base_config.key_toggle_play_pause.clone(),
             key_next_sentence: guard.base_config.key_next_sentence.clone(),
             key_prev_sentence: guard.base_config.key_prev_sentence.clone(),
+            key_repeat_sentence: guard.base_config.key_repeat_sentence.clone(),
             key_toggle_search: guard.base_config.key_toggle_search.clone(),
             key_safe_quit: guard.base_config.key_safe_quit.clone(),
             key_toggle_settings: guard.base_config.key_toggle_settings.clone(),
@@ -421,12 +454,7 @@ fn session_return_to_starter(
     let mut guard = state
         .lock()
         .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-
-    persist_active_reader(&mut guard);
-    guard.reader = None;
-    guard.mode = UiMode::Starter;
-    guard.active_source_path = None;
-    guard.open_in_flight = false;
+    cleanup_for_shutdown(&mut guard);
     Ok(to_session_state(&guard))
 }
 
@@ -722,17 +750,160 @@ fn reader_search_prev(
 }
 
 #[tauri::command]
+fn reader_tts_play(
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<session::ReaderSnapshot, BridgeError> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+    let normalizer = guard.normalizer.clone();
+    let panels = guard.panels;
+    let reader = guard
+        .reader
+        .as_mut()
+        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
+    reader.tts_play(&normalizer);
+    Ok(reader.snapshot(panels, &normalizer))
+}
+
+#[tauri::command]
+fn reader_tts_pause(
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<session::ReaderSnapshot, BridgeError> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+    let normalizer = guard.normalizer.clone();
+    let panels = guard.panels;
+    let reader = guard
+        .reader
+        .as_mut()
+        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
+    reader.tts_pause();
+    Ok(reader.snapshot(panels, &normalizer))
+}
+
+#[tauri::command]
+fn reader_tts_toggle_play_pause(
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<session::ReaderSnapshot, BridgeError> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+    let normalizer = guard.normalizer.clone();
+    let panels = guard.panels;
+    let reader = guard
+        .reader
+        .as_mut()
+        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
+    reader.tts_toggle_play_pause(&normalizer);
+    Ok(reader.snapshot(panels, &normalizer))
+}
+
+#[tauri::command]
+fn reader_tts_play_from_page_start(
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<session::ReaderSnapshot, BridgeError> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+    let normalizer = guard.normalizer.clone();
+    let panels = guard.panels;
+    let reader = guard
+        .reader
+        .as_mut()
+        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
+    reader.tts_play_from_page_start(&normalizer);
+    Ok(reader.snapshot(panels, &normalizer))
+}
+
+#[tauri::command]
+fn reader_tts_play_from_highlight(
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<session::ReaderSnapshot, BridgeError> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+    let normalizer = guard.normalizer.clone();
+    let panels = guard.panels;
+    let reader = guard
+        .reader
+        .as_mut()
+        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
+    reader.tts_play_from_highlight(&normalizer);
+    Ok(reader.snapshot(panels, &normalizer))
+}
+
+#[tauri::command]
+fn reader_tts_seek_next(
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<session::ReaderSnapshot, BridgeError> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+    let normalizer = guard.normalizer.clone();
+    let panels = guard.panels;
+    let reader = guard
+        .reader
+        .as_mut()
+        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
+    reader.tts_seek_next(&normalizer);
+    Ok(reader.snapshot(panels, &normalizer))
+}
+
+#[tauri::command]
+fn reader_tts_seek_prev(
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<session::ReaderSnapshot, BridgeError> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+    let normalizer = guard.normalizer.clone();
+    let panels = guard.panels;
+    let reader = guard
+        .reader
+        .as_mut()
+        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
+    reader.tts_seek_prev(&normalizer);
+    Ok(reader.snapshot(panels, &normalizer))
+}
+
+#[tauri::command]
+fn reader_tts_repeat_sentence(
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<session::ReaderSnapshot, BridgeError> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+    let normalizer = guard.normalizer.clone();
+    let panels = guard.panels;
+    let reader = guard
+        .reader
+        .as_mut()
+        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
+    reader.tts_repeat_current_sentence(&normalizer);
+    Ok(reader.snapshot(panels, &normalizer))
+}
+
+#[tauri::command]
 fn reader_close_session(
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<SessionState, BridgeError> {
     let mut guard = state
         .lock()
         .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    persist_active_reader(&mut guard);
-    guard.reader = None;
-    guard.mode = UiMode::Starter;
-    guard.active_source_path = None;
+    cleanup_for_shutdown(&mut guard);
     Ok(to_session_state(&guard))
+}
+
+#[tauri::command]
+fn app_safe_quit(
+    app: tauri::AppHandle,
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<(), BridgeError> {
+    finalize_shutdown_from_mutex(state.inner());
+    app.exit(0);
+    Ok(())
 }
 
 #[tauri::command]
@@ -750,11 +921,7 @@ async fn calibre_load_books(
         (guard.calibre_config.clone(), request_id)
     };
 
-    info!(
-        request_id,
-        force_refresh,
-        "Starting calibre load request"
-    );
+    info!(request_id, force_refresh, "Starting calibre load request");
 
     let _ = app.emit(
         "calibre-load",
@@ -766,10 +933,18 @@ async fn calibre_load_books(
         },
     );
 
-    let books_result = tauri::async_runtime::spawn_blocking(move || calibre::load_books(&config, force_refresh))
-        .await
-        .map_err(|err| bridge_error("task_join_error", format!("Failed to join calibre task: {err}")))
-        .and_then(|result| result.map_err(|err| bridge_error("calibre_load_failed", err.to_string())));
+    let books_result =
+        tauri::async_runtime::spawn_blocking(move || calibre::load_books(&config, force_refresh))
+            .await
+            .map_err(|err| {
+                bridge_error(
+                    "task_join_error",
+                    format!("Failed to join calibre task: {err}"),
+                )
+            })
+            .and_then(|result| {
+                result.map_err(|err| bridge_error("calibre_load_failed", err.to_string()))
+            });
 
     let books = match books_result {
         Ok(books) => books,
@@ -832,7 +1007,9 @@ async fn calibre_open_book(
             .iter()
             .find(|book| book.id == book_id)
             .cloned()
-            .ok_or_else(|| bridge_error("not_found", format!("Unknown calibre book id={book_id}")))?;
+            .ok_or_else(|| {
+                bridge_error("not_found", format!("Unknown calibre book id={book_id}"))
+            })?;
         (book, guard.calibre_config.clone())
     };
 
@@ -840,7 +1017,12 @@ async fn calibre_open_book(
         calibre::materialize_book_path(&calibre_config, &book)
     })
     .await
-    .map_err(|err| bridge_error("task_join_error", format!("Failed to join calibre-open task: {err}")))?
+    .map_err(|err| {
+        bridge_error(
+            "task_join_error",
+            format!("Failed to join calibre-open task: {err}"),
+        )
+    })?
     .map_err(|err| bridge_error("calibre_open_failed", err.to_string()))?;
 
     open_resolved_source(&app, &state, path).await
@@ -856,6 +1038,24 @@ pub fn run() {
 
     info!("Starting ebup-viewer tauri bridge");
     let builder = tauri::Builder::default()
+        .setup(|app| {
+            let app_handle = app.handle().clone();
+            if let Err(err) = ctrlc::set_handler(move || {
+                info!("Received Ctrl+C; running safe shutdown housekeeping");
+                let state = app_handle.state::<Mutex<BackendState>>();
+                finalize_shutdown_from_mutex(state.inner());
+                app_handle.exit(130);
+            }) {
+                warn!("Failed to install Ctrl+C signal handler: {err}");
+            }
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                let state = window.app_handle().state::<Mutex<BackendState>>();
+                finalize_shutdown_from_mutex(state.inner());
+            }
+        })
         .manage(Mutex::new(BackendState::new()))
         .plugin(log_plugin)
         .invoke_handler(tauri::generate_handler![
@@ -881,7 +1081,16 @@ pub fn run() {
             reader_search_set_query,
             reader_search_next,
             reader_search_prev,
+            reader_tts_play,
+            reader_tts_pause,
+            reader_tts_toggle_play_pause,
+            reader_tts_play_from_page_start,
+            reader_tts_play_from_highlight,
+            reader_tts_seek_next,
+            reader_tts_seek_prev,
+            reader_tts_repeat_sentence,
             reader_close_session,
+            app_safe_quit,
             calibre_load_books,
             calibre_open_book
         ]);
@@ -921,8 +1130,10 @@ mod tests {
                 default_lines_per_page: 700,
                 default_tts_speed: 2.5,
                 default_pause_after_sentence: 0.06,
+                key_toggle_play_pause: "space".to_string(),
                 key_next_sentence: "f".to_string(),
                 key_prev_sentence: "s".to_string(),
+                key_repeat_sentence: "r".to_string(),
                 key_toggle_search: "ctrl+f".to_string(),
                 key_safe_quit: "q".to_string(),
                 key_toggle_settings: "ctrl+t".to_string(),
@@ -953,7 +1164,10 @@ mod tests {
         let json = serde_json::to_string(&state).expect("serialize session");
         let decoded: SessionState = serde_json::from_str(&json).expect("deserialize session");
         assert!(matches!(decoded.mode, UiMode::Reader));
-        assert_eq!(decoded.active_source_path.as_deref(), Some("/tmp/book.epub"));
+        assert_eq!(
+            decoded.active_source_path.as_deref(),
+            Some("/tmp/book.epub")
+        );
         assert!(decoded.panels.show_tts);
     }
 
@@ -966,7 +1180,10 @@ mod tests {
             message: None,
         };
         let source_json = serde_json::to_value(source).expect("serialize source event");
-        assert_eq!(source_json.get("request_id").and_then(|v| v.as_u64()), Some(42));
+        assert_eq!(
+            source_json.get("request_id").and_then(|v| v.as_u64()),
+            Some(42)
+        );
 
         let calibre = CalibreLoadEvent {
             request_id: 43,
@@ -975,7 +1192,13 @@ mod tests {
             message: None,
         };
         let calibre_json = serde_json::to_value(calibre).expect("serialize calibre event");
-        assert_eq!(calibre_json.get("request_id").and_then(|v| v.as_u64()), Some(43));
-        assert_eq!(calibre_json.get("count").and_then(|v| v.as_u64()), Some(123));
+        assert_eq!(
+            calibre_json.get("request_id").and_then(|v| v.as_u64()),
+            Some(43)
+        );
+        assert_eq!(
+            calibre_json.get("count").and_then(|v| v.as_u64()),
+            Some(123)
+        );
     }
 }

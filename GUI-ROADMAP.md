@@ -110,14 +110,14 @@
 
 **Phase 9: TTS Control And Highlight Fidelity**
 
-- [ ] P9-01 Port all playback commands: play/pause/toggle/play-from-page/play-from-highlight/seek/repeat.
+- [x] P9-01 Port all playback commands: play/pause/toggle/play-from-page/play-from-highlight/seek/repeat.
 - [ ] P9-02 Preserve pause-after-sentence semantics and speed/volume behavior.
 - [ ] P9-03 Preserve clicked sentence start logic with correct audio/display mapping.
 - [ ] P9-04 Keep mapping logic in Rust; move visual positioning to DOM measurements in UI.
 - [ ] P9-05 Replace heuristic scroll math with actual element anchoring where feasible.
 - [ ] P9-06 Port auto-scroll and auto-center toggles with exact visibility guarantees.
 - [ ] P9-07 Preserve cancellation semantics for close/quit during preparation.
-- [ ] P9-08 Emit and render 3-decimal TTS progress consistently.
+- [x] P9-08 Emit and render 3-decimal TTS progress consistently.
 
 **Phase 10: EPUB/PDF/Clipboard Ingestion Paths**
 
@@ -133,7 +133,7 @@
 - [x] P11-01 Preserve config schema and defaults (`conf/config.toml`, `conf/normalizer.toml`, `conf/calibre.toml`).
 - [x] P11-02 Preserve bookmark save/load semantics and resume fidelity.
 - [x] P11-03 Preserve recent-book indexing and thumbnail handling.
-- [ ] P11-04 Preserve safe quit behavior including Ctrl+C semantics.
+- [x] P11-04 Preserve safe quit behavior including Ctrl+C semantics.
 - [ ] P11-05 Preserve logging configuration and dynamic level updates.
 - [ ] P11-06 Add Tauri capability permissions for file access, logging, and subprocess usage required by quack-check.
 

@@ -44,6 +44,7 @@ interface AppStore {
   toast: ToastMessage | null;
   sourceOpenSubscribed: boolean;
   calibreSubscribed: boolean;
+  appSafeQuit: () => Promise<void>;
   bootstrap: () => Promise<void>;
   refreshRecents: () => Promise<void>;
   openSourcePath: (path: string) => Promise<void>;
@@ -63,6 +64,14 @@ interface AppStore {
   readerSearchSetQuery: (query: string) => Promise<void>;
   readerSearchNext: () => Promise<void>;
   readerSearchPrev: () => Promise<void>;
+  readerTtsPlay: () => Promise<void>;
+  readerTtsPause: () => Promise<void>;
+  readerTtsTogglePlayPause: () => Promise<void>;
+  readerTtsPlayFromPageStart: () => Promise<void>;
+  readerTtsPlayFromHighlight: () => Promise<void>;
+  readerTtsSeekNext: () => Promise<void>;
+  readerTtsSeekPrev: () => Promise<void>;
+  readerTtsRepeatSentence: () => Promise<void>;
   toggleSettingsPanel: () => Promise<void>;
   toggleStatsPanel: () => Promise<void>;
   toggleTtsPanel: () => Promise<void>;
@@ -190,6 +199,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toast: null,
   sourceOpenSubscribed: false,
   calibreSubscribed: false,
+
+  appSafeQuit: async () => {
+    try {
+      await backendApi.appSafeQuit();
+      const session = get().session;
+      if (session) {
+        set({
+          session: { ...session, mode: "starter", active_source_path: null, open_in_flight: false },
+          reader: null
+        });
+      } else {
+        set({ reader: null });
+      }
+    } catch (error) {
+      set({ error: toBridgeError(error).message });
+    }
+  },
 
   bootstrap: async () => {
     if (get().loadingBootstrap) {
@@ -492,6 +518,78 @@ export const useAppStore = create<AppStore>((set, get) => ({
   readerSearchPrev: async () => {
     try {
       const reader = await backendApi.readerSearchPrev();
+      set({ reader });
+    } catch (error) {
+      set({ error: toBridgeError(error).message });
+    }
+  },
+
+  readerTtsPlay: async () => {
+    try {
+      const reader = await backendApi.readerTtsPlay();
+      set({ reader });
+    } catch (error) {
+      set({ error: toBridgeError(error).message });
+    }
+  },
+
+  readerTtsPause: async () => {
+    try {
+      const reader = await backendApi.readerTtsPause();
+      set({ reader });
+    } catch (error) {
+      set({ error: toBridgeError(error).message });
+    }
+  },
+
+  readerTtsTogglePlayPause: async () => {
+    try {
+      const reader = await backendApi.readerTtsTogglePlayPause();
+      set({ reader });
+    } catch (error) {
+      set({ error: toBridgeError(error).message });
+    }
+  },
+
+  readerTtsPlayFromPageStart: async () => {
+    try {
+      const reader = await backendApi.readerTtsPlayFromPageStart();
+      set({ reader });
+    } catch (error) {
+      set({ error: toBridgeError(error).message });
+    }
+  },
+
+  readerTtsPlayFromHighlight: async () => {
+    try {
+      const reader = await backendApi.readerTtsPlayFromHighlight();
+      set({ reader });
+    } catch (error) {
+      set({ error: toBridgeError(error).message });
+    }
+  },
+
+  readerTtsSeekNext: async () => {
+    try {
+      const reader = await backendApi.readerTtsSeekNext();
+      set({ reader });
+    } catch (error) {
+      set({ error: toBridgeError(error).message });
+    }
+  },
+
+  readerTtsSeekPrev: async () => {
+    try {
+      const reader = await backendApi.readerTtsSeekPrev();
+      set({ reader });
+    } catch (error) {
+      set({ error: toBridgeError(error).message });
+    }
+  },
+
+  readerTtsRepeatSentence: async () => {
+    try {
+      const reader = await backendApi.readerTtsRepeatSentence();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });

@@ -1431,6 +1431,7 @@ name = "ebup-viewer-tauri"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ctrlc",
  "epub",
  "html2text",
  "image 0.25.9",

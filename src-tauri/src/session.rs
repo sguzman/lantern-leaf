@@ -12,6 +12,15 @@ pub struct PanelState {
     pub show_tts: bool,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TtsPlaybackState {
+    #[default]
+    Idle,
+    Playing,
+    Paused,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ReaderSettingsView {
     pub theme: config::ThemeMode,
@@ -27,6 +36,16 @@ pub struct ReaderSettingsView {
     pub center_spoken_sentence: bool,
     pub tts_speed: f32,
     pub tts_volume: f32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReaderTtsView {
+    pub state: TtsPlaybackState,
+    pub current_sentence_idx: Option<usize>,
+    pub sentence_count: usize,
+    pub can_seek_prev: bool,
+    pub can_seek_next: bool,
+    pub progress_pct: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -76,6 +95,7 @@ pub struct ReaderSnapshot {
     pub search_matches: Vec<usize>,
     pub selected_search_match: Option<usize>,
     pub settings: ReaderSettingsView,
+    pub tts: ReaderTtsView,
     pub stats: ReaderStats,
     pub panels: PanelState,
 }
@@ -97,6 +117,7 @@ pub struct ReaderSession {
     search_query: String,
     search_matches: Vec<usize>,
     selected_search_match: Option<usize>,
+    tts_state: TtsPlaybackState,
     current_plan_page: Option<usize>,
     current_plan: Option<normalizer::PageNormalization>,
 }
@@ -120,9 +141,10 @@ impl ReaderSession {
         config.font_size = config
             .font_size
             .clamp(pagination::MIN_FONT_SIZE, pagination::MAX_FONT_SIZE);
-        config.lines_per_page = config
-            .lines_per_page
-            .clamp(pagination::MIN_LINES_PER_PAGE, pagination::MAX_LINES_PER_PAGE);
+        config.lines_per_page = config.lines_per_page.clamp(
+            pagination::MIN_LINES_PER_PAGE,
+            pagination::MAX_LINES_PER_PAGE,
+        );
 
         let mut session = Self {
             source_path,
@@ -140,6 +162,7 @@ impl ReaderSession {
             search_query: String::new(),
             search_matches: Vec::new(),
             selected_search_match: None,
+            tts_state: TtsPlaybackState::Idle,
             current_plan_page: None,
             current_plan: None,
         };
@@ -187,6 +210,7 @@ impl ReaderSession {
         let sentences = self.current_sentences(normalizer);
         let highlighted_sentence_idx = self.current_highlight_idx();
         let stats = self.stats(normalizer);
+        let tts = self.tts_view(normalizer, stats.tts_progress_pct);
         ReaderSnapshot {
             source_path: self.source_path_str(),
             source_name: self.source_name.clone(),
@@ -204,6 +228,7 @@ impl ReaderSession {
             search_matches: self.search_matches.clone(),
             selected_search_match: self.selected_search_match,
             settings: self.settings_view(),
+            tts,
             stats,
             panels,
         }
@@ -225,7 +250,10 @@ impl ReaderSession {
             }
         }
         if let Some(lines) = patch.lines_per_page {
-            let clamped = lines.clamp(pagination::MIN_LINES_PER_PAGE, pagination::MAX_LINES_PER_PAGE);
+            let clamped = lines.clamp(
+                pagination::MIN_LINES_PER_PAGE,
+                pagination::MAX_LINES_PER_PAGE,
+            );
             if clamped != self.config.lines_per_page {
                 self.config.lines_per_page = clamped;
                 repaginate = true;
@@ -369,7 +397,10 @@ impl ReaderSession {
         if count == 0 {
             return;
         }
-        let current = self.current_highlight_idx().unwrap_or(0).min(count.saturating_sub(1));
+        let current = self
+            .current_highlight_idx()
+            .unwrap_or(0)
+            .min(count.saturating_sub(1));
         let next = (current + 1).min(count.saturating_sub(1));
         self.sentence_click(next, normalizer);
     }
@@ -379,7 +410,10 @@ impl ReaderSession {
         if count == 0 {
             return;
         }
-        let current = self.current_highlight_idx().unwrap_or(0).min(count.saturating_sub(1));
+        let current = self
+            .current_highlight_idx()
+            .unwrap_or(0)
+            .min(count.saturating_sub(1));
         let prev = current.saturating_sub(1);
         self.sentence_click(prev, normalizer);
     }
@@ -393,6 +427,74 @@ impl ReaderSession {
             self.highlighted_display_idx = self.map_audio_to_display_idx(normalizer, audio_idx);
         }
         self.update_search_matches(normalizer);
+    }
+
+    pub fn tts_play(&mut self, normalizer: &normalizer::TextNormalizer) {
+        let count = self.current_sentences(normalizer).len();
+        if count == 0 {
+            self.tts_state = TtsPlaybackState::Idle;
+            return;
+        }
+        if self.current_highlight_idx().is_none() {
+            self.sentence_click(0, normalizer);
+        }
+        self.tts_state = TtsPlaybackState::Playing;
+    }
+
+    pub fn tts_pause(&mut self) {
+        if self.tts_state == TtsPlaybackState::Playing {
+            self.tts_state = TtsPlaybackState::Paused;
+        }
+    }
+
+    pub fn tts_toggle_play_pause(&mut self, normalizer: &normalizer::TextNormalizer) {
+        if self.tts_state == TtsPlaybackState::Playing {
+            self.tts_pause();
+        } else {
+            self.tts_play(normalizer);
+        }
+    }
+
+    pub fn tts_play_from_page_start(&mut self, normalizer: &normalizer::TextNormalizer) {
+        let count = self.current_sentences(normalizer).len();
+        if count == 0 {
+            self.tts_state = TtsPlaybackState::Idle;
+            return;
+        }
+        self.sentence_click(0, normalizer);
+        self.tts_state = TtsPlaybackState::Playing;
+    }
+
+    pub fn tts_play_from_highlight(&mut self, normalizer: &normalizer::TextNormalizer) {
+        if self.current_highlight_idx().is_none() {
+            self.tts_play_from_page_start(normalizer);
+            return;
+        }
+        self.tts_state = TtsPlaybackState::Playing;
+    }
+
+    pub fn tts_seek_next(&mut self, normalizer: &normalizer::TextNormalizer) {
+        if self.move_highlight_relative(1, normalizer) {
+            return;
+        }
+        // Keep playback paused/idle at the end; don't auto-reset to start.
+        if self.tts_state == TtsPlaybackState::Playing {
+            self.tts_state = TtsPlaybackState::Paused;
+        }
+    }
+
+    pub fn tts_seek_prev(&mut self, normalizer: &normalizer::TextNormalizer) {
+        let _ = self.move_highlight_relative(-1, normalizer);
+    }
+
+    pub fn tts_repeat_current_sentence(&mut self, normalizer: &normalizer::TextNormalizer) {
+        if self.current_highlight_idx().is_none() {
+            self.tts_play_from_page_start(normalizer);
+        }
+    }
+
+    pub fn tts_stop(&mut self) {
+        self.tts_state = TtsPlaybackState::Idle;
     }
 
     pub fn to_bookmark(&self) -> crate::cache::Bookmark {
@@ -452,7 +554,9 @@ impl ReaderSession {
 
     fn global_idx_for_bookmark(&self, bookmark: &crate::cache::Bookmark) -> Option<usize> {
         let sentence_idx = bookmark.sentence_idx?;
-        let page = bookmark.page.min(self.page_sentence_counts.len().saturating_sub(1));
+        let page = bookmark
+            .page
+            .min(self.page_sentence_counts.len().saturating_sub(1));
         let base: usize = self.page_sentence_counts.iter().take(page).sum();
         Some(base + sentence_idx)
     }
@@ -499,11 +603,13 @@ impl ReaderSession {
             self.current_plan = Some(plan);
         }
 
-        self.current_plan.clone().unwrap_or(normalizer::PageNormalization {
-            audio_sentences: Vec::new(),
-            display_to_audio: Vec::new(),
-            audio_to_display: Vec::new(),
-        })
+        self.current_plan
+            .clone()
+            .unwrap_or(normalizer::PageNormalization {
+                audio_sentences: Vec::new(),
+                display_to_audio: Vec::new(),
+                audio_to_display: Vec::new(),
+            })
     }
 
     fn map_display_to_audio_idx(
@@ -557,8 +663,122 @@ impl ReaderSession {
     }
 
     fn global_display_idx(&self) -> Option<usize> {
-        let page_base: usize = self.page_sentence_counts.iter().take(self.current_page).sum();
+        let page_base: usize = self
+            .page_sentence_counts
+            .iter()
+            .take(self.current_page)
+            .sum();
         self.highlighted_display_idx.map(|idx| page_base + idx)
+    }
+
+    fn tts_view(
+        &mut self,
+        normalizer: &normalizer::TextNormalizer,
+        progress_pct: f64,
+    ) -> ReaderTtsView {
+        let sentence_count = self.current_sentences(normalizer).len();
+        let current_sentence_idx = self.current_highlight_idx();
+        let can_seek_prev = if let Some(idx) = current_sentence_idx {
+            idx > 0 || self.has_sentence_before_current_page()
+        } else {
+            self.has_sentence_before_current_page()
+        };
+        let can_seek_next = if let Some(idx) = current_sentence_idx {
+            idx + 1 < sentence_count || self.has_sentence_after_current_page()
+        } else {
+            sentence_count > 0 || self.has_sentence_after_current_page()
+        };
+        ReaderTtsView {
+            state: self.tts_state,
+            current_sentence_idx,
+            sentence_count,
+            can_seek_prev,
+            can_seek_next,
+            progress_pct: (progress_pct * 1000.0).round() / 1000.0,
+        }
+    }
+
+    fn has_sentence_before_current_page(&self) -> bool {
+        self.page_sentence_counts
+            .iter()
+            .take(self.current_page)
+            .any(|count| *count > 0)
+    }
+
+    fn has_sentence_after_current_page(&self) -> bool {
+        self.page_sentence_counts
+            .iter()
+            .skip(self.current_page.saturating_add(1))
+            .any(|count| *count > 0)
+    }
+
+    fn move_highlight_relative(
+        &mut self,
+        delta: isize,
+        normalizer: &normalizer::TextNormalizer,
+    ) -> bool {
+        if delta == 0 {
+            return self.current_highlight_idx().is_some();
+        }
+
+        let count = self.current_sentences(normalizer).len();
+        if count == 0 {
+            if delta > 0 {
+                return self.move_to_adjacent_page_with_sentences(1, normalizer);
+            }
+            return self.move_to_adjacent_page_with_sentences(-1, normalizer);
+        }
+
+        let current = self
+            .current_highlight_idx()
+            .unwrap_or(0)
+            .min(count.saturating_sub(1));
+        if delta > 0 {
+            let next = current.saturating_add(delta as usize);
+            if next < count {
+                self.sentence_click(next, normalizer);
+                return true;
+            }
+            if self.move_to_adjacent_page_with_sentences(1, normalizer) {
+                self.sentence_click(0, normalizer);
+                return true;
+            }
+            return false;
+        }
+
+        let back = delta.unsigned_abs();
+        if current >= back {
+            self.sentence_click(current - back, normalizer);
+            return true;
+        }
+        if self.move_to_adjacent_page_with_sentences(-1, normalizer) {
+            let new_count = self.current_sentences(normalizer).len();
+            if new_count > 0 {
+                self.sentence_click(new_count - 1, normalizer);
+                return true;
+            }
+        }
+        false
+    }
+
+    fn move_to_adjacent_page_with_sentences(
+        &mut self,
+        direction: isize,
+        normalizer: &normalizer::TextNormalizer,
+    ) -> bool {
+        if direction == 0 || self.pages.is_empty() {
+            return false;
+        }
+        let mut page = self.current_page as isize + direction;
+        while page >= 0 && (page as usize) < self.pages.len() {
+            let idx = page as usize;
+            if self.page_sentence_counts.get(idx).copied().unwrap_or(0) > 0 {
+                self.set_page(idx, normalizer);
+                return true;
+            }
+            page += direction;
+        }
+        false
     }
 
     fn update_search_matches(&mut self, normalizer: &normalizer::TextNormalizer) {
@@ -646,8 +866,11 @@ impl ReaderSession {
         let words_up_to_current_position =
             words_before_page + ((page_word_count as f64) * progress_fraction).round() as usize;
         let sentences_up_to_current_position = sentences_before_page
-            + (((page_sentence_count as f64) * progress_fraction).round() as usize)
-                .min(page_sentence_count.max(sentence_progress_count).min(sentence_progress_total.max(1)));
+            + (((page_sentence_count as f64) * progress_fraction).round() as usize).min(
+                page_sentence_count
+                    .max(sentence_progress_count)
+                    .min(sentence_progress_total.max(1)),
+            );
 
         let effective_wpm = (BASE_WPM * self.config.tts_speed as f64).max(40.0);
         let page_total_secs = (page_word_count as f64 / effective_wpm) * 60.0;
@@ -709,4 +932,94 @@ pub fn persist_session_housekeeping(session: &ReaderSession) {
     let bookmark = session.to_bookmark();
     crate::cache::save_bookmark(Path::new(&session.source_path), &bookmark);
     crate::cache::save_epub_config(Path::new(&session.source_path), &session.config);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_test_session(page_sentences: &[&[&str]]) -> ReaderSession {
+        let pages: Vec<String> = page_sentences
+            .iter()
+            .map(|sentences| sentences.join(" "))
+            .collect();
+        let raw_page_sentences: Vec<Vec<String>> = page_sentences
+            .iter()
+            .map(|sentences| {
+                sentences
+                    .iter()
+                    .map(|sentence| sentence.to_string())
+                    .collect()
+            })
+            .collect();
+        let page_word_counts: Vec<usize> = pages
+            .iter()
+            .map(|page| page.split_whitespace().count())
+            .collect();
+        let page_sentence_counts: Vec<usize> = raw_page_sentences.iter().map(Vec::len).collect();
+
+        ReaderSession {
+            source_path: PathBuf::from("/tmp/test.epub"),
+            source_name: "test.epub".to_string(),
+            full_text: pages.join("\n\n"),
+            config: config::AppConfig::default(),
+            pages,
+            raw_page_sentences,
+            page_word_counts,
+            page_sentence_counts,
+            current_page: 0,
+            highlighted_display_idx: Some(0),
+            highlighted_audio_idx: None,
+            text_only_mode: false,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            selected_search_match: None,
+            tts_state: TtsPlaybackState::Paused,
+            current_plan_page: None,
+            current_plan: None,
+        }
+    }
+
+    #[test]
+    fn paused_state_is_preserved_when_changing_pages() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = build_test_session(&[&["A.", "B."], &["C.", "D."]]);
+        session.current_page = 0;
+        session.highlighted_display_idx = Some(1);
+        session.tts_state = TtsPlaybackState::Paused;
+
+        session.next_page(&normalizer);
+
+        assert_eq!(session.current_page, 1);
+        assert_eq!(session.current_highlight_idx(), Some(0));
+        assert_eq!(session.tts_state, TtsPlaybackState::Paused);
+    }
+
+    #[test]
+    fn paused_state_is_preserved_when_seeking_next_sentence() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = build_test_session(&[&["A.", "B.", "C."]]);
+        session.highlighted_display_idx = Some(0);
+        session.tts_state = TtsPlaybackState::Paused;
+
+        session.tts_seek_next(&normalizer);
+
+        assert_eq!(session.current_highlight_idx(), Some(1));
+        assert_eq!(session.tts_state, TtsPlaybackState::Paused);
+    }
+
+    #[test]
+    fn paused_state_is_preserved_when_seeking_prev_across_page_boundary() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = build_test_session(&[&["A."], &["B."]]);
+        session.current_page = 1;
+        session.highlighted_display_idx = Some(0);
+        session.tts_state = TtsPlaybackState::Paused;
+
+        session.tts_seek_prev(&normalizer);
+
+        assert_eq!(session.current_page, 0);
+        assert_eq!(session.current_highlight_idx(), Some(0));
+        assert_eq!(session.tts_state, TtsPlaybackState::Paused);
+    }
 }

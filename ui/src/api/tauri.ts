@@ -115,6 +115,14 @@ const mockReaderSnapshot = (): ReaderSnapshot => ({
     words_read_up_to_current_position: 6,
     sentences_read_up_to_current_position: 1
   },
+  tts: {
+    state: "idle",
+    current_sentence_idx: 0,
+    sentence_count: 1,
+    can_seek_prev: false,
+    can_seek_next: false,
+    progress_pct: 100
+  },
   panels: {
     show_settings: true,
     show_stats: false,
@@ -136,8 +144,10 @@ const mockState: MockBackendState = {
       default_lines_per_page: 700,
       default_tts_speed: 2.5,
       default_pause_after_sentence: 0.06,
+      key_toggle_play_pause: "space",
       key_next_sentence: "f",
       key_prev_sentence: "s",
+      key_repeat_sentence: "r",
       key_toggle_search: "ctrl+f",
       key_safe_quit: "q",
       key_toggle_settings: "ctrl+t",
@@ -203,6 +213,10 @@ async function mockSessionReturnToStarter(): Promise<SessionState> {
   return structuredClone(mockState.session);
 }
 
+async function mockAppSafeQuit(): Promise<void> {
+  await mockSessionReturnToStarter();
+}
+
 async function mockRecentList(limit?: number): Promise<RecentBook[]> {
   return structuredClone(mockState.recents.slice(0, normalizeRecentLimit(limit)));
 }
@@ -244,10 +258,12 @@ async function mockReaderNextSentence(): Promise<ReaderSnapshot> {
   const count = reader.sentences.length;
   if (count === 0) {
     reader.highlighted_sentence_idx = null;
+    reader.tts.current_sentence_idx = null;
     return structuredClone(reader);
   }
   const current = reader.highlighted_sentence_idx ?? 0;
   reader.highlighted_sentence_idx = Math.min(count - 1, current + 1);
+  reader.tts.current_sentence_idx = reader.highlighted_sentence_idx;
   return structuredClone(reader);
 }
 
@@ -256,10 +272,75 @@ async function mockReaderPrevSentence(): Promise<ReaderSnapshot> {
   const count = reader.sentences.length;
   if (count === 0) {
     reader.highlighted_sentence_idx = null;
+    reader.tts.current_sentence_idx = null;
     return structuredClone(reader);
   }
   const current = reader.highlighted_sentence_idx ?? 0;
   reader.highlighted_sentence_idx = Math.max(0, current - 1);
+  reader.tts.current_sentence_idx = reader.highlighted_sentence_idx;
+  return structuredClone(reader);
+}
+
+async function mockReaderTtsPlay(): Promise<ReaderSnapshot> {
+  const reader = ensureMockReader();
+  if (reader.highlighted_sentence_idx === null) {
+    reader.highlighted_sentence_idx = 0;
+  }
+  reader.tts.current_sentence_idx = reader.highlighted_sentence_idx;
+  reader.tts.state = "playing";
+  return structuredClone(reader);
+}
+
+async function mockReaderTtsPause(): Promise<ReaderSnapshot> {
+  const reader = ensureMockReader();
+  if (reader.tts.state === "playing") {
+    reader.tts.state = "paused";
+  }
+  return structuredClone(reader);
+}
+
+async function mockReaderTtsTogglePlayPause(): Promise<ReaderSnapshot> {
+  const reader = ensureMockReader();
+  if (reader.tts.state === "playing") {
+    reader.tts.state = "paused";
+  } else {
+    reader.tts.state = "playing";
+  }
+  return structuredClone(reader);
+}
+
+async function mockReaderTtsPlayFromPageStart(): Promise<ReaderSnapshot> {
+  const reader = ensureMockReader();
+  reader.highlighted_sentence_idx = 0;
+  reader.tts.current_sentence_idx = 0;
+  reader.tts.state = "playing";
+  return structuredClone(reader);
+}
+
+async function mockReaderTtsPlayFromHighlight(): Promise<ReaderSnapshot> {
+  const reader = ensureMockReader();
+  if (reader.highlighted_sentence_idx === null) {
+    reader.highlighted_sentence_idx = 0;
+  }
+  reader.tts.current_sentence_idx = reader.highlighted_sentence_idx;
+  reader.tts.state = "playing";
+  return structuredClone(reader);
+}
+
+async function mockReaderTtsSeekNext(): Promise<ReaderSnapshot> {
+  return mockReaderNextSentence();
+}
+
+async function mockReaderTtsSeekPrev(): Promise<ReaderSnapshot> {
+  return mockReaderPrevSentence();
+}
+
+async function mockReaderTtsRepeatSentence(): Promise<ReaderSnapshot> {
+  const reader = ensureMockReader();
+  if (reader.highlighted_sentence_idx === null) {
+    reader.highlighted_sentence_idx = 0;
+  }
+  reader.tts.current_sentence_idx = reader.highlighted_sentence_idx;
   return structuredClone(reader);
 }
 
@@ -317,6 +398,7 @@ async function mockOnCalibreLoad(handler: (event: CalibreLoadEvent) => void): Pr
 }
 
 export interface BackendApi {
+  appSafeQuit: () => Promise<void>;
   sessionGetBootstrap: () => Promise<BootstrapState>;
   sessionGetState: () => Promise<SessionState>;
   sessionReturnToStarter: () => Promise<SessionState>;
@@ -339,6 +421,14 @@ export interface BackendApi {
   readerSearchSetQuery: (query: string) => Promise<ReaderSnapshot>;
   readerSearchNext: () => Promise<ReaderSnapshot>;
   readerSearchPrev: () => Promise<ReaderSnapshot>;
+  readerTtsPlay: () => Promise<ReaderSnapshot>;
+  readerTtsPause: () => Promise<ReaderSnapshot>;
+  readerTtsTogglePlayPause: () => Promise<ReaderSnapshot>;
+  readerTtsPlayFromPageStart: () => Promise<ReaderSnapshot>;
+  readerTtsPlayFromHighlight: () => Promise<ReaderSnapshot>;
+  readerTtsSeekNext: () => Promise<ReaderSnapshot>;
+  readerTtsSeekPrev: () => Promise<ReaderSnapshot>;
+  readerTtsRepeatSentence: () => Promise<ReaderSnapshot>;
   readerCloseSession: () => Promise<SessionState>;
   calibreLoadBooks: (forceRefresh?: boolean) => Promise<CalibreBook[]>;
   calibreOpenBook: (bookId: number) => Promise<OpenSourceResult>;
@@ -348,6 +438,7 @@ export interface BackendApi {
 
 function createTauriBackendApi(): BackendApi {
   return {
+    appSafeQuit: () => invokeCommand<void>("app_safe_quit"),
     sessionGetBootstrap: () => invokeCommand<BootstrapState>("session_get_bootstrap"),
     sessionGetState: () => invokeCommand<SessionState>("session_get_state"),
     sessionReturnToStarter: () => invokeCommand<SessionState>("session_return_to_starter"),
@@ -374,6 +465,14 @@ function createTauriBackendApi(): BackendApi {
       invokeCommand<ReaderSnapshot>("reader_search_set_query", { query }),
     readerSearchNext: () => invokeCommand<ReaderSnapshot>("reader_search_next"),
     readerSearchPrev: () => invokeCommand<ReaderSnapshot>("reader_search_prev"),
+    readerTtsPlay: () => invokeCommand<ReaderSnapshot>("reader_tts_play"),
+    readerTtsPause: () => invokeCommand<ReaderSnapshot>("reader_tts_pause"),
+    readerTtsTogglePlayPause: () => invokeCommand<ReaderSnapshot>("reader_tts_toggle_play_pause"),
+    readerTtsPlayFromPageStart: () => invokeCommand<ReaderSnapshot>("reader_tts_play_from_page_start"),
+    readerTtsPlayFromHighlight: () => invokeCommand<ReaderSnapshot>("reader_tts_play_from_highlight"),
+    readerTtsSeekNext: () => invokeCommand<ReaderSnapshot>("reader_tts_seek_next"),
+    readerTtsSeekPrev: () => invokeCommand<ReaderSnapshot>("reader_tts_seek_prev"),
+    readerTtsRepeatSentence: () => invokeCommand<ReaderSnapshot>("reader_tts_repeat_sentence"),
     readerCloseSession: () => invokeCommand<SessionState>("reader_close_session"),
     calibreLoadBooks: (forceRefresh) =>
       invokeCommand<CalibreBook[]>("calibre_load_books", { forceRefresh }),
@@ -389,6 +488,7 @@ function createTauriBackendApi(): BackendApi {
 
 function createMockBackendApi(): BackendApi {
   return {
+    appSafeQuit: mockAppSafeQuit,
     sessionGetBootstrap: mockSessionGetBootstrap,
     sessionGetState: mockSessionGetState,
     sessionReturnToStarter: mockSessionReturnToStarter,
@@ -411,6 +511,14 @@ function createMockBackendApi(): BackendApi {
     readerSearchSetQuery: mockReaderGetSnapshot,
     readerSearchNext: mockReaderGetSnapshot,
     readerSearchPrev: mockReaderGetSnapshot,
+    readerTtsPlay: mockReaderTtsPlay,
+    readerTtsPause: mockReaderTtsPause,
+    readerTtsTogglePlayPause: mockReaderTtsTogglePlayPause,
+    readerTtsPlayFromPageStart: mockReaderTtsPlayFromPageStart,
+    readerTtsPlayFromHighlight: mockReaderTtsPlayFromHighlight,
+    readerTtsSeekNext: mockReaderTtsSeekNext,
+    readerTtsSeekPrev: mockReaderTtsSeekPrev,
+    readerTtsRepeatSentence: mockReaderTtsRepeatSentence,
     readerCloseSession: mockSessionReturnToStarter,
     calibreLoadBooks: mockCalibreLoadBooks,
     calibreOpenBook: mockCalibreOpenBook,

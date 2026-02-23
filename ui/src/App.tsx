@@ -102,6 +102,7 @@ export default function App() {
     clearError,
     toast,
     dismissToast,
+    appSafeQuit,
     bootstrapState,
     session,
     reader,
@@ -120,6 +121,14 @@ export default function App() {
     readerSentenceClick,
     readerNextSentence,
     readerPrevSentence,
+    readerTtsPlay,
+    readerTtsPause,
+    readerTtsTogglePlayPause,
+    readerTtsPlayFromPageStart,
+    readerTtsPlayFromHighlight,
+    readerTtsSeekNext,
+    readerTtsSeekPrev,
+    readerTtsRepeatSentence,
     readerToggleTextOnly,
     readerSearchSetQuery,
     readerSearchNext,
@@ -183,7 +192,7 @@ export default function App() {
   }, [activeHighlight, activeThemeMode]);
 
   useEffect(() => {
-    if (!bootstrapState || !session || session.mode !== "reader") {
+    if (!bootstrapState) {
       return;
     }
 
@@ -192,6 +201,16 @@ export default function App() {
       const typingInInput =
         target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable;
       if (typingInInput) {
+        return;
+      }
+
+      if (matchesShortcut(event, bootstrapState.config.key_safe_quit)) {
+        event.preventDefault();
+        void appSafeQuit();
+        return;
+      }
+
+      if (!session || session.mode !== "reader") {
         return;
       }
 
@@ -210,14 +229,24 @@ export default function App() {
         void toggleTtsPanel();
         return;
       }
+      if (matchesShortcut(event, bootstrapState.config.key_toggle_play_pause)) {
+        event.preventDefault();
+        void readerTtsTogglePlayPause();
+        return;
+      }
       if (matchesShortcut(event, bootstrapState.config.key_next_sentence)) {
         event.preventDefault();
-        void readerNextSentence();
+        void readerTtsSeekNext();
         return;
       }
       if (matchesShortcut(event, bootstrapState.config.key_prev_sentence)) {
         event.preventDefault();
-        void readerPrevSentence();
+        void readerTtsSeekPrev();
+        return;
+      }
+      if (matchesShortcut(event, bootstrapState.config.key_repeat_sentence)) {
+        event.preventDefault();
+        void readerTtsRepeatSentence();
         return;
       }
       if (matchesShortcut(event, bootstrapState.config.key_toggle_search)) {
@@ -227,11 +256,6 @@ export default function App() {
         );
         searchInput?.focus();
         searchInput?.select();
-        return;
-      }
-      if (matchesShortcut(event, bootstrapState.config.key_safe_quit)) {
-        event.preventDefault();
-        void closeReaderSession();
       }
     };
 
@@ -239,10 +263,12 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     bootstrapState,
+    appSafeQuit,
     session,
-    closeReaderSession,
-    readerNextSentence,
-    readerPrevSentence,
+    readerTtsTogglePlayPause,
+    readerTtsSeekNext,
+    readerTtsSeekPrev,
+    readerTtsRepeatSentence,
     toggleSettingsPanel,
     toggleStatsPanel,
     toggleTtsPanel
@@ -280,6 +306,14 @@ export default function App() {
                 onToggleSettingsPanel={toggleSettingsPanel}
                 onToggleStatsPanel={toggleStatsPanel}
                 onToggleTtsPanel={toggleTtsPanel}
+                onTtsPlay={readerTtsPlay}
+                onTtsPause={readerTtsPause}
+                onTtsTogglePlayPause={readerTtsTogglePlayPause}
+                onTtsPlayFromPageStart={readerTtsPlayFromPageStart}
+                onTtsPlayFromHighlight={readerTtsPlayFromHighlight}
+                onTtsSeekNext={readerTtsSeekNext}
+                onTtsSeekPrev={readerTtsSeekPrev}
+                onTtsRepeatSentence={readerTtsRepeatSentence}
                 onApplySettings={readerApplySettings}
               />
             ) : (

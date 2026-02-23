@@ -35,6 +35,14 @@ interface ReaderShellProps {
   onToggleSettingsPanel: () => Promise<void>;
   onToggleStatsPanel: () => Promise<void>;
   onToggleTtsPanel: () => Promise<void>;
+  onTtsPlay: () => Promise<void>;
+  onTtsPause: () => Promise<void>;
+  onTtsTogglePlayPause: () => Promise<void>;
+  onTtsPlayFromPageStart: () => Promise<void>;
+  onTtsPlayFromHighlight: () => Promise<void>;
+  onTtsSeekNext: () => Promise<void>;
+  onTtsSeekPrev: () => Promise<void>;
+  onTtsRepeatSentence: () => Promise<void>;
   onApplySettings: (patch: ReaderSettingsPatch) => Promise<void>;
 }
 
@@ -179,6 +187,14 @@ export function ReaderShell({
   onToggleSettingsPanel,
   onToggleStatsPanel,
   onToggleTtsPanel,
+  onTtsPlay,
+  onTtsPause,
+  onTtsTogglePlayPause,
+  onTtsPlayFromPageStart,
+  onTtsPlayFromHighlight,
+  onTtsSeekNext,
+  onTtsSeekPrev,
+  onTtsRepeatSentence,
   onApplySettings
 }: ReaderShellProps) {
   const [pageInput, setPageInput] = useState(String(reader.current_page + 1));
@@ -256,6 +272,8 @@ export function ReaderShell({
   const showSettingsButton = topBarWidth >= 1090;
   const showStatsButton = topBarWidth >= 1200;
   const showTtsButton = topBarWidth >= 1310;
+  const playbackLabel = reader.tts.state === "playing" ? "Pause" : "Play";
+  const hasHighlightSentence = reader.tts.current_sentence_idx !== null;
 
   return (
     <Card className="w-full max-w-[1700px] rounded-3xl border border-slate-200 shadow-sm">
@@ -570,6 +588,67 @@ export function ReaderShell({
 
                   {reader.panels.show_tts ? (
                     <Stack spacing={1.5}>
+                      <Typography variant="caption" fontWeight={700}>
+                        State: {reader.tts.state} | Sentence:{" "}
+                        {reader.tts.current_sentence_idx !== null
+                          ? `${reader.tts.current_sentence_idx + 1}/${Math.max(1, reader.tts.sentence_count)}`
+                          : `0/${Math.max(1, reader.tts.sentence_count)}`}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Progress: {reader.tts.progress_pct.toFixed(3)}%
+                      </Typography>
+                      <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
+                        <Button variant="contained" size="small" onClick={() => void onTtsTogglePlayPause()}>
+                          {playbackLabel}
+                        </Button>
+                        <Button variant="outlined" size="small" onClick={() => void onTtsPlay()}>
+                          Play
+                        </Button>
+                        <Button variant="outlined" size="small" onClick={() => void onTtsPause()}>
+                          Pause
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => void onTtsPlayFromPageStart()}
+                          disabled={reader.tts.sentence_count === 0}
+                        >
+                          Play Page
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => void onTtsPlayFromHighlight()}
+                          disabled={!hasHighlightSentence}
+                        >
+                          Play Highlight
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => void onTtsSeekPrev()}
+                          disabled={!reader.tts.can_seek_prev}
+                        >
+                          Prev Sentence
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => void onTtsSeekNext()}
+                          disabled={!reader.tts.can_seek_next}
+                        >
+                          Next Sentence
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => void onTtsRepeatSentence()}
+                          disabled={!hasHighlightSentence}
+                        >
+                          Repeat
+                        </Button>
+                      </Stack>
+                      <Divider />
                       <NumericSettingControl
                         label="Playback Speed"
                         value={reader.settings.tts_speed}

@@ -25,8 +25,10 @@ export interface BootstrapConfig {
   default_lines_per_page: number;
   default_tts_speed: number;
   default_pause_after_sentence: number;
+  key_toggle_play_pause: string;
   key_next_sentence: string;
   key_prev_sentence: string;
+  key_repeat_sentence: string;
   key_toggle_search: string;
   key_safe_quit: string;
   key_toggle_settings: string;
@@ -81,6 +83,17 @@ export interface ReaderStats {
   sentences_read_up_to_current_position: number;
 }
 
+export type TtsPlaybackState = "idle" | "playing" | "paused";
+
+export interface ReaderTtsView {
+  state: TtsPlaybackState;
+  current_sentence_idx: number | null;
+  sentence_count: number;
+  can_seek_prev: boolean;
+  can_seek_next: boolean;
+  progress_pct: number;
+}
+
 export interface ReaderSnapshot {
   source_path: string;
   source_name: string;
@@ -94,6 +107,7 @@ export interface ReaderSnapshot {
   search_matches: number[];
   selected_search_match: number | null;
   settings: ReaderSettingsView;
+  tts: ReaderTtsView;
   stats: ReaderStats;
   panels: PanelState;
 }
