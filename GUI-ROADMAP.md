@@ -1,0 +1,187 @@
+**Voltlane Findings To Reuse**
+
+- [ ] Reuse Voltlane’s split architecture pattern: Rust core crate + Tauri bridge + React/TS UI (`tmp/voltlane/Cargo.toml`, `tmp/voltlane/src-tauri/src/lib.rs`, `tmp/voltlane/ui/src/App.tsx`).
+- [ ] Reuse Voltlane’s typed command boundary pattern: one Rust `#[tauri::command]` per operation and a TS wrapper layer (`tmp/voltlane/src-tauri/src/lib.rs`, `tmp/voltlane/ui/src/api/tauri.ts`).
+- [ ] Reuse Voltlane’s single shared app state in backend guarded by `Mutex` (`tmp/voltlane/src-tauri/src/lib.rs`).
+- [ ] Reuse Voltlane’s state orchestration model in UI with Zustand (`tmp/voltlane/ui/src/store/projectStore.ts`).
+- [ ] Reuse Voltlane’s Tauri build orchestration: Vite dev server + packaged frontend dist (`tmp/voltlane/src-tauri/tauri.conf.json`).
+- [ ] Reuse Voltlane’s logging/bootstrap strategy in backend setup (`tmp/voltlane/src-tauri/src/lib.rs`).
+- [ ] Improve on Voltlane by adding generated API typings (optional `tauri-specta`) to avoid manual Rust/TS drift.
+- [ ] Improve on Voltlane by adding Tailwind + Material UI integration rules up front (Voltlane currently uses plain CSS only).
+
+**Target Architecture For ebup-viewer**
+
+- [ ] Target stack: Tauri 2 shell + Rust core domain crate + React/TypeScript frontend.
+- [ ] Keep Rust responsible for domain/data/IO/TTS/PDF pipeline.
+- [ ] Keep frontend responsible for rendering, layout, input handling, DOM-based scrolling/highlight positioning.
+- [ ] Use Material UI for component primitives and interactions.
+- [ ] Use Tailwind for layout and spacing utilities.
+- [ ] Use a single UI state store (Zustand) that calls typed backend commands.
+- [ ] Preserve all existing behavior before introducing UX changes.
+
+**Roadmap**
+
+**Phase 0: Baseline And Contract Freeze**
+
+- [ ] P0-01 Create a full feature inventory from current iced app flows (starter, reader, TTS, calibre, PDF, settings, stats, search, shortcuts, safe quit).
+- [ ] P0-02 Capture baseline behavior docs for all known “must not regress” items (highlight alignment, non-vertical button policy, pause semantics, close-session behavior).
+- [ ] P0-03 Capture baseline performance metrics: startup time, page switch latency, TTS start latency, window resize responsiveness.
+- [ ] P0-04 Capture baseline logs for key scenarios: EPUB open, PDF open, TTS batch generate, close while generating, resume from bookmark.
+- [ ] P0-05 Define parity acceptance checklist with explicit pass/fail criteria for each feature.
+- [ ] P0-06 Freeze feature additions during migration except migration-blocking fixes.
+
+**Phase 1: Repository Restructure**
+
+- [ ] P1-01 Convert project to a workspace shape similar to Voltlane while preserving existing Rust modules.
+- [ ] P1-02 Add `src-tauri` crate for desktop shell/command bridge.
+- [ ] P1-03 Add `ui` app with Vite + React + TypeScript.
+- [ ] P1-04 Keep current iced entrypoint temporarily as fallback build target until parity gate passes.
+- [ ] P1-05 Add root scripts for `ui:dev`, `ui:build`, `tauri:dev`, `tauri:build`.
+- [ ] P1-06 Define CI matrix for Rust core checks, Tauri compile, frontend build, lint, tests.
+- [ ] P1-07 Add migration branch policy and rollback plan.
+
+**Phase 2: Rust Core Extraction (Headless Domain)**
+
+- [ ] P2-01 Extract UI-agnostic modules into a dedicated core crate (config/cache/loader/normalizer/pagination/calibre/quack_check/tts orchestration).
+- [ ] P2-02 Remove `iced` types from domain layer (`RelativeOffset`, UI font/color concerns) and replace with neutral DTOs.
+- [ ] P2-03 Introduce session-centric core API (`SessionState`, `SessionCommand`, `SessionEvent`).
+- [ ] P2-04 Isolate async jobs behind explicit handles and cancellation tokens (TTS prep, calibre load, PDF extraction).
+- [ ] P2-05 Preserve deterministic state transitions currently implemented in reducer/effects.
+- [ ] P2-06 Add unit tests for extracted command/state transitions before connecting frontend.
+
+**Phase 3: Backend Bridge (Tauri)**
+
+- [ ] P3-01 Implement backend `AppState` with mutexed core session manager (Voltlane-style).
+- [ ] P3-02 Define command groups: session, source-open, navigation, appearance/settings, search, TTS, calibre, PDF, diagnostics.
+- [ ] P3-03 Implement one Tauri command per operation; return typed DTOs only.
+- [ ] P3-04 Add backend event emitters for long-running progress and state changes (TTS planning/prep, calibre load, PDF transcription).
+- [ ] P3-05 Add command-level error taxonomy (user-safe errors vs internal errors).
+- [ ] P3-06 Add operation-guard rules (single active book load; no duplicate PDF processing; reject conflicting requests).
+- [ ] P3-07 Add shutdown hooks to cancel all in-flight tasks on close/return-to-starter.
+- [ ] P3-08 Add structured tracing in bridge and correlate with session/request IDs.
+
+**Phase 4: Command Contract And Types**
+
+- [ ] P4-01 Define canonical Rust DTO schema for frontend consumption.
+- [ ] P4-02 Generate or mirror TS types from Rust DTOs.
+- [ ] P4-03 Create stable command naming and versioning convention.
+- [ ] P4-04 Add contract tests that validate serialization/deserialization across bridge.
+- [ ] P4-05 Add compatibility policy for future command evolution.
+
+**Phase 5: Frontend Foundation (React + TS + MUI + Tailwind)**
+
+- [ ] P5-01 Initialize strict TS config and lint/format tooling.
+- [ ] P5-02 Install Material UI and theme infrastructure.
+- [ ] P5-03 Install Tailwind and PostCSS pipeline.
+- [ ] P5-04 Decide style precedence policy: MUI theme + Tailwind utilities without conflict.
+- [ ] P5-05 Configure `CssBaseline` and decide on Tailwind preflight strategy to avoid reset collisions.
+- [ ] P5-06 Map existing day/night theme values to MUI theme tokens + CSS variables.
+- [ ] P5-07 Build minimal app shell layout with responsive split panes.
+- [ ] P5-08 Add global error boundary and command failure toast system.
+
+**Phase 6: UI Data Layer**
+
+- [ ] P6-01 Implement `ui/src/api/tauri.ts` style typed wrappers for all backend commands.
+- [ ] P6-02 Implement runtime adapter: real Tauri invoke + optional mock adapter for browser-only UI dev.
+- [ ] P6-03 Build Zustand store slices: session, reader, tts, calibre, settings, stats, jobs, notifications.
+- [ ] P6-04 Centralize optimistic update policy and rollback logic.
+- [ ] P6-05 Implement event subscription handlers to update store from backend progress/events.
+- [ ] P6-06 Add telemetry fields in store actions for reproducible debugging.
+
+**Phase 7: Starter Screen Port**
+
+- [ ] P7-01 Port welcome/open path/open clipboard controls.
+- [ ] P7-02 Port recent list embedded under welcome section (2-column behavior).
+- [ ] P7-03 Port recent delete action with source+cache deletion semantics.
+- [ ] P7-04 Port calibre visibility toggle, refresh, search, sorting, open behavior.
+- [ ] P7-05 Implement list virtualization for large calibre catalogs.
+- [ ] P7-06 Preserve “book loading lock” behavior that prevents concurrent opens.
+- [ ] P7-07 Preserve starter-level error/status reporting messages.
+
+**Phase 8: Reader View Port**
+
+- [ ] P8-01 Port text rendering modes (pretty/text-only) and sentence click interactions.
+- [ ] P8-02 Port top bar policies (no vertical compression, hide when too tight).
+- [ ] P8-03 Port settings panel and stats panel mutual exclusivity.
+- [ ] P8-04 Port numeric slider/textbox hybrid editing with validation + wheel adjust.
+- [ ] P8-05 Port search bar and regex navigation behavior.
+- [ ] P8-06 Port keyboard shortcuts and shortcut configurability.
+- [ ] P8-07 Port close session behavior back to starter with save housekeeping.
+
+**Phase 9: TTS Control And Highlight Fidelity**
+
+- [ ] P9-01 Port all playback commands: play/pause/toggle/play-from-page/play-from-highlight/seek/repeat.
+- [ ] P9-02 Preserve pause-after-sentence semantics and speed/volume behavior.
+- [ ] P9-03 Preserve clicked sentence start logic with correct audio/display mapping.
+- [ ] P9-04 Keep mapping logic in Rust; move visual positioning to DOM measurements in UI.
+- [ ] P9-05 Replace heuristic scroll math with actual element anchoring where feasible.
+- [ ] P9-06 Port auto-scroll and auto-center toggles with exact visibility guarantees.
+- [ ] P9-07 Preserve cancellation semantics for close/quit during preparation.
+- [ ] P9-08 Emit and render 3-decimal TTS progress consistently.
+
+**Phase 10: EPUB/PDF/Clipboard Ingestion Paths**
+
+- [ ] P10-01 Port EPUB open and image extraction flow unchanged.
+- [ ] P10-02 Port PDF flow with quack-check pipeline invocation and cache signature behavior.
+- [ ] P10-03 Port clipboard-source persistence flow to cached `.txt` source and normal open path.
+- [ ] P10-04 Port normalization pipeline and sentence chunking behavior exactly.
+- [ ] P10-05 Port source cache, normalized cache, bookmark cache compatibility.
+- [ ] P10-06 Ensure per-source config override loading parity.
+
+**Phase 11: Persistence, Config, And Runtime**
+
+- [ ] P11-01 Preserve config schema and defaults (`conf/config.toml`, `conf/normalizer.toml`, `conf/calibre.toml`).
+- [ ] P11-02 Preserve bookmark save/load semantics and resume fidelity.
+- [ ] P11-03 Preserve recent-book indexing and thumbnail handling.
+- [ ] P11-04 Preserve safe quit behavior including Ctrl+C semantics.
+- [ ] P11-05 Preserve logging configuration and dynamic level updates.
+- [ ] P11-06 Add Tauri capability permissions for file access, logging, and subprocess usage required by quack-check.
+
+**Phase 12: Tailwind + MUI Production Hardening**
+
+- [ ] P12-01 Define component usage policy: MUI for controls/dialogs/sliders/tables, Tailwind for layout containers.
+- [ ] P12-02 Build reusable design tokens that map your current app settings into MUI theme and Tailwind classes.
+- [ ] P12-03 Validate dark/day mode parity against existing visuals.
+- [ ] P12-04 Ensure typography/rendering remains stable at current default font size and spacing settings.
+- [ ] P12-05 Validate responsive breakpoints to preserve no-vertical-collapse policies.
+- [ ] P12-06 Audit final CSS bundle size and remove dead styles.
+
+**Phase 13: Testing And Parity Gates**
+
+- [ ] P13-01 Keep and run Rust unit/integration tests for core logic at every phase.
+- [ ] P13-02 Add bridge command tests for all critical command paths.
+- [ ] P13-03 Add frontend unit tests for reducers/store actions and command adapters.
+- [ ] P13-04 Add E2E scenarios (Playwright + Tauri runner) for core reading/TTS flows.
+- [ ] P13-05 Add explicit regression scenarios from your prior incidents (sentence click halt, highlight drift, duplicate PDF jobs, close-during-tts).
+- [ ] P13-06 Add large calibre dataset performance scenario and verify non-blocking UX.
+- [ ] P13-07 Add PDF edge corpus tests with degraded pages and fallback paths.
+- [ ] P13-08 Create migration parity report that compares iced vs new shell outputs for key workflows.
+
+**Phase 14: Cutover And Decommission**
+
+- [ ] P14-01 Run dual-track period where iced build remains available for fallback.
+- [ ] P14-02 Complete parity signoff checklist with explicit pass on all must-have behaviors.
+- [ ] P14-03 Switch default desktop target to Tauri app.
+- [ ] P14-04 Remove iced UI modules only after parity and soak tests pass.
+- [ ] P14-05 Keep core interfaces stable for future GUI changes.
+
+**Critical Risks To Track (and Mitigate)**
+
+- [ ] R-01 Large text rendering performance in WebView with per-sentence spans.
+- [ ] R-02 Highlight/scroll mismatch from mixed Rust vs DOM coordinate systems.
+- [ ] R-03 Long-running TTS/PDF tasks outliving session context.
+- [ ] R-04 Type drift between Rust DTOs and TS interfaces.
+- [ ] R-05 Styling conflicts between MUI and Tailwind resets/utilities.
+- [ ] R-06 Tauri permission/capability restrictions breaking filesystem/subprocess workflows.
+- [ ] R-07 Calibre table scale issues without virtualization.
+- [ ] R-08 Behavior drift in config/bookmark compatibility.
+
+**Definition Of Done**
+
+- [ ] DOD-01 All current user-facing features from iced are present and parity-tested.
+- [ ] DOD-02 All known regressions you previously flagged have explicit passing tests.
+- [ ] DOD-03 Close-session cancels in-flight background work reliably.
+- [ ] DOD-04 PDF, EPUB, and clipboard sources are all first-class and stable.
+- [ ] DOD-05 Tailwind + MUI coexist without style regressions.
+- [ ] DOD-06 Performance targets (startup, page changes, TTS response, resize) meet or beat baseline.
+- [ ] DOD-07 Iced UI codepath can be retired safely.
