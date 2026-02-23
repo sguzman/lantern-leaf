@@ -146,6 +146,7 @@ struct BackendState {
     mode: UiMode,
     active_source_path: Option<PathBuf>,
     open_in_flight: bool,
+    active_open_request: Option<u64>,
     next_request_id: u64,
     panels: session::PanelState,
     base_config: config::AppConfig,
@@ -167,6 +168,7 @@ impl BackendState {
             mode: UiMode::Starter,
             active_source_path: None,
             open_in_flight: false,
+            active_open_request: None,
             next_request_id: 1,
             panels,
             base_config,
@@ -284,6 +286,7 @@ fn cleanup_for_shutdown(state: &mut BackendState) {
     state.mode = UiMode::Starter;
     state.active_source_path = None;
     state.open_in_flight = false;
+    state.active_open_request = None;
 }
 
 fn finalize_shutdown_from_mutex(state: &Mutex<BackendState>) {
@@ -396,8 +399,7 @@ async fn open_resolved_source(
     state: &State<'_, Mutex<BackendState>>,
     source_path: PathBuf,
 ) -> Result<OpenSourceResult, BridgeError> {
-    let request_id: u64;
-    {
+    let (request_id, started_session): (u64, SessionState) = {
         let mut guard = state
             .lock()
             .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
@@ -407,9 +409,14 @@ async fn open_resolved_source(
                 "A book open operation is already in progress",
             ));
         }
+        let request_id = allocate_request_id(&mut guard);
         guard.open_in_flight = true;
-        request_id = allocate_request_id(&mut guard);
-    }
+        guard.active_open_request = Some(request_id);
+        let started_session = to_session_state(&guard);
+        (request_id, started_session)
+    };
+
+    emit_session_state(app, request_id, "source_open_started", &started_session);
 
     info!(
         request_id,
@@ -446,14 +453,54 @@ async fn open_resolved_source(
     let mut guard = state
         .lock()
         .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+    if guard.active_open_request != Some(request_id) {
+        drop(guard);
+        let _ = app.emit(
+            "source-open",
+            SourceOpenEvent {
+                request_id,
+                phase: "cancelled".to_string(),
+                source_path: Some(source_path.to_string_lossy().to_string()),
+                message: Some("Source open request was superseded or cancelled".to_string()),
+            },
+        );
+        info!(
+            request_id,
+            path = %source_path.display(),
+            "Discarded stale source open completion"
+        );
+        return Err(bridge_error(
+            "open_cancelled",
+            "Source open request was superseded or cancelled",
+        ));
+    }
     guard.open_in_flight = false;
-
-    let reader_result = reader_result.map_err(|err| {
-        bridge_error(
-            "task_join_error",
-            format!("Failed to join load task: {err}"),
-        )
-    })?;
+    guard.active_open_request = None;
+    let reader_result = match reader_result {
+        Ok(result) => result,
+        Err(err) => {
+            let session = to_session_state(&guard);
+            drop(guard);
+            emit_session_state(app, request_id, "source_open_failed", &session);
+            let message = format!("Failed to join load task: {err}");
+            warn!(
+                request_id,
+                path = %source_path.display(),
+                error = %message,
+                "Source open request task failed"
+            );
+            let _ = app.emit(
+                "source-open",
+                SourceOpenEvent {
+                    request_id,
+                    phase: "failed".to_string(),
+                    source_path: Some(source_path.to_string_lossy().to_string()),
+                    message: Some(message.clone()),
+                },
+            );
+            return Err(bridge_error("task_join_error", message));
+        }
+    };
 
     match reader_result {
         Ok(mut reader) => {
@@ -497,7 +544,9 @@ async fn open_resolved_source(
             Ok(result)
         }
         Err(err) => {
+            let session = to_session_state(&guard);
             drop(guard);
+            emit_session_state(app, request_id, "source_open_failed", &session);
             warn!(
                 request_id,
                 path = %source_path.display(),

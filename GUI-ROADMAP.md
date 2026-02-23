@@ -57,7 +57,7 @@
 - [ ] P3-04 Add backend event emitters for long-running progress and state changes (TTS planning/prep, calibre load, PDF transcription).
 - [x] P3-05 Add command-level error taxonomy (user-safe errors vs internal errors).
 - [x] P3-06 Add operation-guard rules (single active book load; no duplicate PDF processing; reject conflicting requests).
-- [ ] P3-07 Add shutdown hooks to cancel all in-flight tasks on close/return-to-starter.
+- [x] P3-07 Add shutdown hooks to cancel all in-flight tasks on close/return-to-starter.
 - [x] P3-08 Add structured tracing in bridge and correlate with session/request IDs.
 
 **Phase 4: Command Contract And Types**
@@ -116,7 +116,7 @@
 - [ ] P9-04 Keep mapping logic in Rust; move visual positioning to DOM measurements in UI.
 - [x] P9-05 Replace heuristic scroll math with actual element anchoring where feasible.
 - [x] P9-06 Port auto-scroll and auto-center toggles with exact visibility guarantees.
-- [ ] P9-07 Preserve cancellation semantics for close/quit during preparation.
+- [x] P9-07 Preserve cancellation semantics for close/quit during preparation.
 - [x] P9-08 Emit and render 3-decimal TTS progress consistently.
 
 **Phase 10: EPUB/PDF/Clipboard Ingestion Paths**

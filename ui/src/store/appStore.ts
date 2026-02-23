@@ -241,6 +241,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (!get().sourceOpenSubscribed) {
         await backendApi.onSourceOpen((event) => {
           set({ sourceOpenEvent: event });
+          if (event.phase === "cancelled") {
+            const suffix = event.request_id > 0 ? ` (request ${event.request_id})` : "";
+            set({
+              toast: buildToast(
+                "info",
+                `${event.message ?? "Source open cancelled"}${suffix}`
+              )
+            });
+            return;
+          }
           if (event.phase === "failed") {
             const suffix = event.request_id > 0 ? ` (request ${event.request_id})` : "";
             set({
@@ -378,6 +388,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
         });
       } catch (error) {
         const bridgeError = toBridgeError(error);
+        if (bridgeError.code === "open_cancelled") {
+          set({
+            toast: buildToast("info", bridgeError.message)
+          });
+          return;
+        }
         set({
           error: bridgeError.message,
           toast: buildToast("error", bridgeError.message)
@@ -400,6 +416,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
         });
       } catch (error) {
         const bridgeError = toBridgeError(error);
+        if (bridgeError.code === "open_cancelled") {
+          set({
+            toast: buildToast("info", bridgeError.message)
+          });
+          return;
+        }
         set({
           error: bridgeError.message,
           toast: buildToast("error", bridgeError.message)
@@ -420,6 +442,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
         });
       } catch (error) {
         const bridgeError = toBridgeError(error);
+        if (bridgeError.code === "open_cancelled") {
+          set({
+            toast: buildToast("info", bridgeError.message)
+          });
+          return;
+        }
         set({
           error: bridgeError.message,
           toast: buildToast("error", bridgeError.message)
