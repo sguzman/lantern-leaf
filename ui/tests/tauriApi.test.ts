@@ -118,4 +118,62 @@ describe("tauri command adapter", () => {
       }
     });
   });
+
+  it("subscribes all bridge progress/state channels with stable names", async () => {
+    const api = await loadTauriApiModule();
+    const listenMock = vi.mocked(listen);
+    const noop = vi.fn();
+
+    await api.backendApi.onSourceOpen(noop);
+    await api.backendApi.onCalibreLoad(noop);
+    await api.backendApi.onSessionState(noop);
+    await api.backendApi.onReaderState(noop);
+
+    expect(listenMock.mock.calls.map((call) => call[0])).toEqual([
+      "source-open",
+      "calibre-load",
+      "session-state",
+      "reader-state"
+    ]);
+  });
+
+  it("invokes critical bridge commands with expected names and argument keys", async () => {
+    const invokeMock = vi.mocked(invoke);
+    invokeMock.mockResolvedValue({});
+    const api = await loadTauriApiModule();
+
+    await api.backendApi.sourceOpenPath("/tmp/book.epub");
+    await api.backendApi.sourceOpenClipboardText("hello");
+    await api.backendApi.readerSentenceClick(7);
+    await api.backendApi.readerApplySettings({ pause_after_sentence: 0.06, tts_speed: 2.5 });
+    await api.backendApi.readerSetPage(12);
+    await api.backendApi.readerSearchSetQuery("needle");
+    await api.backendApi.calibreLoadBooks(true);
+    await api.backendApi.calibreOpenBook(42);
+    await api.backendApi.panelToggleSettings();
+    await api.backendApi.panelToggleStats();
+    await api.backendApi.panelToggleTts();
+
+    expect(invokeMock.mock.calls).toEqual([
+      ["source_open_path", { path: "/tmp/book.epub" }],
+      ["source_open_clipboard_text", { text: "hello" }],
+      ["reader_sentence_click", { sentenceIdx: 7 }],
+      [
+        "reader_apply_settings",
+        {
+          patch: {
+            pause_after_sentence: 0.06,
+            tts_speed: 2.5
+          }
+        }
+      ],
+      ["reader_set_page", { page: 12 }],
+      ["reader_search_set_query", { query: "needle" }],
+      ["calibre_load_books", { forceRefresh: true }],
+      ["calibre_open_book", { bookId: 42 }],
+      ["panel_toggle_settings", undefined],
+      ["panel_toggle_stats", undefined],
+      ["panel_toggle_tts", undefined]
+    ]);
+  });
 });

@@ -1022,4 +1022,61 @@ mod tests {
         assert_eq!(session.current_highlight_idx(), Some(0));
         assert_eq!(session.tts_state, TtsPlaybackState::Paused);
     }
+
+    #[test]
+    fn sentence_click_keeps_paused_state() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = build_test_session(&[&["A.", "B.", "C."]]);
+        session.highlighted_display_idx = Some(0);
+        session.tts_state = TtsPlaybackState::Paused;
+
+        session.sentence_click(2, &normalizer);
+
+        assert_eq!(session.current_highlight_idx(), Some(2));
+        assert_eq!(session.tts_state, TtsPlaybackState::Paused);
+    }
+
+    #[test]
+    fn text_only_sentence_click_uses_audio_index_mapping() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = build_test_session(&[&[r#"In the word lists of Cheshire, Derbyshire, Lancashire and Yorkshire we find the following terms, all of which took root in the Delaware Valley: abide as in cannot abide it, all out for entirely, apple-pie order to mean very good order, bamboozle for deceive, black and white for writing, blather for empty talk, boggle for take fright, brat for child, budge for move, burying for funeral, by golly as an expletive, by gum for another expletive."#]]);
+        session.tts_state = TtsPlaybackState::Paused;
+        session.toggle_text_only(&normalizer);
+        let audio_count = session.current_sentences(&normalizer).len();
+        assert!(audio_count > 1, "expected long sentence to split into multiple audio chunks");
+
+        let target_audio_idx = audio_count - 1;
+        session.sentence_click(target_audio_idx, &normalizer);
+
+        assert_eq!(session.highlighted_audio_idx, Some(target_audio_idx));
+        assert_eq!(session.highlighted_display_idx, Some(0));
+        assert_eq!(session.current_highlight_idx(), Some(target_audio_idx));
+        assert_eq!(session.tts_state, TtsPlaybackState::Paused);
+    }
+
+    #[test]
+    fn apply_settings_patch_clamps_pause_speed_and_volume() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = build_test_session(&[&["A.", "B."]]);
+
+        session.apply_settings_patch(
+            ReaderSettingsPatch {
+                font_size: None,
+                line_spacing: None,
+                margin_horizontal: None,
+                margin_vertical: None,
+                lines_per_page: None,
+                pause_after_sentence: Some(0.056),
+                auto_scroll_tts: None,
+                center_spoken_sentence: None,
+                tts_speed: Some(4.9),
+                tts_volume: Some(-1.0),
+            },
+            &normalizer,
+        );
+
+        assert!((session.config.pause_after_sentence - 0.06).abs() < f32::EPSILON);
+        assert!((session.config.tts_speed - 4.0).abs() < f32::EPSILON);
+        assert!((session.config.tts_volume - 0.0).abs() < f32::EPSILON);
+    }
 }

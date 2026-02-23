@@ -52,7 +52,7 @@
 **Phase 3: Backend Bridge (Tauri)**
 
 - [x] P3-01 Implement backend `AppState` with mutexed core session manager (Voltlane-style).
-- [ ] P3-02 Define command groups: session, source-open, navigation, appearance/settings, search, TTS, calibre, PDF, diagnostics.
+- [x] P3-02 Define command groups: session, source-open, navigation, appearance/settings, search, TTS, calibre, PDF, diagnostics.
 - [x] P3-03 Implement one Tauri command per operation; return typed DTOs only.
 - [ ] P3-04 Add backend event emitters for long-running progress and state changes (TTS planning/prep, calibre load, PDF transcription).
 - [x] P3-05 Add command-level error taxonomy (user-safe errors vs internal errors).
@@ -111,8 +111,8 @@
 **Phase 9: TTS Control And Highlight Fidelity**
 
 - [x] P9-01 Port all playback commands: play/pause/toggle/play-from-page/play-from-highlight/seek/repeat.
-- [ ] P9-02 Preserve pause-after-sentence semantics and speed/volume behavior.
-- [ ] P9-03 Preserve clicked sentence start logic with correct audio/display mapping.
+- [x] P9-02 Preserve pause-after-sentence semantics and speed/volume behavior.
+- [x] P9-03 Preserve clicked sentence start logic with correct audio/display mapping.
 - [ ] P9-04 Keep mapping logic in Rust; move visual positioning to DOM measurements in UI.
 - [x] P9-05 Replace heuristic scroll math with actual element anchoring where feasible.
 - [x] P9-06 Port auto-scroll and auto-center toggles with exact visibility guarantees.
@@ -148,8 +148,8 @@
 
 **Phase 13: Testing And Parity Gates**
 
-- [ ] P13-01 Keep and run Rust unit/integration tests for core logic at every phase.
-- [ ] P13-02 Add bridge command tests for all critical command paths.
+- [x] P13-01 Keep and run Rust unit/integration tests for core logic at every phase.
+- [x] P13-02 Add bridge command tests for all critical command paths.
 - [x] P13-03 Add frontend unit tests for reducers/store actions and command adapters.
 - [ ] P13-04 Add E2E scenarios (Playwright + Tauri runner) for core reading/TTS flows.
 - [ ] P13-05 Add explicit regression scenarios from your prior incidents (sentence click halt, highlight drift, duplicate PDF jobs, close-during-tts).
