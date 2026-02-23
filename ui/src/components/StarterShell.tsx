@@ -19,7 +19,13 @@ import {
 } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 
-import type { BootstrapState, CalibreBook, RecentBook } from "../types";
+import type {
+  BootstrapState,
+  CalibreBook,
+  CalibreLoadEvent,
+  RecentBook,
+  SourceOpenEvent
+} from "../types";
 
 interface StarterShellProps {
   bootstrap: BootstrapState | null;
@@ -34,6 +40,8 @@ interface StarterShellProps {
   onRefreshRecents: () => Promise<void>;
   onLoadCalibre: (forceRefresh?: boolean) => Promise<void>;
   onOpenCalibreBook: (bookId: number) => Promise<void>;
+  sourceOpenEvent: SourceOpenEvent | null;
+  calibreLoadEvent: CalibreLoadEvent | null;
 }
 
 export function StarterShell({
@@ -48,7 +56,9 @@ export function StarterShell({
   onDeleteRecent,
   onRefreshRecents,
   onLoadCalibre,
-  onOpenCalibreBook
+  onOpenCalibreBook,
+  sourceOpenEvent,
+  calibreLoadEvent
 }: StarterShellProps) {
   const [path, setPath] = useState("");
   const [clipboardError, setClipboardError] = useState<string | null>(null);
@@ -154,6 +164,18 @@ export function StarterShell({
   };
 
   const hasRecents = recents.length > 0;
+  const sourceOpenStatus =
+    sourceOpenEvent && sourceOpenEvent.phase !== "ready"
+      ? `Open #${sourceOpenEvent.request_id}: ${sourceOpenEvent.phase}${
+          sourceOpenEvent.source_path ? ` · ${sourceOpenEvent.source_path}` : ""
+        }${sourceOpenEvent.message ? ` · ${sourceOpenEvent.message}` : ""}`
+      : null;
+  const calibreStatus =
+    calibreLoadEvent && calibreLoadEvent.phase !== "ready"
+      ? `Calibre #${calibreLoadEvent.request_id}: ${calibreLoadEvent.phase}${
+          calibreLoadEvent.count !== null ? ` · ${calibreLoadEvent.count.toLocaleString()} books` : ""
+        }${calibreLoadEvent.message ? ` · ${calibreLoadEvent.message}` : ""}`
+      : null;
 
   return (
     <Card className="w-full max-w-7xl rounded-3xl border border-slate-200 shadow-sm">
@@ -173,6 +195,16 @@ export function StarterShell({
           <Typography variant="body2" color="text.secondary">
             {summaryText}
           </Typography>
+          {sourceOpenStatus ? (
+            <Typography variant="caption" color="text.secondary">
+              {sourceOpenStatus}
+            </Typography>
+          ) : null}
+          {calibreStatus ? (
+            <Typography variant="caption" color="text.secondary">
+              {calibreStatus}
+            </Typography>
+          ) : null}
 
           <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
             <TextField

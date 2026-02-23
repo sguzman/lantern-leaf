@@ -14,7 +14,7 @@ import {
   TextField,
   Typography
 } from "@mui/material";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ReaderSettingsPatch, ReaderSnapshot } from "../types";
 
@@ -65,6 +65,44 @@ function formatSeconds(seconds: number): string {
 
 function formatPercent(value: number): string {
   return `${value.toFixed(3)}%`;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function scrollSentenceIntoView(
+  container: HTMLElement,
+  sentence: HTMLElement,
+  center: boolean,
+  behavior: ScrollBehavior
+): void {
+  const containerRect = container.getBoundingClientRect();
+  const sentenceRect = sentence.getBoundingClientRect();
+  const currentTop = container.scrollTop;
+  const sentenceTop = sentenceRect.top - containerRect.top + currentTop;
+  const sentenceBottom = sentenceTop + sentenceRect.height;
+  const viewportTop = currentTop;
+  const viewportBottom = viewportTop + container.clientHeight;
+  const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
+  const padding = 16;
+
+  let targetTop: number;
+  if (center) {
+    targetTop = sentenceTop - (container.clientHeight - sentenceRect.height) / 2;
+  } else if (sentenceTop < viewportTop + padding) {
+    targetTop = sentenceTop - padding;
+  } else if (sentenceBottom > viewportBottom - padding) {
+    targetTop = sentenceBottom - container.clientHeight + padding;
+  } else {
+    return;
+  }
+
+  const clampedTop = clamp(targetTop, 0, maxTop);
+  if (Math.abs(clampedTop - currentTop) < 1) {
+    return;
+  }
+  container.scrollTo({ top: clampedTop, behavior });
 }
 
 function NumericSettingControl({
@@ -200,6 +238,7 @@ export function ReaderShell({
   const [pageInput, setPageInput] = useState(String(reader.current_page + 1));
   const [searchInput, setSearchInput] = useState(reader.search_query);
   const sentenceRefs = useRef<Record<number, HTMLButtonElement | null>>({});
+  const sentenceScrollRef = useRef<HTMLDivElement | null>(null);
   const topBarRef = useRef<HTMLDivElement | null>(null);
   const [topBarWidth, setTopBarWidth] = useState(0);
 
@@ -230,6 +269,34 @@ export function ReaderShell({
     setSearchInput(reader.search_query);
   }, [reader.search_query]);
 
+  const alignHighlightedSentence = useCallback(
+    (behavior: ScrollBehavior) => {
+      const idx = reader.highlighted_sentence_idx;
+      if (idx === null || idx === undefined) {
+        return;
+      }
+      if (!reader.settings.auto_scroll_tts) {
+        return;
+      }
+      const container = sentenceScrollRef.current;
+      const sentence = sentenceRefs.current[idx];
+      if (!container || !sentence) {
+        return;
+      }
+      scrollSentenceIntoView(
+        container,
+        sentence,
+        reader.settings.center_spoken_sentence,
+        behavior
+      );
+    },
+    [
+      reader.highlighted_sentence_idx,
+      reader.settings.auto_scroll_tts,
+      reader.settings.center_spoken_sentence
+    ]
+  );
+
   useEffect(() => {
     const idx = reader.highlighted_sentence_idx;
     if (idx === null || idx === undefined) {
@@ -238,20 +305,44 @@ export function ReaderShell({
     if (!reader.settings.auto_scroll_tts) {
       return;
     }
-    const node = sentenceRefs.current[idx];
-    if (!node) {
+    const frame = requestAnimationFrame(() => {
+      alignHighlightedSentence("smooth");
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    alignHighlightedSentence,
+    reader.current_page
+  ]);
+
+  useEffect(() => {
+    if (!reader.settings.auto_scroll_tts) {
       return;
     }
-    node.scrollIntoView({
-      behavior: "smooth",
-      block: reader.settings.center_spoken_sentence ? "center" : "nearest",
-      inline: "nearest"
+    const container = sentenceScrollRef.current;
+    if (!container) {
+      return;
+    }
+
+    const realign = () => {
+      alignHighlightedSentence("auto");
+    };
+    const resizeObserver = new ResizeObserver(() => {
+      requestAnimationFrame(realign);
     });
+    resizeObserver.observe(container);
+    window.addEventListener("resize", realign);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", realign);
+    };
   }, [
-    reader.current_page,
-    reader.highlighted_sentence_idx,
+    alignHighlightedSentence,
+    reader.sentences.length,
     reader.settings.auto_scroll_tts,
-    reader.settings.center_spoken_sentence
+    reader.settings.font_size,
+    reader.settings.line_spacing,
+    reader.settings.margin_horizontal
   ]);
 
   const panelTitle = useMemo(() => {
@@ -426,7 +517,10 @@ export function ReaderShell({
 
           <Stack direction={{ xs: "column", lg: "row" }} spacing={2}>
             <div className="min-h-[62vh] flex-1 overflow-hidden rounded-2xl border border-slate-200">
-              <div className="h-full overflow-y-auto px-3 py-3 md:px-5 md:py-4">
+              <div
+                ref={sentenceScrollRef}
+                className="h-full overflow-y-auto px-3 py-3 md:px-5 md:py-4"
+              >
                 <Stack spacing={0.75}>
                   {reader.sentences.map((sentence, idx) => {
                     const highlighted = reader.highlighted_sentence_idx === idx;

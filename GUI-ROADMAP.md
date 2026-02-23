@@ -114,8 +114,8 @@
 - [ ] P9-02 Preserve pause-after-sentence semantics and speed/volume behavior.
 - [ ] P9-03 Preserve clicked sentence start logic with correct audio/display mapping.
 - [ ] P9-04 Keep mapping logic in Rust; move visual positioning to DOM measurements in UI.
-- [ ] P9-05 Replace heuristic scroll math with actual element anchoring where feasible.
-- [ ] P9-06 Port auto-scroll and auto-center toggles with exact visibility guarantees.
+- [x] P9-05 Replace heuristic scroll math with actual element anchoring where feasible.
+- [x] P9-06 Port auto-scroll and auto-center toggles with exact visibility guarantees.
 - [ ] P9-07 Preserve cancellation semantics for close/quit during preparation.
 - [x] P9-08 Emit and render 3-decimal TTS progress consistently.
 

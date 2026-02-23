@@ -102,6 +102,8 @@ export default function App() {
     clearError,
     toast,
     dismissToast,
+    sourceOpenEvent,
+    calibreLoadEvent,
     appSafeQuit,
     bootstrapState,
     session,
@@ -330,6 +332,8 @@ export default function App() {
                 onRefreshRecents={refreshRecents}
                 onLoadCalibre={loadCalibreBooks}
                 onOpenCalibreBook={openCalibreBook}
+                sourceOpenEvent={sourceOpenEvent}
+                calibreLoadEvent={calibreLoadEvent}
               />
             )}
           </Stack>

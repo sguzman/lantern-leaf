@@ -5,9 +5,11 @@ import type {
   BootstrapState,
   BridgeError,
   CalibreBook,
+  CalibreLoadEvent,
   ReaderSettingsPatch,
   ReaderSnapshot,
   RecentBook,
+  SourceOpenEvent,
   SessionState
 } from "../types";
 
@@ -42,6 +44,8 @@ interface AppStore {
   busy: boolean;
   error: string | null;
   toast: ToastMessage | null;
+  sourceOpenEvent: SourceOpenEvent | null;
+  calibreLoadEvent: CalibreLoadEvent | null;
   sourceOpenSubscribed: boolean;
   calibreSubscribed: boolean;
   sessionStateSubscribed: boolean;
@@ -201,6 +205,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   busy: false,
   error: null,
   toast: null,
+  sourceOpenEvent: null,
+  calibreLoadEvent: null,
   sourceOpenSubscribed: false,
   calibreSubscribed: false,
   sessionStateSubscribed: false,
@@ -234,6 +240,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       if (!get().sourceOpenSubscribed) {
         await backendApi.onSourceOpen((event) => {
+          set({ sourceOpenEvent: event });
           if (event.phase === "failed") {
             const suffix = event.request_id > 0 ? ` (request ${event.request_id})` : "";
             set({
@@ -245,6 +252,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
       if (!get().calibreSubscribed) {
         await backendApi.onCalibreLoad((event) => {
+          set({ calibreLoadEvent: event });
           if (event.phase === "failed") {
             const suffix = event.request_id > 0 ? ` (request ${event.request_id})` : "";
             set({
