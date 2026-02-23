@@ -3,3 +3,7 @@
 vendor/espeak-rs-sys/target
 *.epub
 tmp
+node_modules
+gen
+dist
+src-tauri/target

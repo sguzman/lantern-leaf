@@ -1,22 +1,22 @@
 **Voltlane Findings To Reuse**
 
-- [ ] Reuse Voltlane’s split architecture pattern: Rust core crate + Tauri bridge + React/TS UI (`tmp/voltlane/Cargo.toml`, `tmp/voltlane/src-tauri/src/lib.rs`, `tmp/voltlane/ui/src/App.tsx`).
-- [ ] Reuse Voltlane’s typed command boundary pattern: one Rust `#[tauri::command]` per operation and a TS wrapper layer (`tmp/voltlane/src-tauri/src/lib.rs`, `tmp/voltlane/ui/src/api/tauri.ts`).
-- [ ] Reuse Voltlane’s single shared app state in backend guarded by `Mutex` (`tmp/voltlane/src-tauri/src/lib.rs`).
-- [ ] Reuse Voltlane’s state orchestration model in UI with Zustand (`tmp/voltlane/ui/src/store/projectStore.ts`).
-- [ ] Reuse Voltlane’s Tauri build orchestration: Vite dev server + packaged frontend dist (`tmp/voltlane/src-tauri/tauri.conf.json`).
-- [ ] Reuse Voltlane’s logging/bootstrap strategy in backend setup (`tmp/voltlane/src-tauri/src/lib.rs`).
+- [x] Reuse Voltlane’s split architecture pattern: Rust core crate + Tauri bridge + React/TS UI (`tmp/voltlane/Cargo.toml`, `tmp/voltlane/src-tauri/src/lib.rs`, `tmp/voltlane/ui/src/App.tsx`).
+- [x] Reuse Voltlane’s typed command boundary pattern: one Rust `#[tauri::command]` per operation and a TS wrapper layer (`tmp/voltlane/src-tauri/src/lib.rs`, `tmp/voltlane/ui/src/api/tauri.ts`).
+- [x] Reuse Voltlane’s single shared app state in backend guarded by `Mutex` (`tmp/voltlane/src-tauri/src/lib.rs`).
+- [x] Reuse Voltlane’s state orchestration model in UI with Zustand (`tmp/voltlane/ui/src/store/projectStore.ts`).
+- [x] Reuse Voltlane’s Tauri build orchestration: Vite dev server + packaged frontend dist (`tmp/voltlane/src-tauri/tauri.conf.json`).
+- [x] Reuse Voltlane’s logging/bootstrap strategy in backend setup (`tmp/voltlane/src-tauri/src/lib.rs`).
 - [ ] Improve on Voltlane by adding generated API typings (optional `tauri-specta`) to avoid manual Rust/TS drift.
-- [ ] Improve on Voltlane by adding Tailwind + Material UI integration rules up front (Voltlane currently uses plain CSS only).
+- [x] Improve on Voltlane by adding Tailwind + Material UI integration rules up front (Voltlane currently uses plain CSS only).
 
 **Target Architecture For ebup-viewer**
 
-- [ ] Target stack: Tauri 2 shell + Rust core domain crate + React/TypeScript frontend.
+- [x] Target stack: Tauri 2 shell + Rust core domain crate + React/TypeScript frontend.
 - [ ] Keep Rust responsible for domain/data/IO/TTS/PDF pipeline.
 - [ ] Keep frontend responsible for rendering, layout, input handling, DOM-based scrolling/highlight positioning.
-- [ ] Use Material UI for component primitives and interactions.
-- [ ] Use Tailwind for layout and spacing utilities.
-- [ ] Use a single UI state store (Zustand) that calls typed backend commands.
+- [x] Use Material UI for component primitives and interactions.
+- [x] Use Tailwind for layout and spacing utilities.
+- [x] Use a single UI state store (Zustand) that calls typed backend commands.
 - [ ] Preserve all existing behavior before introducing UX changes.
 
 **Roadmap**
@@ -32,13 +32,13 @@
 
 **Phase 1: Repository Restructure**
 
-- [ ] P1-01 Convert project to a workspace shape similar to Voltlane while preserving existing Rust modules.
-- [ ] P1-02 Add `src-tauri` crate for desktop shell/command bridge.
-- [ ] P1-03 Add `ui` app with Vite + React + TypeScript.
-- [ ] P1-04 Keep current iced entrypoint temporarily as fallback build target until parity gate passes.
-- [ ] P1-05 Add root scripts for `ui:dev`, `ui:build`, `tauri:dev`, `tauri:build`.
-- [ ] P1-06 Define CI matrix for Rust core checks, Tauri compile, frontend build, lint, tests.
-- [ ] P1-07 Add migration branch policy and rollback plan.
+- [x] P1-01 Convert project to a workspace shape similar to Voltlane while preserving existing Rust modules.
+- [x] P1-02 Add `src-tauri` crate for desktop shell/command bridge.
+- [x] P1-03 Add `ui` app with Vite + React + TypeScript.
+- [x] P1-04 Keep current iced entrypoint temporarily as fallback build target until parity gate passes.
+- [x] P1-05 Add root scripts for `ui:dev`, `ui:build`, `tauri:dev`, `tauri:build`.
+- [x] P1-06 Define CI matrix for Rust core checks, Tauri compile, frontend build, lint, tests.
+- [x] P1-07 Add migration branch policy and rollback plan.
 
 **Phase 2: Rust Core Extraction (Headless Domain)**
 
@@ -51,52 +51,52 @@
 
 **Phase 3: Backend Bridge (Tauri)**
 
-- [ ] P3-01 Implement backend `AppState` with mutexed core session manager (Voltlane-style).
+- [x] P3-01 Implement backend `AppState` with mutexed core session manager (Voltlane-style).
 - [ ] P3-02 Define command groups: session, source-open, navigation, appearance/settings, search, TTS, calibre, PDF, diagnostics.
-- [ ] P3-03 Implement one Tauri command per operation; return typed DTOs only.
+- [x] P3-03 Implement one Tauri command per operation; return typed DTOs only.
 - [ ] P3-04 Add backend event emitters for long-running progress and state changes (TTS planning/prep, calibre load, PDF transcription).
-- [ ] P3-05 Add command-level error taxonomy (user-safe errors vs internal errors).
-- [ ] P3-06 Add operation-guard rules (single active book load; no duplicate PDF processing; reject conflicting requests).
+- [x] P3-05 Add command-level error taxonomy (user-safe errors vs internal errors).
+- [x] P3-06 Add operation-guard rules (single active book load; no duplicate PDF processing; reject conflicting requests).
 - [ ] P3-07 Add shutdown hooks to cancel all in-flight tasks on close/return-to-starter.
 - [ ] P3-08 Add structured tracing in bridge and correlate with session/request IDs.
 
 **Phase 4: Command Contract And Types**
 
-- [ ] P4-01 Define canonical Rust DTO schema for frontend consumption.
-- [ ] P4-02 Generate or mirror TS types from Rust DTOs.
-- [ ] P4-03 Create stable command naming and versioning convention.
+- [x] P4-01 Define canonical Rust DTO schema for frontend consumption.
+- [x] P4-02 Generate or mirror TS types from Rust DTOs.
+- [x] P4-03 Create stable command naming and versioning convention.
 - [ ] P4-04 Add contract tests that validate serialization/deserialization across bridge.
 - [ ] P4-05 Add compatibility policy for future command evolution.
 
 **Phase 5: Frontend Foundation (React + TS + MUI + Tailwind)**
 
-- [ ] P5-01 Initialize strict TS config and lint/format tooling.
-- [ ] P5-02 Install Material UI and theme infrastructure.
-- [ ] P5-03 Install Tailwind and PostCSS pipeline.
-- [ ] P5-04 Decide style precedence policy: MUI theme + Tailwind utilities without conflict.
-- [ ] P5-05 Configure `CssBaseline` and decide on Tailwind preflight strategy to avoid reset collisions.
+- [x] P5-01 Initialize strict TS config and lint/format tooling.
+- [x] P5-02 Install Material UI and theme infrastructure.
+- [x] P5-03 Install Tailwind and PostCSS pipeline.
+- [x] P5-04 Decide style precedence policy: MUI theme + Tailwind utilities without conflict.
+- [x] P5-05 Configure `CssBaseline` and decide on Tailwind preflight strategy to avoid reset collisions.
 - [ ] P5-06 Map existing day/night theme values to MUI theme tokens + CSS variables.
-- [ ] P5-07 Build minimal app shell layout with responsive split panes.
-- [ ] P5-08 Add global error boundary and command failure toast system.
+- [x] P5-07 Build minimal app shell layout with responsive split panes.
+- [x] P5-08 Add global error boundary and command failure toast system.
 
 **Phase 6: UI Data Layer**
 
-- [ ] P6-01 Implement `ui/src/api/tauri.ts` style typed wrappers for all backend commands.
-- [ ] P6-02 Implement runtime adapter: real Tauri invoke + optional mock adapter for browser-only UI dev.
+- [x] P6-01 Implement `ui/src/api/tauri.ts` style typed wrappers for all backend commands.
+- [x] P6-02 Implement runtime adapter: real Tauri invoke + optional mock adapter for browser-only UI dev.
 - [ ] P6-03 Build Zustand store slices: session, reader, tts, calibre, settings, stats, jobs, notifications.
 - [ ] P6-04 Centralize optimistic update policy and rollback logic.
-- [ ] P6-05 Implement event subscription handlers to update store from backend progress/events.
+- [x] P6-05 Implement event subscription handlers to update store from backend progress/events.
 - [ ] P6-06 Add telemetry fields in store actions for reproducible debugging.
 
 **Phase 7: Starter Screen Port**
 
-- [ ] P7-01 Port welcome/open path/open clipboard controls.
-- [ ] P7-02 Port recent list embedded under welcome section (2-column behavior).
-- [ ] P7-03 Port recent delete action with source+cache deletion semantics.
+- [x] P7-01 Port welcome/open path/open clipboard controls.
+- [x] P7-02 Port recent list embedded under welcome section (2-column behavior).
+- [x] P7-03 Port recent delete action with source+cache deletion semantics.
 - [ ] P7-04 Port calibre visibility toggle, refresh, search, sorting, open behavior.
 - [ ] P7-05 Implement list virtualization for large calibre catalogs.
-- [ ] P7-06 Preserve “book loading lock” behavior that prevents concurrent opens.
-- [ ] P7-07 Preserve starter-level error/status reporting messages.
+- [x] P7-06 Preserve “book loading lock” behavior that prevents concurrent opens.
+- [x] P7-07 Preserve starter-level error/status reporting messages.
 
 **Phase 8: Reader View Port**
 
@@ -170,8 +170,8 @@
 - [ ] R-01 Large text rendering performance in WebView with per-sentence spans.
 - [ ] R-02 Highlight/scroll mismatch from mixed Rust vs DOM coordinate systems.
 - [ ] R-03 Long-running TTS/PDF tasks outliving session context.
-- [ ] R-04 Type drift between Rust DTOs and TS interfaces.
-- [ ] R-05 Styling conflicts between MUI and Tailwind resets/utilities.
+- [x] R-04 Type drift between Rust DTOs and TS interfaces.
+- [x] R-05 Styling conflicts between MUI and Tailwind resets/utilities.
 - [ ] R-06 Tauri permission/capability restrictions breaking filesystem/subprocess workflows.
 - [ ] R-07 Calibre table scale issues without virtualization.
 - [ ] R-08 Behavior drift in config/bookmark compatibility.
