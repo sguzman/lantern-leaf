@@ -7,9 +7,11 @@ import type {
   CalibreBook,
   CalibreLoadEvent,
   OpenSourceResult,
+  ReaderStateEvent,
   ReaderSettingsPatch,
   ReaderSnapshot,
   RecentBook,
+  SessionStateEvent,
   SessionState,
   SourceOpenEvent
 } from "../types";
@@ -397,6 +399,31 @@ async function mockOnCalibreLoad(handler: (event: CalibreLoadEvent) => void): Pr
   return () => Promise.resolve();
 }
 
+async function mockOnSessionState(handler: (event: SessionStateEvent) => void): Promise<UnlistenFn> {
+  queueMicrotask(() =>
+    handler({
+      request_id: 0,
+      action: "ready",
+      session: structuredClone(mockState.session)
+    })
+  );
+  return () => Promise.resolve();
+}
+
+async function mockOnReaderState(handler: (event: ReaderStateEvent) => void): Promise<UnlistenFn> {
+  queueMicrotask(() => {
+    if (!mockState.reader) {
+      return;
+    }
+    handler({
+      request_id: 0,
+      action: "ready",
+      reader: structuredClone(mockState.reader)
+    });
+  });
+  return () => Promise.resolve();
+}
+
 export interface BackendApi {
   appSafeQuit: () => Promise<void>;
   sessionGetBootstrap: () => Promise<BootstrapState>;
@@ -434,6 +461,8 @@ export interface BackendApi {
   calibreOpenBook: (bookId: number) => Promise<OpenSourceResult>;
   onSourceOpen: (handler: (event: SourceOpenEvent) => void) => Promise<UnlistenFn>;
   onCalibreLoad: (handler: (event: CalibreLoadEvent) => void) => Promise<UnlistenFn>;
+  onSessionState: (handler: (event: SessionStateEvent) => void) => Promise<UnlistenFn>;
+  onReaderState: (handler: (event: ReaderStateEvent) => void) => Promise<UnlistenFn>;
 }
 
 function createTauriBackendApi(): BackendApi {
@@ -482,6 +511,12 @@ function createTauriBackendApi(): BackendApi {
     },
     onCalibreLoad: async (handler) => {
       return listen<CalibreLoadEvent>("calibre-load", (event) => handler(event.payload));
+    },
+    onSessionState: async (handler) => {
+      return listen<SessionStateEvent>("session-state", (event) => handler(event.payload));
+    },
+    onReaderState: async (handler) => {
+      return listen<ReaderStateEvent>("reader-state", (event) => handler(event.payload));
     }
   };
 }
@@ -523,7 +558,9 @@ function createMockBackendApi(): BackendApi {
     calibreLoadBooks: mockCalibreLoadBooks,
     calibreOpenBook: mockCalibreOpenBook,
     onSourceOpen: mockOnSourceOpen,
-    onCalibreLoad: mockOnCalibreLoad
+    onCalibreLoad: mockOnCalibreLoad,
+    onSessionState: mockOnSessionState,
+    onReaderState: mockOnReaderState
   };
 }
 

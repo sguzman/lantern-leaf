@@ -44,6 +44,10 @@ interface AppStore {
   toast: ToastMessage | null;
   sourceOpenSubscribed: boolean;
   calibreSubscribed: boolean;
+  sessionStateSubscribed: boolean;
+  readerStateSubscribed: boolean;
+  lastSessionEventRequestId: number;
+  lastReaderEventRequestId: number;
   appSafeQuit: () => Promise<void>;
   bootstrap: () => Promise<void>;
   refreshRecents: () => Promise<void>;
@@ -199,6 +203,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toast: null,
   sourceOpenSubscribed: false,
   calibreSubscribed: false,
+  sessionStateSubscribed: false,
+  readerStateSubscribed: false,
+  lastSessionEventRequestId: 0,
+  lastReaderEventRequestId: 0,
 
   appSafeQuit: async () => {
     try {
@@ -245,6 +253,61 @@ export const useAppStore = create<AppStore>((set, get) => ({
           }
         });
         set({ calibreSubscribed: true });
+      }
+      if (!get().sessionStateSubscribed) {
+        await backendApi.onSessionState((event) => {
+          set((current) => {
+            if (event.request_id < current.lastSessionEventRequestId) {
+              return {};
+            }
+            const next: Partial<AppStore> = {
+              session: event.session,
+              lastSessionEventRequestId: event.request_id
+            };
+            if (event.session.mode !== "reader") {
+              next.reader = null;
+              next.lastReaderEventRequestId = Math.max(
+                current.lastReaderEventRequestId,
+                event.request_id
+              );
+            }
+            return next;
+          });
+        });
+        set({ sessionStateSubscribed: true });
+      }
+      if (!get().readerStateSubscribed) {
+        await backendApi.onReaderState((event) => {
+          set((current) => {
+            if (event.request_id < current.lastReaderEventRequestId) {
+              return {};
+            }
+            const nextSession: SessionState = current.session
+              ? {
+                  ...current.session,
+                  mode: "reader",
+                  active_source_path: event.reader.source_path,
+                  open_in_flight: false,
+                  panels: event.reader.panels
+                }
+              : {
+                  mode: "reader",
+                  active_source_path: event.reader.source_path,
+                  open_in_flight: false,
+                  panels: event.reader.panels
+                };
+            return {
+              session: nextSession,
+              reader: event.reader,
+              lastReaderEventRequestId: event.request_id,
+              lastSessionEventRequestId: Math.max(
+                current.lastSessionEventRequestId,
+                event.request_id
+              )
+            };
+          });
+        });
+        set({ readerStateSubscribed: true });
       }
 
       const [bootstrapState, session, recents] = await Promise.all([
@@ -609,7 +672,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       const session = await backendApi.panelToggleSettings();
       set({ session });
-      await get().refreshReaderSnapshot();
     } catch (error) {
       set({ session: previousSession, reader: previousReader });
       set({ error: toBridgeError(error).message });
@@ -629,7 +691,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       const session = await backendApi.panelToggleStats();
       set({ session });
-      await get().refreshReaderSnapshot();
     } catch (error) {
       set({ session: previousSession, reader: previousReader });
       set({ error: toBridgeError(error).message });
@@ -649,7 +710,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       const session = await backendApi.panelToggleTts();
       set({ session });
-      await get().refreshReaderSnapshot();
     } catch (error) {
       set({ session: previousSession, reader: previousReader });
       set({ error: toBridgeError(error).message });

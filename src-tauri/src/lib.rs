@@ -121,6 +121,20 @@ struct CalibreLoadEvent {
     message: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct SessionStateEvent {
+    request_id: u64,
+    action: String,
+    session: SessionState,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ReaderStateEvent {
+    request_id: u64,
+    action: String,
+    reader: session::ReaderSnapshot,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BridgeError {
     code: String,
@@ -285,6 +299,98 @@ fn allocate_request_id(state: &mut BackendState) -> u64 {
     request_id
 }
 
+fn emit_session_state(
+    app: &tauri::AppHandle,
+    request_id: u64,
+    action: &str,
+    session: &SessionState,
+) {
+    let _ = app.emit(
+        "session-state",
+        SessionStateEvent {
+            request_id,
+            action: action.to_string(),
+            session: session.clone(),
+        },
+    );
+}
+
+fn emit_reader_state(
+    app: &tauri::AppHandle,
+    request_id: u64,
+    action: &str,
+    reader: &session::ReaderSnapshot,
+) {
+    let _ = app.emit(
+        "reader-state",
+        ReaderStateEvent {
+            request_id,
+            action: action.to_string(),
+            reader: reader.clone(),
+        },
+    );
+}
+
+fn apply_reader_update<F>(
+    app: &tauri::AppHandle,
+    state: &State<'_, Mutex<BackendState>>,
+    action: &str,
+    update: F,
+) -> Result<session::ReaderSnapshot, BridgeError>
+where
+    F: FnOnce(&mut session::ReaderSession, &normalizer::TextNormalizer),
+{
+    let (snapshot, request_id) = {
+        let mut guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        let normalizer = guard.normalizer.clone();
+        let panels = guard.panels;
+        let request_id = allocate_request_id(&mut guard);
+        let reader = guard
+            .reader
+            .as_mut()
+            .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
+        update(reader, &normalizer);
+        (reader.snapshot(panels, &normalizer), request_id)
+    };
+    emit_reader_state(app, request_id, action, &snapshot);
+    Ok(snapshot)
+}
+
+fn apply_panel_toggle<F>(
+    app: &tauri::AppHandle,
+    state: &State<'_, Mutex<BackendState>>,
+    action: &str,
+    toggle: F,
+) -> Result<SessionState, BridgeError>
+where
+    F: FnOnce(&mut session::PanelState),
+{
+    let (session, reader_snapshot, request_id) = {
+        let mut guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        let request_id = allocate_request_id(&mut guard);
+        toggle(&mut guard.panels);
+
+        let session = to_session_state(&guard);
+        let normalizer = guard.normalizer.clone();
+        let panels = guard.panels;
+        let reader_snapshot = guard
+            .reader
+            .as_mut()
+            .map(|reader| reader.snapshot(panels, &normalizer));
+        (session, reader_snapshot, request_id)
+    };
+
+    emit_session_state(app, request_id, action, &session);
+    if let Some(snapshot) = &reader_snapshot {
+        emit_reader_state(app, request_id, action, snapshot);
+    }
+    Ok(session)
+}
+
 async fn open_resolved_source(
     app: &tauri::AppHandle,
     state: &State<'_, Mutex<BackendState>>,
@@ -363,6 +469,14 @@ async fn open_resolved_source(
             guard.active_source_path = Some(source_path.clone());
             guard.reader = Some(reader);
             let session = to_session_state(&guard);
+            let result = OpenSourceResult {
+                session: session.clone(),
+                reader: snapshot.clone(),
+            };
+
+            drop(guard);
+            emit_session_state(app, request_id, "source_open", &session);
+            emit_reader_state(app, request_id, "source_open", &snapshot);
 
             let _ = app.emit(
                 "source-open",
@@ -380,12 +494,10 @@ async fn open_resolved_source(
                 total_pages = snapshot.total_pages,
                 "Completed source open request"
             );
-            Ok(OpenSourceResult {
-                session,
-                reader: snapshot,
-            })
+            Ok(result)
         }
         Err(err) => {
+            drop(guard);
             warn!(
                 request_id,
                 path = %source_path.display(),
@@ -449,48 +561,55 @@ fn session_get_state(state: State<'_, Mutex<BackendState>>) -> Result<SessionSta
 
 #[tauri::command]
 fn session_return_to_starter(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<SessionState, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    cleanup_for_shutdown(&mut guard);
-    Ok(to_session_state(&guard))
+    let (session, request_id) = {
+        let mut guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        let request_id = allocate_request_id(&mut guard);
+        cleanup_for_shutdown(&mut guard);
+        (to_session_state(&guard), request_id)
+    };
+    emit_session_state(&app, request_id, "session_return_to_starter", &session);
+    Ok(session)
 }
 
 #[tauri::command]
 fn panel_toggle_settings(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<SessionState, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    guard.panels.show_settings = !guard.panels.show_settings;
-    if guard.panels.show_settings {
-        guard.panels.show_stats = false;
-    }
-    Ok(to_session_state(&guard))
+    apply_panel_toggle(&app, &state, "panel_toggle_settings", |panels| {
+        panels.show_settings = !panels.show_settings;
+        if panels.show_settings {
+            panels.show_stats = false;
+        }
+    })
 }
 
 #[tauri::command]
-fn panel_toggle_stats(state: State<'_, Mutex<BackendState>>) -> Result<SessionState, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    guard.panels.show_stats = !guard.panels.show_stats;
-    if guard.panels.show_stats {
-        guard.panels.show_settings = false;
-    }
-    Ok(to_session_state(&guard))
+fn panel_toggle_stats(
+    app: tauri::AppHandle,
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<SessionState, BridgeError> {
+    apply_panel_toggle(&app, &state, "panel_toggle_stats", |panels| {
+        panels.show_stats = !panels.show_stats;
+        if panels.show_stats {
+            panels.show_settings = false;
+        }
+    })
 }
 
 #[tauri::command]
-fn panel_toggle_tts(state: State<'_, Mutex<BackendState>>) -> Result<SessionState, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    guard.panels.show_tts = !guard.panels.show_tts;
-    Ok(to_session_state(&guard))
+fn panel_toggle_tts(
+    app: tauri::AppHandle,
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<SessionState, BridgeError> {
+    apply_panel_toggle(&app, &state, "panel_toggle_tts", |panels| {
+        panels.show_tts = !panels.show_tts;
+    })
 }
 
 #[tauri::command]
@@ -544,356 +663,281 @@ async fn source_open_clipboard_text(
 
 #[tauri::command]
 fn reader_get_snapshot(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(&app, &state, "reader_get_snapshot", |_, _| {})
 }
 
 #[tauri::command]
 fn reader_next_page(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.next_page(&normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(&app, &state, "reader_next_page", |reader, normalizer| {
+        reader.next_page(normalizer);
+    })
 }
 
 #[tauri::command]
 fn reader_prev_page(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.prev_page(&normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(&app, &state, "reader_prev_page", |reader, normalizer| {
+        reader.prev_page(normalizer);
+    })
 }
 
 #[tauri::command]
 fn reader_set_page(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
     page: usize,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.set_page(page, &normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(&app, &state, "reader_set_page", |reader, normalizer| {
+        reader.set_page(page, normalizer);
+    })
 }
 
 #[tauri::command]
 fn reader_sentence_click(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
     sentence_idx: usize,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.sentence_click(sentence_idx, &normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(
+        &app,
+        &state,
+        "reader_sentence_click",
+        |reader, normalizer| {
+            reader.sentence_click(sentence_idx, normalizer);
+        },
+    )
 }
 
 #[tauri::command]
 fn reader_next_sentence(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.select_next_sentence(&normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(
+        &app,
+        &state,
+        "reader_next_sentence",
+        |reader, normalizer| {
+            reader.select_next_sentence(normalizer);
+        },
+    )
 }
 
 #[tauri::command]
 fn reader_prev_sentence(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.select_prev_sentence(&normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(
+        &app,
+        &state,
+        "reader_prev_sentence",
+        |reader, normalizer| {
+            reader.select_prev_sentence(normalizer);
+        },
+    )
 }
 
 #[tauri::command]
 fn reader_toggle_text_only(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.toggle_text_only(&normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(
+        &app,
+        &state,
+        "reader_toggle_text_only",
+        |reader, normalizer| {
+            reader.toggle_text_only(normalizer);
+        },
+    )
 }
 
 #[tauri::command]
 fn reader_apply_settings(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
     patch: session::ReaderSettingsPatch,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.apply_settings_patch(patch, &normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(
+        &app,
+        &state,
+        "reader_apply_settings",
+        |reader, normalizer| {
+            reader.apply_settings_patch(patch, normalizer);
+        },
+    )
 }
 
 #[tauri::command]
 fn reader_search_set_query(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
     query: String,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.set_search_query(query, &normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(
+        &app,
+        &state,
+        "reader_search_set_query",
+        |reader, normalizer| {
+            reader.set_search_query(query, normalizer);
+        },
+    )
 }
 
 #[tauri::command]
 fn reader_search_next(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.search_next(&normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(&app, &state, "reader_search_next", |reader, normalizer| {
+        reader.search_next(normalizer);
+    })
 }
 
 #[tauri::command]
 fn reader_search_prev(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.search_prev(&normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(&app, &state, "reader_search_prev", |reader, normalizer| {
+        reader.search_prev(normalizer);
+    })
 }
 
 #[tauri::command]
 fn reader_tts_play(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.tts_play(&normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(&app, &state, "reader_tts_play", |reader, normalizer| {
+        reader.tts_play(normalizer);
+    })
 }
 
 #[tauri::command]
 fn reader_tts_pause(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.tts_pause();
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(&app, &state, "reader_tts_pause", |reader, _| {
+        reader.tts_pause();
+    })
 }
 
 #[tauri::command]
 fn reader_tts_toggle_play_pause(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.tts_toggle_play_pause(&normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(
+        &app,
+        &state,
+        "reader_tts_toggle_play_pause",
+        |reader, normalizer| {
+            reader.tts_toggle_play_pause(normalizer);
+        },
+    )
 }
 
 #[tauri::command]
 fn reader_tts_play_from_page_start(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.tts_play_from_page_start(&normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(
+        &app,
+        &state,
+        "reader_tts_play_from_page_start",
+        |reader, normalizer| {
+            reader.tts_play_from_page_start(normalizer);
+        },
+    )
 }
 
 #[tauri::command]
 fn reader_tts_play_from_highlight(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.tts_play_from_highlight(&normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(
+        &app,
+        &state,
+        "reader_tts_play_from_highlight",
+        |reader, normalizer| {
+            reader.tts_play_from_highlight(normalizer);
+        },
+    )
 }
 
 #[tauri::command]
 fn reader_tts_seek_next(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.tts_seek_next(&normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(
+        &app,
+        &state,
+        "reader_tts_seek_next",
+        |reader, normalizer| {
+            reader.tts_seek_next(normalizer);
+        },
+    )
 }
 
 #[tauri::command]
 fn reader_tts_seek_prev(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.tts_seek_prev(&normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(
+        &app,
+        &state,
+        "reader_tts_seek_prev",
+        |reader, normalizer| {
+            reader.tts_seek_prev(normalizer);
+        },
+    )
 }
 
 #[tauri::command]
 fn reader_tts_repeat_sentence(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    let normalizer = guard.normalizer.clone();
-    let panels = guard.panels;
-    let reader = guard
-        .reader
-        .as_mut()
-        .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-    reader.tts_repeat_current_sentence(&normalizer);
-    Ok(reader.snapshot(panels, &normalizer))
+    apply_reader_update(
+        &app,
+        &state,
+        "reader_tts_repeat_sentence",
+        |reader, normalizer| {
+            reader.tts_repeat_current_sentence(normalizer);
+        },
+    )
 }
 
 #[tauri::command]
 fn reader_close_session(
+    app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<SessionState, BridgeError> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    cleanup_for_shutdown(&mut guard);
-    Ok(to_session_state(&guard))
+    let (session, request_id) = {
+        let mut guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        let request_id = allocate_request_id(&mut guard);
+        cleanup_for_shutdown(&mut guard);
+        (to_session_state(&guard), request_id)
+    };
+    emit_session_state(&app, request_id, "reader_close_session", &session);
+    Ok(session)
 }
 
 #[tauri::command]
@@ -1199,6 +1243,104 @@ mod tests {
         assert_eq!(
             calibre_json.get("count").and_then(|v| v.as_u64()),
             Some(123)
+        );
+
+        let session_event = SessionStateEvent {
+            request_id: 44,
+            action: "reader_close_session".to_string(),
+            session: SessionState {
+                mode: UiMode::Starter,
+                active_source_path: None,
+                open_in_flight: false,
+                panels: session::PanelState {
+                    show_settings: true,
+                    show_stats: false,
+                    show_tts: true,
+                },
+            },
+        };
+        let session_json = serde_json::to_value(session_event).expect("serialize session event");
+        assert_eq!(
+            session_json.get("request_id").and_then(|v| v.as_u64()),
+            Some(44)
+        );
+
+        let reader_event = ReaderStateEvent {
+            request_id: 45,
+            action: "reader_next_page".to_string(),
+            reader: session::ReaderSnapshot {
+                source_path: "/tmp/book.epub".to_string(),
+                source_name: "book.epub".to_string(),
+                current_page: 0,
+                total_pages: 1,
+                text_only_mode: false,
+                page_text: "hello".to_string(),
+                sentences: vec!["hello".to_string()],
+                highlighted_sentence_idx: Some(0),
+                search_query: String::new(),
+                search_matches: vec![],
+                selected_search_match: None,
+                settings: session::ReaderSettingsView {
+                    theme: config::ThemeMode::Day,
+                    day_highlight: config::HighlightColor {
+                        r: 0.2,
+                        g: 0.4,
+                        b: 0.7,
+                        a: 0.15,
+                    },
+                    night_highlight: config::HighlightColor {
+                        r: 0.8,
+                        g: 0.8,
+                        b: 0.5,
+                        a: 0.2,
+                    },
+                    font_size: 22,
+                    line_spacing: 1.2,
+                    margin_horizontal: 100,
+                    margin_vertical: 12,
+                    lines_per_page: 700,
+                    pause_after_sentence: 0.06,
+                    auto_scroll_tts: false,
+                    center_spoken_sentence: true,
+                    tts_speed: 2.5,
+                    tts_volume: 1.0,
+                },
+                tts: session::ReaderTtsView {
+                    state: session::TtsPlaybackState::Idle,
+                    current_sentence_idx: Some(0),
+                    sentence_count: 1,
+                    can_seek_prev: false,
+                    can_seek_next: false,
+                    progress_pct: 0.0,
+                },
+                stats: session::ReaderStats {
+                    page_index: 1,
+                    total_pages: 1,
+                    tts_progress_pct: 0.0,
+                    page_time_remaining_secs: 0.0,
+                    book_time_remaining_secs: 0.0,
+                    page_word_count: 1,
+                    page_sentence_count: 1,
+                    page_start_percent: 0.0,
+                    page_end_percent: 100.0,
+                    words_read_up_to_page_start: 0,
+                    sentences_read_up_to_page_start: 0,
+                    words_read_up_to_page_end: 1,
+                    sentences_read_up_to_page_end: 1,
+                    words_read_up_to_current_position: 1,
+                    sentences_read_up_to_current_position: 1,
+                },
+                panels: session::PanelState {
+                    show_settings: true,
+                    show_stats: false,
+                    show_tts: true,
+                },
+            },
+        };
+        let reader_json = serde_json::to_value(reader_event).expect("serialize reader event");
+        assert_eq!(
+            reader_json.get("request_id").and_then(|v| v.as_u64()),
+            Some(45)
         );
     }
 }

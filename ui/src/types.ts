@@ -154,6 +154,18 @@ export interface CalibreLoadEvent {
   message: string | null;
 }
 
+export interface SessionStateEvent {
+  request_id: number;
+  action: string;
+  session: SessionState;
+}
+
+export interface ReaderStateEvent {
+  request_id: number;
+  action: string;
+  reader: ReaderSnapshot;
+}
+
 export interface ReaderSettingsPatch {
   font_size?: number;
   line_spacing?: number;
