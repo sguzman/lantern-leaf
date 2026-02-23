@@ -66,7 +66,7 @@
 - [x] P4-02 Generate or mirror TS types from Rust DTOs.
 - [x] P4-03 Create stable command naming and versioning convention.
 - [x] P4-04 Add contract tests that validate serialization/deserialization across bridge.
-- [ ] P4-05 Add compatibility policy for future command evolution.
+- [x] P4-05 Add compatibility policy for future command evolution.
 
 **Phase 5: Frontend Foundation (React + TS + MUI + Tailwind)**
 
@@ -139,7 +139,7 @@
 
 **Phase 12: Tailwind + MUI Production Hardening**
 
-- [ ] P12-01 Define component usage policy: MUI for controls/dialogs/sliders/tables, Tailwind for layout containers.
+- [x] P12-01 Define component usage policy: MUI for controls/dialogs/sliders/tables, Tailwind for layout containers.
 - [x] P12-02 Build reusable design tokens that map your current app settings into MUI theme and Tailwind classes.
 - [ ] P12-03 Validate dark/day mode parity against existing visuals.
 - [ ] P12-04 Ensure typography/rendering remains stable at current default font size and spacing settings.
@@ -150,7 +150,7 @@
 
 - [ ] P13-01 Keep and run Rust unit/integration tests for core logic at every phase.
 - [ ] P13-02 Add bridge command tests for all critical command paths.
-- [ ] P13-03 Add frontend unit tests for reducers/store actions and command adapters.
+- [x] P13-03 Add frontend unit tests for reducers/store actions and command adapters.
 - [ ] P13-04 Add E2E scenarios (Playwright + Tauri runner) for core reading/TTS flows.
 - [ ] P13-05 Add explicit regression scenarios from your prior incidents (sentence click halt, highlight drift, duplicate PDF jobs, close-during-tts).
 - [ ] P13-06 Add large calibre dataset performance scenario and verify non-blocking UX.

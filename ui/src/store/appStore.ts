@@ -1,6 +1,6 @@
-import { create } from "zustand";
+import { create, type StateCreator } from "zustand";
 
-import { backendApi } from "../api/tauri";
+import { backendApi, type BackendApi } from "../api/tauri";
 import type {
   BootstrapState,
   BridgeError,
@@ -31,7 +31,7 @@ export interface ActionTelemetry {
   error: string | null;
 }
 
-interface AppStore {
+export interface AppStore {
   bootstrapState: BootstrapState | null;
   session: SessionState | null;
   reader: ReaderSnapshot | null;
@@ -192,7 +192,8 @@ async function withBusy(
   }
 }
 
-export const useAppStore = create<AppStore>((set, get) => ({
+export function createAppStoreState(backend: BackendApi): StateCreator<AppStore> {
+  return (set, get) => ({
   bootstrapState: null,
   session: null,
   reader: null,
@@ -216,7 +217,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   appSafeQuit: async () => {
     try {
-      await backendApi.appSafeQuit();
+      await backend.appSafeQuit();
       const session = get().session;
       if (session) {
         set({
@@ -239,7 +240,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ loadingBootstrap: true, error: null });
     try {
       if (!get().sourceOpenSubscribed) {
-        await backendApi.onSourceOpen((event) => {
+        await backend.onSourceOpen((event) => {
           set({ sourceOpenEvent: event });
           if (event.phase === "cancelled") {
             const suffix = event.request_id > 0 ? ` (request ${event.request_id})` : "";
@@ -261,7 +262,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         set({ sourceOpenSubscribed: true });
       }
       if (!get().calibreSubscribed) {
-        await backendApi.onCalibreLoad((event) => {
+        await backend.onCalibreLoad((event) => {
           set({ calibreLoadEvent: event });
           if (event.phase === "failed") {
             const suffix = event.request_id > 0 ? ` (request ${event.request_id})` : "";
@@ -273,7 +274,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         set({ calibreSubscribed: true });
       }
       if (!get().sessionStateSubscribed) {
-        await backendApi.onSessionState((event) => {
+        await backend.onSessionState((event) => {
           set((current) => {
             if (event.request_id < current.lastSessionEventRequestId) {
               return {};
@@ -295,7 +296,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         set({ sessionStateSubscribed: true });
       }
       if (!get().readerStateSubscribed) {
-        await backendApi.onReaderState((event) => {
+        await backend.onReaderState((event) => {
           set((current) => {
             if (event.request_id < current.lastReaderEventRequestId) {
               return {};
@@ -329,15 +330,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
 
       const [bootstrapState, session, recents] = await Promise.all([
-        backendApi.sessionGetBootstrap(),
-        backendApi.sessionGetState(),
-        backendApi.recentList()
+        backend.sessionGetBootstrap(),
+        backend.sessionGetState(),
+        backend.recentList()
       ]);
 
       let reader: ReaderSnapshot | null = null;
       if (session.mode === "reader") {
         try {
-          reader = await backendApi.readerGetSnapshot();
+          reader = await backend.readerGetSnapshot();
         } catch {
           reader = null;
         }
@@ -363,7 +364,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const startedAt = Date.now();
     set({ loadingRecents: true, error: null });
     try {
-      const recents = await backendApi.recentList();
+      const recents = await backend.recentList();
       set({ recents });
       finishTelemetry(set, get, "refreshRecents", startedAt, true, null);
     } catch (error) {
@@ -378,8 +379,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   openSourcePath: async (path) => {
     await withBusy(set, get, "openSourcePath", async () => {
       try {
-        const result = await backendApi.sourceOpenPath(path);
-        const recents = await backendApi.recentList();
+        const result = await backend.sourceOpenPath(path);
+        const recents = await backend.recentList();
         set({
           session: result.session,
           reader: result.reader,
@@ -406,8 +407,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   openClipboardText: async (text) => {
     await withBusy(set, get, "openClipboardText", async () => {
       try {
-        const result = await backendApi.sourceOpenClipboardText(text);
-        const recents = await backendApi.recentList();
+        const result = await backend.sourceOpenClipboardText(text);
+        const recents = await backend.recentList();
         set({
           session: result.session,
           reader: result.reader,
@@ -434,8 +435,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   deleteRecent: async (path) => {
     await withBusy(set, get, "deleteRecent", async () => {
       try {
-        await backendApi.recentDelete(path);
-        const recents = await backendApi.recentList();
+        await backend.recentDelete(path);
+        const recents = await backend.recentList();
         set({
           recents,
           toast: buildToast("success", "Recent entry deleted")
@@ -460,7 +461,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   returnToStarter: async () => {
     await withBusy(set, get, "returnToStarter", async () => {
       try {
-        const session = await backendApi.sessionReturnToStarter();
+        const session = await backend.sessionReturnToStarter();
         set({
           session,
           reader: null
@@ -479,7 +480,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   closeReaderSession: async () => {
     await withBusy(set, get, "closeReaderSession", async () => {
       try {
-        const session = await backendApi.readerCloseSession();
+        const session = await backend.readerCloseSession();
         set({
           session,
           reader: null
@@ -501,7 +502,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return;
     }
     try {
-      const reader = await backendApi.readerGetSnapshot();
+      const reader = await backend.readerGetSnapshot();
       set({ reader });
     } catch (error) {
       const bridgeError = toBridgeError(error);
@@ -511,7 +512,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerNextPage: async () => {
     try {
-      const reader = await backendApi.readerNextPage();
+      const reader = await backend.readerNextPage();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -520,7 +521,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerPrevPage: async () => {
     try {
-      const reader = await backendApi.readerPrevPage();
+      const reader = await backend.readerPrevPage();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -529,7 +530,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerSetPage: async (page) => {
     try {
-      const reader = await backendApi.readerSetPage(page);
+      const reader = await backend.readerSetPage(page);
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -538,7 +539,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerSentenceClick: async (sentenceIdx) => {
     try {
-      const reader = await backendApi.readerSentenceClick(sentenceIdx);
+      const reader = await backend.readerSentenceClick(sentenceIdx);
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -547,7 +548,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerNextSentence: async () => {
     try {
-      const reader = await backendApi.readerNextSentence();
+      const reader = await backend.readerNextSentence();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -556,7 +557,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerPrevSentence: async () => {
     try {
-      const reader = await backendApi.readerPrevSentence();
+      const reader = await backend.readerPrevSentence();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -565,7 +566,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerToggleTextOnly: async () => {
     try {
-      const reader = await backendApi.readerToggleTextOnly();
+      const reader = await backend.readerToggleTextOnly();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -586,7 +587,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
     }
     try {
-      const reader = await backendApi.readerApplySettings(patch);
+      const reader = await backend.readerApplySettings(patch);
       set({ reader });
     } catch (error) {
       if (previous) {
@@ -598,7 +599,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerSearchSetQuery: async (query) => {
     try {
-      const reader = await backendApi.readerSearchSetQuery(query);
+      const reader = await backend.readerSearchSetQuery(query);
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -607,7 +608,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerSearchNext: async () => {
     try {
-      const reader = await backendApi.readerSearchNext();
+      const reader = await backend.readerSearchNext();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -616,7 +617,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerSearchPrev: async () => {
     try {
-      const reader = await backendApi.readerSearchPrev();
+      const reader = await backend.readerSearchPrev();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -625,7 +626,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerTtsPlay: async () => {
     try {
-      const reader = await backendApi.readerTtsPlay();
+      const reader = await backend.readerTtsPlay();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -634,7 +635,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerTtsPause: async () => {
     try {
-      const reader = await backendApi.readerTtsPause();
+      const reader = await backend.readerTtsPause();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -643,7 +644,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerTtsTogglePlayPause: async () => {
     try {
-      const reader = await backendApi.readerTtsTogglePlayPause();
+      const reader = await backend.readerTtsTogglePlayPause();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -652,7 +653,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerTtsPlayFromPageStart: async () => {
     try {
-      const reader = await backendApi.readerTtsPlayFromPageStart();
+      const reader = await backend.readerTtsPlayFromPageStart();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -661,7 +662,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerTtsPlayFromHighlight: async () => {
     try {
-      const reader = await backendApi.readerTtsPlayFromHighlight();
+      const reader = await backend.readerTtsPlayFromHighlight();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -670,7 +671,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerTtsSeekNext: async () => {
     try {
-      const reader = await backendApi.readerTtsSeekNext();
+      const reader = await backend.readerTtsSeekNext();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -679,7 +680,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerTtsSeekPrev: async () => {
     try {
-      const reader = await backendApi.readerTtsSeekPrev();
+      const reader = await backend.readerTtsSeekPrev();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -688,7 +689,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   readerTtsRepeatSentence: async () => {
     try {
-      const reader = await backendApi.readerTtsRepeatSentence();
+      const reader = await backend.readerTtsRepeatSentence();
       set({ reader });
     } catch (error) {
       set({ error: toBridgeError(error).message });
@@ -706,7 +707,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
     }
     try {
-      const session = await backendApi.panelToggleSettings();
+      const session = await backend.panelToggleSettings();
       set({ session });
     } catch (error) {
       set({ session: previousSession, reader: previousReader });
@@ -725,7 +726,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
     }
     try {
-      const session = await backendApi.panelToggleStats();
+      const session = await backend.panelToggleStats();
       set({ session });
     } catch (error) {
       set({ session: previousSession, reader: previousReader });
@@ -744,7 +745,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
     }
     try {
-      const session = await backendApi.panelToggleTts();
+      const session = await backend.panelToggleTts();
       set({ session });
     } catch (error) {
       set({ session: previousSession, reader: previousReader });
@@ -756,7 +757,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const startedAt = Date.now();
     set({ loadingCalibre: true, error: null });
     try {
-      const calibreBooks = await backendApi.calibreLoadBooks(forceRefresh);
+      const calibreBooks = await backend.calibreLoadBooks(forceRefresh);
       set({ calibreBooks });
       finishTelemetry(set, get, "loadCalibreBooks", startedAt, true, null);
     } catch (error) {
@@ -774,8 +775,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   openCalibreBook: async (bookId) => {
     await withBusy(set, get, "openCalibreBook", async () => {
       try {
-        const result = await backendApi.calibreOpenBook(bookId);
-        const recents = await backendApi.recentList();
+        const result = await backend.calibreOpenBook(bookId);
+        const recents = await backend.recentList();
         set({
           session: result.session,
           reader: result.reader,
@@ -796,4 +797,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   clearError: () => set({ error: null }),
   dismissToast: () => set({ toast: null }),
   clearTelemetry: () => set({ telemetry: [] })
-}));
+  });
+}
+
+export const useAppStore = create<AppStore>(createAppStoreState(backendApi));

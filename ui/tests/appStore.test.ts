@@ -1,0 +1,257 @@
+import { createStore } from "zustand/vanilla";
+import { describe, expect, it } from "vitest";
+
+import type { BackendApi } from "../src/api/tauri";
+import { createAppStoreState, type AppStore } from "../src/store/appStore";
+import type {
+  BootstrapState,
+  CalibreBook,
+  CalibreLoadEvent,
+  OpenSourceResult,
+  ReaderSettingsPatch,
+  ReaderSnapshot,
+  ReaderStateEvent,
+  RecentBook,
+  SessionState,
+  SessionStateEvent,
+  SourceOpenEvent
+} from "../src/types";
+
+function makeBootstrapState(): BootstrapState {
+  return {
+    app_name: "ebup-viewer",
+    mode: "test",
+    config: {
+      theme: "day",
+      font_family: "lexend",
+      font_weight: "bold",
+      day_highlight: { r: 0.2, g: 0.4, b: 0.7, a: 0.15 },
+      night_highlight: { r: 0.8, g: 0.8, b: 0.5, a: 0.2 },
+      default_font_size: 22,
+      default_lines_per_page: 700,
+      default_tts_speed: 2.5,
+      default_pause_after_sentence: 0.06,
+      key_toggle_play_pause: "space",
+      key_next_sentence: "f",
+      key_prev_sentence: "s",
+      key_repeat_sentence: "r",
+      key_toggle_search: "ctrl+f",
+      key_safe_quit: "q",
+      key_toggle_settings: "ctrl+t",
+      key_toggle_stats: "ctrl+g",
+      key_toggle_tts: "ctrl+y"
+    }
+  };
+}
+
+function makeSessionState(mode: SessionState["mode"]): SessionState {
+  return {
+    mode,
+    active_source_path: mode === "reader" ? "/tmp/book.epub" : null,
+    open_in_flight: false,
+    panels: {
+      show_settings: true,
+      show_stats: false,
+      show_tts: true
+    }
+  };
+}
+
+function makeReaderSnapshot(sourcePath: string, sentence: string): ReaderSnapshot {
+  return {
+    source_path: sourcePath,
+    source_name: sourcePath.split("/").pop() ?? "book.epub",
+    current_page: 0,
+    total_pages: 1,
+    text_only_mode: false,
+    page_text: sentence,
+    sentences: [sentence],
+    highlighted_sentence_idx: 0,
+    search_query: "",
+    search_matches: [],
+    selected_search_match: null,
+    settings: {
+      theme: "day",
+      day_highlight: { r: 0.2, g: 0.4, b: 0.7, a: 0.15 },
+      night_highlight: { r: 0.8, g: 0.8, b: 0.5, a: 0.2 },
+      font_size: 22,
+      line_spacing: 1.2,
+      margin_horizontal: 100,
+      margin_vertical: 12,
+      lines_per_page: 700,
+      pause_after_sentence: 0.06,
+      auto_scroll_tts: true,
+      center_spoken_sentence: true,
+      tts_speed: 2.5,
+      tts_volume: 1
+    },
+    tts: {
+      state: "idle",
+      current_sentence_idx: 0,
+      sentence_count: 1,
+      can_seek_prev: false,
+      can_seek_next: false,
+      progress_pct: 100
+    },
+    stats: {
+      page_index: 1,
+      total_pages: 1,
+      tts_progress_pct: 100,
+      page_time_remaining_secs: 0,
+      book_time_remaining_secs: 0,
+      page_word_count: 1,
+      page_sentence_count: 1,
+      page_start_percent: 0,
+      page_end_percent: 100,
+      words_read_up_to_page_start: 0,
+      sentences_read_up_to_page_start: 0,
+      words_read_up_to_page_end: 1,
+      sentences_read_up_to_page_end: 1,
+      words_read_up_to_current_position: 1,
+      sentences_read_up_to_current_position: 1
+    },
+    panels: {
+      show_settings: true,
+      show_stats: false,
+      show_tts: true
+    }
+  };
+}
+
+function createBackend(overrides: Partial<BackendApi> = {}) {
+  const hooks: {
+    source?: (event: SourceOpenEvent) => void;
+    calibre?: (event: CalibreLoadEvent) => void;
+    session?: (event: SessionStateEvent) => void;
+    reader?: (event: ReaderStateEvent) => void;
+  } = {};
+
+  const defaultReader = makeReaderSnapshot("/tmp/default.epub", "Default");
+  const defaultOpenResult: OpenSourceResult = {
+    session: makeSessionState("reader"),
+    reader: defaultReader
+  };
+
+  const defaultBackend: BackendApi = {
+    appSafeQuit: async () => {},
+    sessionGetBootstrap: async () => makeBootstrapState(),
+    sessionGetState: async () => makeSessionState("starter"),
+    sessionReturnToStarter: async () => makeSessionState("starter"),
+    panelToggleSettings: async () => makeSessionState("reader"),
+    panelToggleStats: async () => makeSessionState("reader"),
+    panelToggleTts: async () => makeSessionState("reader"),
+    recentList: async () => [] as RecentBook[],
+    recentDelete: async () => {},
+    sourceOpenPath: async () => defaultOpenResult,
+    sourceOpenClipboardText: async () => defaultOpenResult,
+    readerGetSnapshot: async () => defaultReader,
+    readerNextPage: async () => defaultReader,
+    readerPrevPage: async () => defaultReader,
+    readerSetPage: async () => defaultReader,
+    readerSentenceClick: async () => defaultReader,
+    readerNextSentence: async () => defaultReader,
+    readerPrevSentence: async () => defaultReader,
+    readerToggleTextOnly: async () => defaultReader,
+    readerApplySettings: async (_patch: ReaderSettingsPatch) => defaultReader,
+    readerSearchSetQuery: async () => defaultReader,
+    readerSearchNext: async () => defaultReader,
+    readerSearchPrev: async () => defaultReader,
+    readerTtsPlay: async () => defaultReader,
+    readerTtsPause: async () => defaultReader,
+    readerTtsTogglePlayPause: async () => defaultReader,
+    readerTtsPlayFromPageStart: async () => defaultReader,
+    readerTtsPlayFromHighlight: async () => defaultReader,
+    readerTtsSeekNext: async () => defaultReader,
+    readerTtsSeekPrev: async () => defaultReader,
+    readerTtsRepeatSentence: async () => defaultReader,
+    readerCloseSession: async () => makeSessionState("starter"),
+    calibreLoadBooks: async () => [] as CalibreBook[],
+    calibreOpenBook: async () => defaultOpenResult,
+    onSourceOpen: async (handler) => {
+      hooks.source = handler;
+      return async () => {};
+    },
+    onCalibreLoad: async (handler) => {
+      hooks.calibre = handler;
+      return async () => {};
+    },
+    onSessionState: async (handler) => {
+      hooks.session = handler;
+      return async () => {};
+    },
+    onReaderState: async (handler) => {
+      hooks.reader = handler;
+      return async () => {};
+    }
+  };
+
+  return {
+    backend: {
+      ...defaultBackend,
+      ...overrides
+    } satisfies BackendApi,
+    hooks
+  };
+}
+
+function createTestStore(backend: BackendApi) {
+  return createStore<AppStore>(createAppStoreState(backend));
+}
+
+describe("appStore event handling", () => {
+  it("applies the newest reader event and ignores stale reader events", async () => {
+    const { backend, hooks } = createBackend();
+    const store = createTestStore(backend);
+    await store.getState().bootstrap();
+
+    const latest = makeReaderSnapshot("/tmp/latest.epub", "Latest sentence");
+    const stale = makeReaderSnapshot("/tmp/stale.epub", "Stale sentence");
+    hooks.reader?.({ request_id: 10, action: "reader_state", reader: latest });
+    hooks.reader?.({ request_id: 9, action: "reader_state", reader: stale });
+
+    const state = store.getState();
+    expect(state.reader?.source_path).toBe("/tmp/latest.epub");
+    expect(state.reader?.sentences[0]).toBe("Latest sentence");
+    expect(state.lastReaderEventRequestId).toBe(10);
+  });
+
+  it("clears reader state when a newer starter session event arrives", async () => {
+    const { backend, hooks } = createBackend();
+    const store = createTestStore(backend);
+    await store.getState().bootstrap();
+
+    const reader = makeReaderSnapshot("/tmp/live.epub", "Live");
+    hooks.reader?.({ request_id: 5, action: "reader_state", reader });
+    hooks.session?.({
+      request_id: 6,
+      action: "session_state",
+      session: makeSessionState("starter")
+    });
+
+    const state = store.getState();
+    expect(state.session?.mode).toBe("starter");
+    expect(state.reader).toBeNull();
+    expect(state.lastSessionEventRequestId).toBe(6);
+    expect(state.lastReaderEventRequestId).toBe(6);
+  });
+
+  it("treats open_cancelled as info without setting app error", async () => {
+    const { backend } = createBackend({
+      sourceOpenPath: async () => {
+        throw {
+          code: "open_cancelled",
+          message: "Source open request was superseded or cancelled"
+        };
+      }
+    });
+    const store = createTestStore(backend);
+
+    await store.getState().openSourcePath("/tmp/book.epub");
+
+    const state = store.getState();
+    expect(state.error).toBeNull();
+    expect(state.toast?.severity).toBe("info");
+    expect(state.toast?.message).toContain("superseded");
+    expect(state.busy).toBe(false);
+  });
+});

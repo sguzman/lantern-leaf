@@ -1197,6 +1197,16 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_file(name: &str, extension: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("ebup_viewer_test_{name}_{nanos}.{extension}"))
+    }
 
     #[test]
     fn bootstrap_state_roundtrips_json_contract() {
@@ -1391,5 +1401,40 @@ mod tests {
             reader_json.get("request_id").and_then(|v| v.as_u64()),
             Some(45)
         );
+    }
+
+    #[test]
+    fn normalize_recent_limit_clamps_to_expected_bounds() {
+        assert_eq!(normalize_recent_limit(None), DEFAULT_RECENT_LIMIT);
+        assert_eq!(normalize_recent_limit(Some(0)), 1);
+        assert_eq!(normalize_recent_limit(Some(1)), 1);
+        assert_eq!(normalize_recent_limit(Some(MAX_RECENT_LIMIT + 123)), MAX_RECENT_LIMIT);
+    }
+
+    #[test]
+    fn supported_source_extensions_match_contract() {
+        assert!(is_supported_source(Path::new("/tmp/book.epub")));
+        assert!(is_supported_source(Path::new("/tmp/book.PDF")));
+        assert!(is_supported_source(Path::new("/tmp/book.txt")));
+        assert!(is_supported_source(Path::new("/tmp/book.md")));
+        assert!(is_supported_source(Path::new("/tmp/book.markdown")));
+        assert!(!is_supported_source(Path::new("/tmp/book.docx")));
+    }
+
+    #[test]
+    fn resolve_source_path_returns_expected_error_codes() {
+        let empty = resolve_source_path("   ").expect_err("empty input must fail");
+        assert_eq!(empty.code, "invalid_input");
+
+        let missing = resolve_source_path("/tmp/this/path/does/not/exist.epub")
+            .expect_err("missing source must fail");
+        assert_eq!(missing.code, "not_found");
+
+        let unsupported = unique_temp_file("unsupported", "docx");
+        fs::write(&unsupported, "hello world").expect("write temp file");
+        let err = resolve_source_path(unsupported.to_string_lossy().as_ref())
+            .expect_err("unsupported extension must fail");
+        assert_eq!(err.code, "unsupported_source");
+        let _ = fs::remove_file(unsupported);
     }
 }
