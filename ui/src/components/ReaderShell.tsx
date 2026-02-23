@@ -424,14 +424,14 @@ export function ReaderShell({
                         className="w-full rounded-lg border px-3 py-1.5 text-left text-[1.03rem] leading-7 transition-colors"
                         style={{
                           borderColor: highlighted
-                            ? "#db2777"
+                            ? "var(--reader-highlight-border)"
                             : searchMatch
-                              ? "#0ea5e9"
+                              ? "var(--reader-search-border)"
                               : "transparent",
                           background: highlighted
-                            ? "#f472b644"
+                            ? "var(--reader-highlight-bg)"
                             : searchMatch
-                              ? "#38bdf822"
+                              ? "var(--reader-search-bg)"
                               : "transparent"
                         }}
                       >

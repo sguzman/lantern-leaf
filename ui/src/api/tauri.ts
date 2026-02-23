@@ -84,6 +84,9 @@ const mockReaderSnapshot = (): ReaderSnapshot => ({
   search_matches: [],
   selected_search_match: null,
   settings: {
+    theme: "day",
+    day_highlight: { r: 0.2, g: 0.4, b: 0.7, a: 0.15 },
+    night_highlight: { r: 0.8, g: 0.8, b: 0.5, a: 0.2 },
     font_size: 22,
     line_spacing: 1.2,
     margin_horizontal: 100,
@@ -124,6 +127,11 @@ const mockState: MockBackendState = {
     app_name: "ebup-viewer",
     mode: "mock",
     config: {
+      theme: "day",
+      font_family: "lexend",
+      font_weight: "bold",
+      day_highlight: { r: 0.2, g: 0.4, b: 0.7, a: 0.15 },
+      night_highlight: { r: 0.8, g: 0.8, b: 0.5, a: 0.2 },
       default_font_size: 22,
       default_lines_per_page: 700,
       default_tts_speed: 2.5,
@@ -287,6 +295,7 @@ async function mockPanelToggleTts(): Promise<SessionState> {
 async function mockOnSourceOpen(handler: (event: SourceOpenEvent) => void): Promise<UnlistenFn> {
   queueMicrotask(() =>
     handler({
+      request_id: 0,
       phase: "ready",
       source_path: null,
       message: "Using mock backend adapter"
@@ -298,6 +307,7 @@ async function mockOnSourceOpen(handler: (event: SourceOpenEvent) => void): Prom
 async function mockOnCalibreLoad(handler: (event: CalibreLoadEvent) => void): Promise<UnlistenFn> {
   queueMicrotask(() =>
     handler({
+      request_id: 0,
       phase: "ready",
       count: 0,
       message: "Using mock backend adapter"

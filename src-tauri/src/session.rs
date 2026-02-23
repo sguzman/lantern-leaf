@@ -14,6 +14,9 @@ pub struct PanelState {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ReaderSettingsView {
+    pub theme: config::ThemeMode,
+    pub day_highlight: config::HighlightColor,
+    pub night_highlight: config::HighlightColor,
     pub font_size: u32,
     pub line_spacing: f32,
     pub margin_horizontal: u16,
@@ -160,6 +163,9 @@ impl ReaderSession {
 
     pub fn settings_view(&self) -> ReaderSettingsView {
         ReaderSettingsView {
+            theme: self.config.theme,
+            day_highlight: self.config.day_highlight,
+            night_highlight: self.config.night_highlight,
             font_size: self.config.font_size,
             line_spacing: self.config.line_spacing,
             margin_horizontal: self.config.margin_horizontal,

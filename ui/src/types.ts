@@ -6,7 +6,21 @@ export interface PanelState {
   show_tts: boolean;
 }
 
+export type ThemeMode = "day" | "night";
+
+export interface HighlightColor {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
 export interface BootstrapConfig {
+  theme: ThemeMode;
+  font_family: string;
+  font_weight: string;
+  day_highlight: HighlightColor;
+  night_highlight: HighlightColor;
   default_font_size: number;
   default_lines_per_page: number;
   default_tts_speed: number;
@@ -34,6 +48,9 @@ export interface SessionState {
 }
 
 export interface ReaderSettingsView {
+  theme: ThemeMode;
+  day_highlight: HighlightColor;
+  night_highlight: HighlightColor;
   font_size: number;
   line_spacing: number;
   margin_horizontal: number;
@@ -110,12 +127,14 @@ export interface BridgeError {
 }
 
 export interface SourceOpenEvent {
+  request_id: number;
   phase: string;
   source_path: string | null;
   message: string | null;
 }
 
 export interface CalibreLoadEvent {
+  request_id: number;
   phase: string;
   count: number | null;
   message: string | null;

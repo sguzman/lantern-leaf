@@ -1,9 +1,20 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: light;
+  color-scheme: var(--app-color-scheme, light);
+  --app-bg: #f8fafc;
+  --app-fg: #0f172a;
+  --reader-highlight-bg: rgba(51, 102, 179, 0.15);
+  --reader-highlight-border: rgb(92, 140, 198);
+  --reader-search-bg: #38bdf822;
+  --reader-search-border: #0ea5e9;
 }
 
 body {
   margin: 0;
+}
+
+.app-root {
+  background: var(--app-bg);
+  color: var(--app-fg);
 }

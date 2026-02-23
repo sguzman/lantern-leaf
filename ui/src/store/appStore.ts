@@ -12,11 +12,21 @@ import type {
 } from "../types";
 
 type ToastSeverity = "info" | "success" | "error";
+const TELEMETRY_LIMIT = 200;
 
 export interface ToastMessage {
   id: number;
   severity: ToastSeverity;
   message: string;
+}
+
+export interface ActionTelemetry {
+  id: number;
+  action: string;
+  started_at_unix_ms: number;
+  duration_ms: number;
+  ok: boolean;
+  error: string | null;
 }
 
 interface AppStore {
@@ -25,6 +35,7 @@ interface AppStore {
   reader: ReaderSnapshot | null;
   recents: RecentBook[];
   calibreBooks: CalibreBook[];
+  telemetry: ActionTelemetry[];
   loadingBootstrap: boolean;
   loadingRecents: boolean;
   loadingCalibre: boolean;
@@ -59,6 +70,7 @@ interface AppStore {
   openCalibreBook: (bookId: number) => Promise<void>;
   clearError: () => void;
   dismissToast: () => void;
+  clearTelemetry: () => void;
 }
 
 function toMessage(error: unknown): string {
@@ -98,13 +110,66 @@ function buildToast(severity: ToastSeverity, message: string): ToastMessage {
   };
 }
 
+function appendTelemetry(
+  set: (partial: Partial<AppStore>) => void,
+  get: () => AppStore,
+  telemetry: ActionTelemetry
+): void {
+  const next = [telemetry, ...get().telemetry];
+  if (next.length > TELEMETRY_LIMIT) {
+    next.length = TELEMETRY_LIMIT;
+  }
+  set({ telemetry: next });
+}
+
+function finishTelemetry(
+  set: (partial: Partial<AppStore>) => void,
+  get: () => AppStore,
+  action: string,
+  startedAt: number,
+  ok: boolean,
+  error: string | null
+): void {
+  appendTelemetry(set, get, {
+    id: Date.now(),
+    action,
+    started_at_unix_ms: startedAt,
+    duration_ms: Date.now() - startedAt,
+    ok,
+    error
+  });
+}
+
+function togglePanels(
+  panels: SessionState["panels"],
+  panel: "show_settings" | "show_stats" | "show_tts"
+): SessionState["panels"] {
+  const next = {
+    ...panels,
+    [panel]: !panels[panel]
+  };
+  if (panel === "show_settings" && next.show_settings) {
+    next.show_stats = false;
+  }
+  if (panel === "show_stats" && next.show_stats) {
+    next.show_settings = false;
+  }
+  return next;
+}
+
 async function withBusy(
   set: (partial: Partial<AppStore>) => void,
+  get: () => AppStore,
+  action: string,
   fn: () => Promise<void>
 ): Promise<void> {
+  const startedAt = Date.now();
   set({ busy: true, error: null });
   try {
     await fn();
+    finishTelemetry(set, get, action, startedAt, true, null);
+  } catch (error) {
+    finishTelemetry(set, get, action, startedAt, false, toMessage(error));
   } finally {
     set({ busy: false });
   }
@@ -116,6 +181,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   reader: null,
   recents: [],
   calibreBooks: [],
+  telemetry: [],
   loadingBootstrap: false,
   loadingRecents: false,
   loadingCalibre: false,
@@ -129,13 +195,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (get().loadingBootstrap) {
       return;
     }
+    const startedAt = Date.now();
     set({ loadingBootstrap: true, error: null });
     try {
       if (!get().sourceOpenSubscribed) {
         await backendApi.onSourceOpen((event) => {
           if (event.phase === "failed") {
+            const suffix = event.request_id > 0 ? ` (request ${event.request_id})` : "";
             set({
-              toast: buildToast("error", event.message ?? "Source open failed")
+              toast: buildToast("error", `${event.message ?? "Source open failed"}${suffix}`)
             });
           }
         });
@@ -144,8 +212,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (!get().calibreSubscribed) {
         await backendApi.onCalibreLoad((event) => {
           if (event.phase === "failed") {
+            const suffix = event.request_id > 0 ? ` (request ${event.request_id})` : "";
             set({
-              toast: buildToast("error", event.message ?? "Calibre load failed")
+              toast: buildToast("error", `${event.message ?? "Calibre load failed"}${suffix}`)
             });
           }
         });
@@ -173,27 +242,34 @@ export const useAppStore = create<AppStore>((set, get) => ({
         recents,
         reader
       });
+      finishTelemetry(set, get, "bootstrap", startedAt, true, null);
     } catch (error) {
-      set({ error: toMessage(error) });
+      const message = toMessage(error);
+      set({ error: message });
+      finishTelemetry(set, get, "bootstrap", startedAt, false, message);
     } finally {
       set({ loadingBootstrap: false });
     }
   },
 
   refreshRecents: async () => {
+    const startedAt = Date.now();
     set({ loadingRecents: true, error: null });
     try {
       const recents = await backendApi.recentList();
       set({ recents });
+      finishTelemetry(set, get, "refreshRecents", startedAt, true, null);
     } catch (error) {
-      set({ error: toMessage(error) });
+      const message = toMessage(error);
+      set({ error: message });
+      finishTelemetry(set, get, "refreshRecents", startedAt, false, message);
     } finally {
       set({ loadingRecents: false });
     }
   },
 
   openSourcePath: async (path) => {
-    await withBusy(set, async () => {
+    await withBusy(set, get, "openSourcePath", async () => {
       try {
         const result = await backendApi.sourceOpenPath(path);
         const recents = await backendApi.recentList();
@@ -209,12 +285,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
           error: bridgeError.message,
           toast: buildToast("error", bridgeError.message)
         });
+        throw bridgeError;
       }
     });
   },
 
   openClipboardText: async (text) => {
-    await withBusy(set, async () => {
+    await withBusy(set, get, "openClipboardText", async () => {
       try {
         const result = await backendApi.sourceOpenClipboardText(text);
         const recents = await backendApi.recentList();
@@ -230,12 +307,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
           error: bridgeError.message,
           toast: buildToast("error", bridgeError.message)
         });
+        throw bridgeError;
       }
     });
   },
 
   deleteRecent: async (path) => {
-    await withBusy(set, async () => {
+    await withBusy(set, get, "deleteRecent", async () => {
       try {
         await backendApi.recentDelete(path);
         const recents = await backendApi.recentList();
@@ -249,12 +327,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
           error: bridgeError.message,
           toast: buildToast("error", bridgeError.message)
         });
+        throw bridgeError;
       }
     });
   },
 
   returnToStarter: async () => {
-    await withBusy(set, async () => {
+    await withBusy(set, get, "returnToStarter", async () => {
       try {
         const session = await backendApi.sessionReturnToStarter();
         set({
@@ -267,12 +346,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
           error: bridgeError.message,
           toast: buildToast("error", bridgeError.message)
         });
+        throw bridgeError;
       }
     });
   },
 
   closeReaderSession: async () => {
-    await withBusy(set, async () => {
+    await withBusy(set, get, "closeReaderSession", async () => {
       try {
         const session = await backendApi.readerCloseSession();
         set({
@@ -285,6 +365,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           error: bridgeError.message,
           toast: buildToast("error", bridgeError.message)
         });
+        throw bridgeError;
       }
     });
   },
@@ -367,10 +448,25 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   readerApplySettings: async (patch) => {
+    const previous = get().reader;
+    if (previous) {
+      set({
+        reader: {
+          ...previous,
+          settings: {
+            ...previous.settings,
+            ...patch
+          }
+        }
+      });
+    }
     try {
       const reader = await backendApi.readerApplySettings(patch);
       set({ reader });
     } catch (error) {
+      if (previous) {
+        set({ reader: previous });
+      }
       set({ error: toBridgeError(error).message });
     }
   },
@@ -403,53 +499,86 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   toggleSettingsPanel: async () => {
+    const previousSession = get().session;
+    const previousReader = get().reader;
+    if (previousSession) {
+      const panels = togglePanels(previousSession.panels, "show_settings");
+      set({
+        session: { ...previousSession, panels },
+        reader: previousReader ? { ...previousReader, panels } : previousReader
+      });
+    }
     try {
       const session = await backendApi.panelToggleSettings();
       set({ session });
       await get().refreshReaderSnapshot();
     } catch (error) {
+      set({ session: previousSession, reader: previousReader });
       set({ error: toBridgeError(error).message });
     }
   },
 
   toggleStatsPanel: async () => {
+    const previousSession = get().session;
+    const previousReader = get().reader;
+    if (previousSession) {
+      const panels = togglePanels(previousSession.panels, "show_stats");
+      set({
+        session: { ...previousSession, panels },
+        reader: previousReader ? { ...previousReader, panels } : previousReader
+      });
+    }
     try {
       const session = await backendApi.panelToggleStats();
       set({ session });
       await get().refreshReaderSnapshot();
     } catch (error) {
+      set({ session: previousSession, reader: previousReader });
       set({ error: toBridgeError(error).message });
     }
   },
 
   toggleTtsPanel: async () => {
+    const previousSession = get().session;
+    const previousReader = get().reader;
+    if (previousSession) {
+      const panels = togglePanels(previousSession.panels, "show_tts");
+      set({
+        session: { ...previousSession, panels },
+        reader: previousReader ? { ...previousReader, panels } : previousReader
+      });
+    }
     try {
       const session = await backendApi.panelToggleTts();
       set({ session });
       await get().refreshReaderSnapshot();
     } catch (error) {
+      set({ session: previousSession, reader: previousReader });
       set({ error: toBridgeError(error).message });
     }
   },
 
   loadCalibreBooks: async (forceRefresh) => {
+    const startedAt = Date.now();
     set({ loadingCalibre: true, error: null });
     try {
       const calibreBooks = await backendApi.calibreLoadBooks(forceRefresh);
       set({ calibreBooks });
+      finishTelemetry(set, get, "loadCalibreBooks", startedAt, true, null);
     } catch (error) {
       const bridgeError = toBridgeError(error);
       set({
         error: bridgeError.message,
         toast: buildToast("error", bridgeError.message)
       });
+      finishTelemetry(set, get, "loadCalibreBooks", startedAt, false, bridgeError.message);
     } finally {
       set({ loadingCalibre: false });
     }
   },
 
   openCalibreBook: async (bookId) => {
-    await withBusy(set, async () => {
+    await withBusy(set, get, "openCalibreBook", async () => {
       try {
         const result = await backendApi.calibreOpenBook(bookId);
         const recents = await backendApi.recentList();
@@ -465,10 +594,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
           error: bridgeError.message,
           toast: buildToast("error", bridgeError.message)
         });
+        throw bridgeError;
       }
     });
   },
 
   clearError: () => set({ error: null }),
-  dismissToast: () => set({ toast: null })
+  dismissToast: () => set({ toast: null }),
+  clearTelemetry: () => set({ telemetry: [] })
 }));

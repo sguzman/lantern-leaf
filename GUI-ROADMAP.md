@@ -58,14 +58,14 @@
 - [x] P3-05 Add command-level error taxonomy (user-safe errors vs internal errors).
 - [x] P3-06 Add operation-guard rules (single active book load; no duplicate PDF processing; reject conflicting requests).
 - [ ] P3-07 Add shutdown hooks to cancel all in-flight tasks on close/return-to-starter.
-- [ ] P3-08 Add structured tracing in bridge and correlate with session/request IDs.
+- [x] P3-08 Add structured tracing in bridge and correlate with session/request IDs.
 
 **Phase 4: Command Contract And Types**
 
 - [x] P4-01 Define canonical Rust DTO schema for frontend consumption.
 - [x] P4-02 Generate or mirror TS types from Rust DTOs.
 - [x] P4-03 Create stable command naming and versioning convention.
-- [ ] P4-04 Add contract tests that validate serialization/deserialization across bridge.
+- [x] P4-04 Add contract tests that validate serialization/deserialization across bridge.
 - [ ] P4-05 Add compatibility policy for future command evolution.
 
 **Phase 5: Frontend Foundation (React + TS + MUI + Tailwind)**
@@ -75,7 +75,7 @@
 - [x] P5-03 Install Tailwind and PostCSS pipeline.
 - [x] P5-04 Decide style precedence policy: MUI theme + Tailwind utilities without conflict.
 - [x] P5-05 Configure `CssBaseline` and decide on Tailwind preflight strategy to avoid reset collisions.
-- [ ] P5-06 Map existing day/night theme values to MUI theme tokens + CSS variables.
+- [x] P5-06 Map existing day/night theme values to MUI theme tokens + CSS variables.
 - [x] P5-07 Build minimal app shell layout with responsive split panes.
 - [x] P5-08 Add global error boundary and command failure toast system.
 
@@ -84,9 +84,9 @@
 - [x] P6-01 Implement `ui/src/api/tauri.ts` style typed wrappers for all backend commands.
 - [x] P6-02 Implement runtime adapter: real Tauri invoke + optional mock adapter for browser-only UI dev.
 - [ ] P6-03 Build Zustand store slices: session, reader, tts, calibre, settings, stats, jobs, notifications.
-- [ ] P6-04 Centralize optimistic update policy and rollback logic.
+- [x] P6-04 Centralize optimistic update policy and rollback logic.
 - [x] P6-05 Implement event subscription handlers to update store from backend progress/events.
-- [ ] P6-06 Add telemetry fields in store actions for reproducible debugging.
+- [x] P6-06 Add telemetry fields in store actions for reproducible debugging.
 
 **Phase 7: Starter Screen Port**
 
@@ -121,18 +121,18 @@
 
 **Phase 10: EPUB/PDF/Clipboard Ingestion Paths**
 
-- [ ] P10-01 Port EPUB open and image extraction flow unchanged.
-- [ ] P10-02 Port PDF flow with quack-check pipeline invocation and cache signature behavior.
-- [ ] P10-03 Port clipboard-source persistence flow to cached `.txt` source and normal open path.
-- [ ] P10-04 Port normalization pipeline and sentence chunking behavior exactly.
-- [ ] P10-05 Port source cache, normalized cache, bookmark cache compatibility.
-- [ ] P10-06 Ensure per-source config override loading parity.
+- [x] P10-01 Port EPUB open and image extraction flow unchanged.
+- [x] P10-02 Port PDF flow with quack-check pipeline invocation and cache signature behavior.
+- [x] P10-03 Port clipboard-source persistence flow to cached `.txt` source and normal open path.
+- [x] P10-04 Port normalization pipeline and sentence chunking behavior exactly.
+- [x] P10-05 Port source cache, normalized cache, bookmark cache compatibility.
+- [x] P10-06 Ensure per-source config override loading parity.
 
 **Phase 11: Persistence, Config, And Runtime**
 
-- [ ] P11-01 Preserve config schema and defaults (`conf/config.toml`, `conf/normalizer.toml`, `conf/calibre.toml`).
-- [ ] P11-02 Preserve bookmark save/load semantics and resume fidelity.
-- [ ] P11-03 Preserve recent-book indexing and thumbnail handling.
+- [x] P11-01 Preserve config schema and defaults (`conf/config.toml`, `conf/normalizer.toml`, `conf/calibre.toml`).
+- [x] P11-02 Preserve bookmark save/load semantics and resume fidelity.
+- [x] P11-03 Preserve recent-book indexing and thumbnail handling.
 - [ ] P11-04 Preserve safe quit behavior including Ctrl+C semantics.
 - [ ] P11-05 Preserve logging configuration and dynamic level updates.
 - [ ] P11-06 Add Tauri capability permissions for file access, logging, and subprocess usage required by quack-check.
@@ -140,7 +140,7 @@
 **Phase 12: Tailwind + MUI Production Hardening**
 
 - [ ] P12-01 Define component usage policy: MUI for controls/dialogs/sliders/tables, Tailwind for layout containers.
-- [ ] P12-02 Build reusable design tokens that map your current app settings into MUI theme and Tailwind classes.
+- [x] P12-02 Build reusable design tokens that map your current app settings into MUI theme and Tailwind classes.
 - [ ] P12-03 Validate dark/day mode parity against existing visuals.
 - [ ] P12-04 Ensure typography/rendering remains stable at current default font size and spacing settings.
 - [ ] P12-05 Validate responsive breakpoints to preserve no-vertical-collapse policies.
@@ -173,7 +173,7 @@
 - [x] R-04 Type drift between Rust DTOs and TS interfaces.
 - [x] R-05 Styling conflicts between MUI and Tailwind resets/utilities.
 - [ ] R-06 Tauri permission/capability restrictions breaking filesystem/subprocess workflows.
-- [ ] R-07 Calibre table scale issues without virtualization.
+- [x] R-07 Calibre table scale issues without virtualization.
 - [ ] R-08 Behavior drift in config/bookmark compatibility.
 
 **Definition Of Done**

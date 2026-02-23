@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, State};
@@ -35,15 +35,20 @@ mod session;
 const MAX_RECENT_LIMIT: usize = 512;
 const DEFAULT_RECENT_LIMIT: usize = 64;
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum UiMode {
     Starter,
     Reader,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct BootstrapConfig {
+    theme: config::ThemeMode,
+    font_family: config::FontFamily,
+    font_weight: config::FontWeight,
+    day_highlight: config::HighlightColor,
+    night_highlight: config::HighlightColor,
     default_font_size: u32,
     default_lines_per_page: usize,
     default_tts_speed: f32,
@@ -57,14 +62,14 @@ struct BootstrapConfig {
     key_toggle_tts: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct BootstrapState {
     app_name: String,
     mode: String,
     config: BootstrapConfig,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SessionState {
     mode: UiMode,
     active_source_path: Option<String>,
@@ -98,21 +103,23 @@ struct CalibreBookDto {
     cover_thumbnail: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SourceOpenEvent {
+    request_id: u64,
     phase: String,
     source_path: Option<String>,
     message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct CalibreLoadEvent {
+    request_id: u64,
     phase: String,
     count: Option<usize>,
     message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct BridgeError {
     code: String,
     message: String,
@@ -123,6 +130,7 @@ struct BackendState {
     mode: UiMode,
     active_source_path: Option<PathBuf>,
     open_in_flight: bool,
+    next_request_id: u64,
     panels: session::PanelState,
     base_config: config::AppConfig,
     normalizer: normalizer::TextNormalizer,
@@ -143,6 +151,7 @@ impl BackendState {
             mode: UiMode::Starter,
             active_source_path: None,
             open_in_flight: false,
+            next_request_id: 1,
             panels,
             base_config,
             normalizer: normalizer::TextNormalizer::load_default(),
@@ -245,11 +254,18 @@ fn persist_active_reader(state: &mut BackendState) {
     }
 }
 
+fn allocate_request_id(state: &mut BackendState) -> u64 {
+    let request_id = state.next_request_id;
+    state.next_request_id = state.next_request_id.wrapping_add(1).max(1);
+    request_id
+}
+
 async fn open_resolved_source(
     app: &tauri::AppHandle,
     state: &State<'_, Mutex<BackendState>>,
     source_path: PathBuf,
 ) -> Result<OpenSourceResult, BridgeError> {
+    let request_id: u64;
     {
         let mut guard = state
             .lock()
@@ -261,11 +277,19 @@ async fn open_resolved_source(
             ));
         }
         guard.open_in_flight = true;
+        request_id = allocate_request_id(&mut guard);
     }
+
+    info!(
+        request_id,
+        path = %source_path.display(),
+        "Starting source open request"
+    );
 
     let _ = app.emit(
         "source-open",
         SourceOpenEvent {
+            request_id,
             phase: "started".to_string(),
             source_path: Some(source_path.to_string_lossy().to_string()),
             message: None,
@@ -286,13 +310,15 @@ async fn open_resolved_source(
     let reader_result = tauri::async_runtime::spawn_blocking(move || {
         session::load_session_for_source(source_path_for_task, &base_config, &normalizer_for_task)
     })
-    .await
-    .map_err(|err| bridge_error("task_join_error", format!("Failed to join load task: {err}")))?;
+    .await;
 
     let mut guard = state
         .lock()
         .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
     guard.open_in_flight = false;
+
+    let reader_result = reader_result
+        .map_err(|err| bridge_error("task_join_error", format!("Failed to join load task: {err}")))?;
 
     match reader_result {
         Ok(mut reader) => {
@@ -312,10 +338,18 @@ async fn open_resolved_source(
             let _ = app.emit(
                 "source-open",
                 SourceOpenEvent {
+                    request_id,
                     phase: "finished".to_string(),
                     source_path: Some(source_path.to_string_lossy().to_string()),
                     message: None,
                 },
+            );
+            info!(
+                request_id,
+                path = %source_path.display(),
+                page = snapshot.current_page + 1,
+                total_pages = snapshot.total_pages,
+                "Completed source open request"
             );
             Ok(OpenSourceResult {
                 session,
@@ -323,9 +357,16 @@ async fn open_resolved_source(
             })
         }
         Err(err) => {
+            warn!(
+                request_id,
+                path = %source_path.display(),
+                error = %err,
+                "Source open request failed"
+            );
             let _ = app.emit(
                 "source-open",
                 SourceOpenEvent {
+                    request_id,
                     phase: "failed".to_string(),
                     source_path: Some(source_path.to_string_lossy().to_string()),
                     message: Some(err.clone()),
@@ -345,6 +386,11 @@ fn session_get_bootstrap(state: State<'_, Mutex<BackendState>>) -> Result<Bootst
         app_name: "ebup-viewer".to_string(),
         mode: "migration".to_string(),
         config: BootstrapConfig {
+            theme: guard.base_config.theme,
+            font_family: guard.base_config.font_family,
+            font_weight: guard.base_config.font_weight,
+            day_highlight: guard.base_config.day_highlight,
+            night_highlight: guard.base_config.night_highlight,
             default_font_size: guard.base_config.font_size,
             default_lines_per_page: guard.base_config.lines_per_page,
             default_tts_speed: guard.base_config.tts_speed,
@@ -696,26 +742,56 @@ async fn calibre_load_books(
     force_refresh: Option<bool>,
 ) -> Result<Vec<CalibreBookDto>, BridgeError> {
     let force_refresh = force_refresh.unwrap_or(false);
-    let config = {
-        let guard = state
+    let (config, request_id) = {
+        let mut guard = state
             .lock()
             .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-        guard.calibre_config.clone()
+        let request_id = allocate_request_id(&mut guard);
+        (guard.calibre_config.clone(), request_id)
     };
+
+    info!(
+        request_id,
+        force_refresh,
+        "Starting calibre load request"
+    );
 
     let _ = app.emit(
         "calibre-load",
         CalibreLoadEvent {
+            request_id,
             phase: "started".to_string(),
             count: None,
             message: None,
         },
     );
 
-    let books = tauri::async_runtime::spawn_blocking(move || calibre::load_books(&config, force_refresh))
+    let books_result = tauri::async_runtime::spawn_blocking(move || calibre::load_books(&config, force_refresh))
         .await
-        .map_err(|err| bridge_error("task_join_error", format!("Failed to join calibre task: {err}")))?
-        .map_err(|err| bridge_error("calibre_load_failed", err.to_string()))?;
+        .map_err(|err| bridge_error("task_join_error", format!("Failed to join calibre task: {err}")))
+        .and_then(|result| result.map_err(|err| bridge_error("calibre_load_failed", err.to_string())));
+
+    let books = match books_result {
+        Ok(books) => books,
+        Err(err) => {
+            warn!(
+                request_id,
+                force_refresh,
+                error = %err.message,
+                "Calibre load request failed"
+            );
+            let _ = app.emit(
+                "calibre-load",
+                CalibreLoadEvent {
+                    request_id,
+                    phase: "failed".to_string(),
+                    count: None,
+                    message: Some(err.message.clone()),
+                },
+            );
+            return Err(err);
+        }
+    };
 
     let mut guard = state
         .lock()
@@ -725,10 +801,17 @@ async fn calibre_load_books(
     let _ = app.emit(
         "calibre-load",
         CalibreLoadEvent {
+            request_id,
             phase: "finished".to_string(),
             count: Some(books.len()),
             message: None,
         },
+    );
+    info!(
+        request_id,
+        force_refresh,
+        count = books.len(),
+        "Completed calibre load request"
     );
 
     Ok(books.into_iter().map(map_calibre_book).collect())
@@ -806,5 +889,93 @@ pub fn run() {
     if let Err(err) = builder.run(tauri::generate_context!()) {
         warn!("tauri runtime failed: {err}");
         panic!("tauri runtime failed: {err}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bootstrap_state_roundtrips_json_contract() {
+        let state = BootstrapState {
+            app_name: "ebup-viewer".to_string(),
+            mode: "migration".to_string(),
+            config: BootstrapConfig {
+                theme: config::ThemeMode::Day,
+                font_family: config::FontFamily::Lexend,
+                font_weight: config::FontWeight::Bold,
+                day_highlight: config::HighlightColor {
+                    r: 0.2,
+                    g: 0.4,
+                    b: 0.7,
+                    a: 0.15,
+                },
+                night_highlight: config::HighlightColor {
+                    r: 0.8,
+                    g: 0.8,
+                    b: 0.5,
+                    a: 0.2,
+                },
+                default_font_size: 22,
+                default_lines_per_page: 700,
+                default_tts_speed: 2.5,
+                default_pause_after_sentence: 0.06,
+                key_next_sentence: "f".to_string(),
+                key_prev_sentence: "s".to_string(),
+                key_toggle_search: "ctrl+f".to_string(),
+                key_safe_quit: "q".to_string(),
+                key_toggle_settings: "ctrl+t".to_string(),
+                key_toggle_stats: "ctrl+g".to_string(),
+                key_toggle_tts: "ctrl+y".to_string(),
+            },
+        };
+
+        let json = serde_json::to_string(&state).expect("serialize bootstrap");
+        let decoded: BootstrapState = serde_json::from_str(&json).expect("deserialize bootstrap");
+        assert_eq!(decoded.config.default_font_size, 22);
+        assert_eq!(decoded.config.theme, config::ThemeMode::Day);
+        assert_eq!(decoded.config.key_toggle_tts, "ctrl+y");
+    }
+
+    #[test]
+    fn session_state_roundtrips_json_contract() {
+        let state = SessionState {
+            mode: UiMode::Reader,
+            active_source_path: Some("/tmp/book.epub".to_string()),
+            open_in_flight: false,
+            panels: session::PanelState {
+                show_settings: true,
+                show_stats: false,
+                show_tts: true,
+            },
+        };
+        let json = serde_json::to_string(&state).expect("serialize session");
+        let decoded: SessionState = serde_json::from_str(&json).expect("deserialize session");
+        assert!(matches!(decoded.mode, UiMode::Reader));
+        assert_eq!(decoded.active_source_path.as_deref(), Some("/tmp/book.epub"));
+        assert!(decoded.panels.show_tts);
+    }
+
+    #[test]
+    fn event_contracts_include_request_ids() {
+        let source = SourceOpenEvent {
+            request_id: 42,
+            phase: "started".to_string(),
+            source_path: Some("/tmp/book.epub".to_string()),
+            message: None,
+        };
+        let source_json = serde_json::to_value(source).expect("serialize source event");
+        assert_eq!(source_json.get("request_id").and_then(|v| v.as_u64()), Some(42));
+
+        let calibre = CalibreLoadEvent {
+            request_id: 43,
+            phase: "finished".to_string(),
+            count: Some(123),
+            message: None,
+        };
+        let calibre_json = serde_json::to_value(calibre).expect("serialize calibre event");
+        assert_eq!(calibre_json.get("request_id").and_then(|v| v.as_u64()), Some(43));
+        assert_eq!(calibre_json.get("count").and_then(|v| v.as_u64()), Some(123));
     }
 }
