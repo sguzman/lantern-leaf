@@ -234,6 +234,37 @@ pub fn delete_recent_source_and_cache(source_path: &Path) -> Result<(), String> 
     Ok(())
 }
 
+
+fn resolve_existing_recent_source_path(source_path: &Path) -> Option<PathBuf> {
+    if source_path.as_os_str().is_empty() {
+        return None;
+    }
+    if source_path.exists() {
+        return Some(source_path.to_path_buf());
+    }
+
+    let mut components: Vec<&std::ffi::OsStr> = Vec::new();
+    for component in source_path.components() {
+        components.push(component.as_os_str());
+    }
+
+    let cache_idx = components
+        .iter()
+        .position(|segment| *segment == std::ffi::OsStr::new(CACHE_DIR))?;
+
+    let workspace_root = cache_root().parent()?.to_path_buf();
+    let mut candidate = workspace_root.join(CACHE_DIR);
+    for segment in components.iter().skip(cache_idx + 1) {
+        candidate.push(segment);
+    }
+
+    if candidate.exists() {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
 pub fn list_recent_books(limit: usize) -> Vec<RecentBook> {
     let Ok(entries) = fs::read_dir(cache_root()) else {
         return Vec::new();
@@ -251,9 +282,15 @@ pub fn list_recent_books(limit: usize) -> Vec<RecentBook> {
             let source_hint_path = entry.path().join(SOURCE_PATH_FILE);
             let source_path_raw = fs::read_to_string(&source_hint_path).ok()?;
             let source_path = PathBuf::from(source_path_raw.trim());
-            if source_path.as_os_str().is_empty() || !source_path.exists() {
-                return None;
+            let source_path = resolve_existing_recent_source_path(&source_path)?;
+
+            // Self-heal stale source hint paths after workspace/project moves.
+            let current_hint = source_path_raw.trim();
+            let resolved_hint = source_path.to_string_lossy();
+            if current_hint != resolved_hint {
+                let _ = fs::write(&source_hint_path, resolved_hint.as_ref());
             }
+
             let last_opened_unix_secs = fs::metadata(&source_hint_path)
                 .ok()
                 .and_then(|meta| meta.modified().ok())
@@ -278,7 +315,6 @@ pub fn list_recent_books(limit: usize) -> Vec<RecentBook> {
     }
     books
 }
-
 pub fn tts_dir(epub_path: &Path) -> PathBuf {
     hash_dir(epub_path).join("tts")
 }

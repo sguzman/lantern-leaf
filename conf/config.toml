@@ -9,12 +9,22 @@ letter_spacing = 0
 lines_per_page = 700
 margin_horizontal = 100
 margin_vertical = 0
-day_highlight = { r = 0.2, g = 0.4, b = 0.7, a = 0.15 }
-night_highlight = { r = 0.8, g = 0.8, b = 0.5, a = 0.2 }
+
+[appearance.day_highlight]
+r = 0.2
+g = 0.4
+b = 0.7
+a = 0.15
+
+[appearance.night_highlight]
+r = 0.8
+g = 0.8
+b = 0.5
+a = 0.2
 
 [window]
-width = 1624
-height = 768
+width = 1624.0
+height = 768.0
 
 [reading_behavior]
 pause_after_sentence = 0.06
@@ -28,14 +38,15 @@ show_settings = true
 [logging]
 log_level = "info"
 
+[storage]
+cache_dir = ".cache"
+
 [tts]
 tts_model_path = "/usr/share/piper-voices/en/en_US/ryan/high/en_US-ryan-high.onnx"
 tts_espeak_path = "/usr/share"
 tts_speed = 2.5
 tts_volume = 1.0
-# Number of parallel synthesis worker processes (1 = single-process).
 tts_threads = 4
-# Progress log cadence while generating a batch of uncached TTS audio.
 tts_progress_log_interval_secs = 5.0
 
 [keybindings]
@@ -48,6 +59,3 @@ toggle_search = "ctrl+f"
 toggle_settings = "ctrl+t"
 toggle_stats = "ctrl+g"
 toggle_tts = "ctrl+y"
-
-[storage]
-cache_dir = ".cache"

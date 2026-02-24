@@ -68,6 +68,10 @@ export function createSessionSliceActions({ set, get, backend }: SliceContext): 
           reader,
           runtimeLogLevel: bootstrapState.config.log_level
         });
+
+        if (session.mode === "starter") {
+          void get().loadCalibreBooks(false);
+        }
         finishTelemetry(set, get, "bootstrap", startedAt, true, null);
       } catch (error) {
         const message = toMessage(error);
