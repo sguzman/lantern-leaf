@@ -160,7 +160,7 @@
 **Phase 14: Cutover And Decommission**
 
 - [x] P14-01 Run dual-track period where iced build remains available for fallback. (Both root iced path and Tauri path are continuously validated in CI.)
-- [ ] P14-02 Complete parity signoff checklist with explicit pass on all must-have behaviors. (In progress: expanded runtime smoke now covers search + full TTS control surface + clipboard/recent flows + EPUB open runtime coverage + PDF terminal event lifecycle checks + calibre terminal lifecycle checks; remaining gaps are calibre-open success soak across environments, full PDF-success soak across environments, and final soak.)
+- [ ] P14-02 Complete parity signoff checklist with explicit pass on all must-have behaviors. (In progress: runtime smoke now enforces EPUB/PDF/clipboard/calibre open success plus terminal lifecycle checks and full reader/TTS control coverage; remaining work is final soak duration and signoff bookkeeping.)
 - [x] P14-03 Switch default desktop target to Tauri app. (Root `pnpm dev`/`pnpm build` now target Tauri; legacy iced path remains explicit as `pnpm desktop:legacy` until decommission.)
 - [ ] P14-04 Remove iced UI modules only after parity and soak tests pass.
 - [ ] P14-05 Keep core interfaces stable for future GUI changes.
@@ -172,9 +172,9 @@
 - [ ] R-03 Long-running TTS/PDF tasks outliving session context. (Mitigated with request-id stale-event guards, Tauri-runner smoke including starter/reader transitions, and paused-state runtime checks; keep open until broader soak.)
 - [x] R-04 Type drift between Rust DTOs and TS interfaces.
 - [x] R-05 Styling conflicts between MUI and Tailwind resets/utilities.
-- [ ] R-06 Tauri permission/capability restrictions breaking filesystem/subprocess workflows. (Mitigated in part by root-aware config path resolution for pandoc/quack-check/calibre when running under `src-tauri` manifest context.)
+- [ ] R-06 Tauri permission/capability restrictions breaking filesystem/subprocess workflows. (Mitigated in part by root-aware config path resolution for pandoc/quack-check/calibre when running under `src-tauri` manifest context, plus cache-root override support to eliminate runtime cwd-dependent cache misses.)
 - [x] R-07 Calibre table scale issues without virtualization.
-- [ ] R-08 Behavior drift in config/bookmark compatibility. (Mitigated with cache bookmark/config roundtrip tests plus config persistence helper tests in Tauri bridge; keep open until full parity signoff.)
+- [ ] R-08 Behavior drift in config/bookmark compatibility. (Mitigated with cache bookmark/config roundtrip tests, shutdown housekeeping persistence tests, plus config persistence helper tests in Tauri bridge; keep open until full parity signoff.)
 
 **Definition Of Done**
 

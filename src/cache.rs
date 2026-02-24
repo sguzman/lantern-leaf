@@ -22,6 +22,7 @@ use std::time::UNIX_EPOCH;
 use tracing::{debug, warn};
 
 pub const CACHE_DIR: &str = ".cache";
+pub const CACHE_DIR_ENV: &str = "EBUP_VIEWER_CACHE_DIR";
 const SOURCE_PATH_FILE: &str = "source-path.txt";
 static CONTENT_DIGEST_CACHE: OnceLock<Mutex<HashMap<PathBuf, SourceDigestEntry>>> = OnceLock::new();
 
@@ -49,6 +50,13 @@ pub struct RecentBook {
     pub display_title: String,
     pub thumbnail_path: Option<PathBuf>,
     pub last_opened_unix_secs: u64,
+}
+
+pub fn cache_root() -> PathBuf {
+    std::env::var_os(CACHE_DIR_ENV)
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| PathBuf::from(CACHE_DIR))
 }
 
 fn default_scroll() -> f32 {
@@ -120,7 +128,7 @@ pub fn hash_dir(epub_path: &Path) -> PathBuf {
         hasher.update(epub_path.as_os_str().to_string_lossy().as_bytes());
         format!("{:x}", hasher.finalize())
     });
-    Path::new(CACHE_DIR).join(hash)
+    cache_root().join(hash)
 }
 
 fn source_content_hash(path: &Path) -> Option<String> {
@@ -196,7 +204,7 @@ pub fn persist_clipboard_text_source(text: &str) -> Result<PathBuf, String> {
     hasher.update(trimmed.as_bytes());
     let digest = format!("{:x}", hasher.finalize());
     let short = &digest[..16];
-    let dir = Path::new(CACHE_DIR).join("clipboard");
+    let dir = cache_root().join("clipboard");
     fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
     let path = dir.join(format!("clipboard-{short}.txt"));
 
@@ -227,7 +235,7 @@ pub fn delete_recent_source_and_cache(source_path: &Path) -> Result<(), String> 
 }
 
 pub fn list_recent_books(limit: usize) -> Vec<RecentBook> {
-    let Ok(entries) = fs::read_dir(CACHE_DIR) else {
+    let Ok(entries) = fs::read_dir(cache_root()) else {
         return Vec::new();
     };
 
@@ -403,7 +411,7 @@ mod tests {
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let pid = std::process::id();
-        Path::new(CACHE_DIR)
+        cache_root()
             .join("test-sources")
             .join(format!("cache-test-{pid}-{nanos}.{ext}"))
     }
@@ -427,6 +435,41 @@ mod tests {
         let cache_path = hash_dir(path);
         let _ = fs::remove_file(path);
         let _ = fs::remove_dir_all(cache_path);
+    }
+
+    #[test]
+    fn cache_root_uses_env_override_when_present() {
+        let key = CACHE_DIR_ENV;
+        let previous = std::env::var_os(key);
+        let override_path = std::env::temp_dir().join(format!(
+            "ebup_viewer_cache_root_override_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+
+        // SAFETY: test-scoped environment mutation; restored before return.
+        unsafe {
+            std::env::set_var(key, &override_path);
+        }
+        assert_eq!(cache_root(), override_path);
+
+        match previous {
+            Some(value) => {
+                // SAFETY: test-scoped environment mutation restore.
+                unsafe {
+                    std::env::set_var(key, value);
+                }
+            }
+            None => {
+                // SAFETY: test-scoped environment mutation restore.
+                unsafe {
+                    std::env::remove_var(key);
+                }
+            }
+        }
     }
 
     #[test]

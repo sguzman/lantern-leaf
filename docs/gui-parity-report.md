@@ -19,8 +19,8 @@ This report compares core workflows between the legacy iced UI path and the Taur
 | Open clipboard text source | Supported | Supported | `source_open_clipboard_text` in `src-tauri/src/lib.rs`; starter UI action in `ui/src/components/StarterShell.tsx` |
 | Recent list + delete recent/cache | Supported | Supported | Commands `recent_list`, `recent_delete` in `src-tauri/src/lib.rs`; starter UI cards/actions in `ui/src/components/StarterShell.tsx` |
 | Starter clipboard + recent-delete in real Tauri runtime | Supported | Supported | Runtime smoke flow covers clipboard-open and recent-delete actions in `ui/e2e-tauri/smoke.test.mjs` |
-| PDF transcription event lifecycle visibility in real runtime | Supported | Supported | Runtime smoke asserts terminal `pdf-transcription` + `source-open` marker events (including diagnostics on failure) in `ui/e2e-tauri/smoke.test.mjs` |
-| Calibre load/open | Supported | Supported | Commands `calibre_load_books`, `calibre_open_book`; virtualization helpers in `ui/src/components/calibreList.ts` and tests in `ui/tests/calibreList.test.ts` |
+| PDF transcription event lifecycle visibility in real runtime | Supported | Supported | Runtime smoke opens a seeded PDF transcript fixture, asserts terminal `pdf-transcription` + `source-open` marker events, and verifies rendered sentence content in `ui/e2e-tauri/smoke.test.mjs` |
+| Calibre load/open | Supported | Supported | Commands `calibre_load_books`, `calibre_open_book`; virtualization helpers in `ui/src/components/calibreList.ts`, tests in `ui/tests/calibreList.test.ts`, and runtime smoke load/open assertions with a seeded 1.5k-book cache fixture in `ui/e2e-tauri/smoke.test.mjs` |
 | Calibre load terminal lifecycle visibility in real runtime | Supported | Supported | Runtime smoke asserts terminal `calibre-load` marker events and diagnostics in `ui/e2e-tauri/smoke.test.mjs` |
 | Reader page navigation/search | Supported | Supported | Reader commands in `src-tauri/src/lib.rs`; UI integration in `ui/src/components/ReaderShell.tsx` |
 | Reader search next/prev in real Tauri runtime | Supported | Supported | Runtime smoke exercises search apply/next/prev and highlighted sentence transitions in `ui/e2e-tauri/smoke.test.mjs` |
@@ -36,6 +36,7 @@ This report compares core workflows between the legacy iced UI path and the Taur
 | Runtime log-level updates | Supported | Supported | Command `logging_set_level` and event `log-level` in `src-tauri/src/lib.rs`; starter controls in `ui/src/components/StarterShell.tsx` |
 | Runtime log-level persistence to config | Supported | Supported | Config persistence helper + override-path coverage in `src-tauri/src/lib.rs` tests (`persist_base_config_writes_updated_log_level`, `app_config_path_uses_override_env_when_present`) |
 | Reader shutdown housekeeping persistence | Supported | Supported | `cleanup_for_shutdown_persists_active_reader_housekeeping` test in `src-tauri/src/lib.rs` |
+| Safe-quit shutdown persistence | Supported | Supported | `finalize_shutdown_persists_base_config_and_reader_housekeeping` test in `src-tauri/src/lib.rs` plus shutdown path wiring in `finalize_shutdown_with_config_path` |
 | Bridge progress/state events for TTS and PDF transcription | Supported | Supported | Events `tts-state` / `pdf-transcription` in `src-tauri/src/lib.rs`; store subscriptions in `ui/src/store/appStore.ts` |
 | Stale async event rejection | Supported | Supported | Request-id monotonic guards for source/calibre/tts/pdf/log events in `ui/src/store/slices/jobsSlice.ts`; coverage in `ui/tests/appStore.test.ts` |
 | Bookmark/config cache compatibility | Supported | Supported | Cache roundtrip/legacy tests in `src/cache.rs` (`bookmark_roundtrip_*`, `load_bookmark_defaults_scroll_*`, `epub_config_roundtrip_*`) |
@@ -44,8 +45,7 @@ This report compares core workflows between the legacy iced UI path and the Taur
 
 ## Current Gaps
 
-- Full PDF success in runtime smoke is still environment-dependent on quack-check/docling dependencies; smoke currently gates terminal event diagnostics.
-- Full calibre-open success in runtime smoke is still environment-dependent on reachable calibre backends; smoke currently gates terminal event diagnostics.
+- No blocking parity gaps remain in automated checks; remaining cutover work is final soak coverage and iced-path decommission sequencing.
 
 ## Validation Snapshot
 
@@ -58,6 +58,7 @@ Latest migration verification run includes:
 - `pnpm --dir ui run test:e2e:tauri`
 - `pnpm --dir ui run build`
 - `pnpm --dir ui run audit:bundle`
+- `pnpm run types:check`
 - `cargo test -p ebup-viewer-tauri --lib`
 - `cargo test`
 - `cargo check --workspace`

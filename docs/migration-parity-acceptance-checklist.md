@@ -7,11 +7,11 @@ Last automated verification run: `2026-02-24` (local + Tauri runtime smoke).
 ## Starter Flows
 
 - [x] Open EPUB path succeeds and transitions to reader.
-- [ ] Open PDF path succeeds and emits PDF transcription events.
+- [x] Open PDF path succeeds and emits PDF transcription events.
 - [x] Open PDF path emits terminal transcription events (`finished`/`failed`/`cancelled`) with diagnostics.
 - [x] Open clipboard text succeeds and creates a reusable source.
 - [x] Recent open/delete behavior is correct and cache-aware.
-- [ ] Calibre load/open works at scale without UI lockups.
+- [x] Calibre load/open works at scale without UI lockups.
 - [x] Calibre load emits terminal lifecycle (`finished`/`failed`) with diagnostics in runtime smoke.
 
 ## Reader Flows
@@ -36,7 +36,7 @@ Last automated verification run: `2026-02-24` (local + Tauri runtime smoke).
 ## Runtime/Persistence
 
 - [x] Close session cancels in-flight jobs and returns to starter.
-- [ ] Safe quit performs housekeeping and persistence.
+- [x] Safe quit performs housekeeping and persistence.
 - [x] Bookmark/config resume fidelity is preserved.
 - [x] Runtime log-level change persists to `conf/config.toml`.
 
@@ -51,3 +51,5 @@ Last automated verification run: `2026-02-24` (local + Tauri runtime smoke).
 - [x] `pnpm --dir ui run test:e2e`
 - [x] `pnpm --dir ui run test:e2e:tauri`
 - [x] `pnpm --dir ui run build`
+- [x] `pnpm --dir ui run audit:bundle`
+- [x] `pnpm run types:check`

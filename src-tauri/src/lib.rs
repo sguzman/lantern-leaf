@@ -474,13 +474,26 @@ fn cleanup_for_shutdown(state: &mut BackendState) -> Option<u64> {
     cancelled_open_request
 }
 
-fn finalize_shutdown_from_mutex(state: &Mutex<BackendState>) {
+fn finalize_shutdown_with_config_path(state: &Mutex<BackendState>, config_path: &Path) {
     match state.lock() {
         Ok(mut guard) => {
+            if let Err(err) = persist_base_config(&guard.base_config, config_path) {
+                warn!(
+                    path = %config_path.display(),
+                    code = %err.code,
+                    error = %err.message,
+                    "Failed to persist base config during shutdown"
+                );
+            }
             let _ = cleanup_for_shutdown(&mut guard);
         }
         Err(_) => warn!("Skipping shutdown housekeeping: backend state lock poisoned"),
     }
+}
+
+fn finalize_shutdown_from_mutex(state: &Mutex<BackendState>) {
+    let config_path = app_config_path();
+    finalize_shutdown_with_config_path(state, &config_path);
 }
 
 fn allocate_request_id(state: &mut BackendState) -> u64 {
@@ -2017,6 +2030,44 @@ mod tests {
 
         let cache_path = cache::hash_dir(&source);
         let _ = fs::remove_file(&source);
+        let _ = fs::remove_dir_all(cache_path);
+    }
+
+    #[test]
+    fn finalize_shutdown_persists_base_config_and_reader_housekeeping() {
+        let source = unique_temp_file("finalize_housekeeping_source", "txt");
+        fs::write(
+            &source,
+            "Finalize sentence one. Finalize sentence two. Finalize sentence three.",
+        )
+        .expect("write source fixture");
+        let config_path = unique_temp_file("finalize_housekeeping_config", "toml");
+
+        let base_config = config::AppConfig::default();
+        let normalizer = normalizer::TextNormalizer::default();
+        let reader = session::load_session_for_source(source.clone(), &base_config, &normalizer)
+            .expect("load reader session");
+
+        let mut state = BackendState::new();
+        state.mode = UiMode::Reader;
+        state.active_source_path = Some(source.clone());
+        state.base_config.log_level = config::LogLevel::Warn;
+        state.reader = Some(reader);
+        let state_mutex = Mutex::new(state);
+
+        finalize_shutdown_with_config_path(&state_mutex, &config_path);
+
+        let persisted = config::load_config(&config_path);
+        assert_eq!(persisted.log_level, config::LogLevel::Warn);
+        let bookmark = cache::load_bookmark(&source).expect("bookmark should be persisted");
+        assert_eq!(bookmark.page, 0);
+        let cached_config =
+            cache::load_epub_config(&source).expect("reader config should be persisted");
+        assert_eq!(cached_config.font_size, base_config.font_size);
+
+        let cache_path = cache::hash_dir(&source);
+        let _ = fs::remove_file(&source);
+        let _ = fs::remove_file(&config_path);
         let _ = fs::remove_dir_all(cache_path);
     }
 

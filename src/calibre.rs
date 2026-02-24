@@ -13,10 +13,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
 
 const DEFAULT_CALIBRE_CONFIG_PATH: &str = "conf/calibre.toml";
-const CALIBRE_CACHE_PATH: &str = ".cache/calibre-books.toml";
+const CALIBRE_CACHE_FILE: &str = "calibre-books.toml";
 const CALIBRE_CACHE_REV: &str = "calibre-cache-v1";
-const CALIBRE_DOWNLOAD_DIR: &str = ".cache/calibre-downloads";
-const CALIBRE_THUMB_DIR: &str = ".cache/calibre-thumbs";
+const CALIBRE_DOWNLOAD_SUBDIR: &str = "calibre-downloads";
+const CALIBRE_THUMB_SUBDIR: &str = "calibre-thumbs";
 const THUMB_WIDTH: u32 = 68;
 const THUMB_HEIGHT: u32 = 100;
 const THUMB_PREFETCH_LIMIT: usize = 200;
@@ -306,7 +306,7 @@ pub fn materialize_book_path(config: &CalibreConfig, book: &CalibreBook) -> Resu
     }
 
     let ext = canonical_extension(&book.extension);
-    let cache_root = PathBuf::from(CALIBRE_DOWNLOAD_DIR);
+    let cache_root = calibre_download_dir();
     fs::create_dir_all(&cache_root)
         .with_context(|| format!("failed to create {}", cache_root.display()))?;
 
@@ -957,9 +957,7 @@ fn fetch_thumbnail_from_server(
 
 fn calibre_thumbnail_path(config: &CalibreConfig, book_id: u64) -> PathBuf {
     let key = thumbnail_scope_key(config);
-    Path::new(CALIBRE_THUMB_DIR)
-        .join(key)
-        .join(format!("{book_id}.jpg"))
+    calibre_thumb_dir().join(key).join(format!("{book_id}.jpg"))
 }
 
 fn thumbnail_scope_key(config: &CalibreConfig) -> String {
@@ -1031,7 +1029,7 @@ fn try_load_cache(
     signature: &str,
     check_ttl: bool,
 ) -> Result<Option<Vec<CalibreBook>>> {
-    let cache_path = PathBuf::from(CALIBRE_CACHE_PATH);
+    let cache_path = calibre_cache_path();
     let contents = match fs::read_to_string(&cache_path) {
         Ok(contents) => contents,
         Err(_) => return Ok(None),
@@ -1055,7 +1053,7 @@ fn try_load_cache(
 }
 
 fn write_cache(signature: &str, books: &[CalibreBook]) -> Result<()> {
-    let cache_path = PathBuf::from(CALIBRE_CACHE_PATH);
+    let cache_path = calibre_cache_path();
     if let Some(parent) = cache_path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -1097,6 +1095,18 @@ fn cache_signature(config: &CalibreConfig) -> String {
         hasher.update([0_u8]);
     }
     format!("{:x}", hasher.finalize())
+}
+
+fn calibre_cache_path() -> PathBuf {
+    crate::cache::cache_root().join(CALIBRE_CACHE_FILE)
+}
+
+fn calibre_download_dir() -> PathBuf {
+    crate::cache::cache_root().join(CALIBRE_DOWNLOAD_SUBDIR)
+}
+
+fn calibre_thumb_dir() -> PathBuf {
+    crate::cache::cache_root().join(CALIBRE_THUMB_SUBDIR)
 }
 
 fn now_unix_secs() -> u64 {
@@ -1166,5 +1176,49 @@ allowed_extensions = ["epub", "pdf", "txt"]
         }
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn calibre_paths_follow_cache_root_override() {
+        let key = crate::cache::CACHE_DIR_ENV;
+        let previous = std::env::var_os(key);
+        let override_path = std::env::temp_dir().join(format!(
+            "ebup_viewer_calibre_cache_root_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock should be after epoch")
+                .as_nanos()
+        ));
+
+        // SAFETY: test-scoped env mutation; restored before test exits.
+        unsafe {
+            std::env::set_var(key, &override_path);
+        }
+
+        assert_eq!(calibre_cache_path(), override_path.join(CALIBRE_CACHE_FILE));
+        assert_eq!(
+            calibre_download_dir(),
+            override_path.join(CALIBRE_DOWNLOAD_SUBDIR)
+        );
+        assert_eq!(
+            calibre_thumb_dir(),
+            override_path.join(CALIBRE_THUMB_SUBDIR)
+        );
+
+        match previous {
+            Some(value) => {
+                // SAFETY: test-scoped env mutation restore.
+                unsafe {
+                    std::env::set_var(key, value);
+                }
+            }
+            None => {
+                // SAFETY: test-scoped env mutation restore.
+                unsafe {
+                    std::env::remove_var(key);
+                }
+            }
+        }
     }
 }

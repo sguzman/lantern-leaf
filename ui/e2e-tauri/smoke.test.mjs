@@ -23,6 +23,14 @@ const QUACK_CHECK_PIPELINE_REV = "quack-check-pdf-v2";
 const DEFAULT_QUACK_TEXT_FILENAME = "transcript.txt";
 const CALIBRE_CACHE_REV = "calibre-cache-v1";
 
+function cacheRootFromEnv() {
+  const override = process.env.EBUP_VIEWER_CACHE_DIR;
+  if (typeof override === "string" && override.trim().length > 0) {
+    return path.resolve(override.trim());
+  }
+  return path.resolve(repoRoot, ".cache");
+}
+
 function runOrThrow(command, args, cwd) {
   const result = spawnSync(command, args, {
     cwd,
@@ -57,9 +65,6 @@ function quackTextFilenameFromConfig(rawConfig) {
 function seedPandocCacheForSource(sourcePath, text) {
   const sourceDigest = sourceCacheHash(sourcePath);
   const sourceStats = statSync(sourcePath);
-  const cacheDir = path.resolve(repoRoot, ".cache", sourceDigest);
-  mkdirSync(cacheDir, { recursive: true });
-
   const filterPath = path.resolve(repoRoot, "conf", "pandoc", "strip-nontext.lua");
   const filterSha256 = sha256Hex(readFileSync(filterPath));
 
@@ -71,6 +76,8 @@ function seedPandocCacheForSource(sourcePath, text) {
     ""
   ].join("\n");
 
+  const cacheDir = path.join(cacheRootFromEnv(), sourceDigest);
+  mkdirSync(cacheDir, { recursive: true });
   writeFileSync(path.join(cacheDir, "source-plain.txt"), text, "utf8");
   writeFileSync(path.join(cacheDir, "source-plain.meta.toml"), meta, "utf8");
 }
@@ -78,9 +85,6 @@ function seedPandocCacheForSource(sourcePath, text) {
 function seedPdfCacheForSource(sourcePath, text) {
   const sourceDigest = sourceCacheHash(sourcePath);
   const sourceStats = statSync(sourcePath);
-  const cacheDir = path.resolve(repoRoot, ".cache", sourceDigest, "pdf");
-  mkdirSync(cacheDir, { recursive: true });
-
   const quackConfigPath = path.resolve(repoRoot, "conf", "quack-check.toml");
   const quackConfig = readFileSync(quackConfigPath, "utf8");
   const quackConfigSha256 = sha256Hex(quackConfig);
@@ -95,6 +99,8 @@ function seedPdfCacheForSource(sourcePath, text) {
     ""
   ].join("\n");
 
+  const cacheDir = path.join(cacheRootFromEnv(), sourceDigest, "pdf");
+  mkdirSync(cacheDir, { recursive: true });
   writeFileSync(path.join(cacheDir, "source-plain.txt"), text, "utf8");
   writeFileSync(path.join(cacheDir, "source-plain.meta.toml"), meta, "utf8");
 }
@@ -250,7 +256,7 @@ function writeCalibreConfigFixture(configPath, config) {
   writeFileSync(configPath, lines.join("\n"), "utf8");
 }
 
-function writeCalibreCacheFixture(cachePath, signature, books) {
+function writeCalibreCacheFixture(cachePaths, signature, books) {
   const lines = [
     `rev = ${toTomlString(CALIBRE_CACHE_REV)}`,
     `generated_unix_secs = ${Math.floor(Date.now() / 1000)}`,
@@ -279,8 +285,10 @@ function writeCalibreCacheFixture(cachePath, signature, books) {
     lines.push("");
   }
 
-  mkdirSync(path.dirname(cachePath), { recursive: true });
-  writeFileSync(cachePath, lines.join("\n"), "utf8");
+  for (const cachePath of cachePaths) {
+    mkdirSync(path.dirname(cachePath), { recursive: true });
+    writeFileSync(cachePath, lines.join("\n"), "utf8");
+  }
 }
 
 function resolveTauriBinary() {
@@ -643,6 +651,12 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
   const tmpDir = path.resolve(repoRoot, "tmp");
   mkdirSync(tmpDir, { recursive: true });
   const uniqueRunId = Date.now();
+  const runtimeCacheRoot = path.resolve(tmpDir, `tauri-e2e-cache-${uniqueRunId}`);
+  const previousCacheDirEnv = process.env.EBUP_VIEWER_CACHE_DIR;
+  const previousCalibreConfigPathEnv = process.env.CALIBRE_CONFIG_PATH;
+  process.env.EBUP_VIEWER_CACHE_DIR = runtimeCacheRoot;
+  rmSync(runtimeCacheRoot, { recursive: true, force: true });
+  mkdirSync(runtimeCacheRoot, { recursive: true });
   const sourceFileName = `tauri-e2e-source-${uniqueRunId}.txt`;
   const sourcePath = path.resolve(tmpDir, sourceFileName);
   writeFileSync(
@@ -695,14 +709,7 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
     "utf8"
   );
   const calibreConfigPath = path.resolve(tmpDir, `tauri-e2e-calibre-${uniqueRunId}.toml`);
-  const calibreConfigRepoPath = path.resolve(repoRoot, "conf", "calibre.toml");
-  const previousCalibreConfigFile = existsSync(calibreConfigRepoPath)
-    ? readFileSync(calibreConfigRepoPath, "utf8")
-    : null;
-  const calibreCachePath = path.resolve(repoRoot, ".cache", "calibre-books.toml");
-  const previousCalibreCache = existsSync(calibreCachePath)
-    ? readFileSync(calibreCachePath, "utf8")
-    : null;
+  const calibreCachePaths = [path.join(runtimeCacheRoot, "calibre-books.toml")];
   const calibreTargetBookId = 910_001;
   const calibreTargetTitle = `Runtime Calibre Target ${uniqueRunId}`;
   const calibreConfig = {
@@ -721,7 +728,7 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
     list_cache_ttl_secs: 3600
   };
   writeCalibreConfigFixture(calibreConfigPath, calibreConfig);
-  writeFileSync(calibreConfigRepoPath, readFileSync(calibreConfigPath, "utf8"), "utf8");
+  process.env.CALIBRE_CONFIG_PATH = calibreConfigPath;
   const calibreSignature = buildCalibreCacheSignature(calibreConfig);
   const calibreBooks = [];
   for (let idx = 0; idx < 1_500; idx += 1) {
@@ -744,7 +751,7 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
     file_size_bytes: 4096,
     path: calibreSourcePath
   });
-  writeCalibreCacheFixture(calibreCachePath, calibreSignature, calibreBooks);
+  writeCalibreCacheFixture(calibreCachePaths, calibreSignature, calibreBooks);
 
   runOrThrow("pnpm", ["tauri", "build", "--debug", "--no-bundle"], repoRoot);
   const application = resolveTauriBinary();
@@ -765,17 +772,17 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
       }
     } finally {
       tauriDriver.kill();
-      if (previousCalibreConfigFile === null) {
-        rmSync(calibreConfigRepoPath, { force: true });
+      if (previousCacheDirEnv === undefined) {
+        delete process.env.EBUP_VIEWER_CACHE_DIR;
       } else {
-        writeFileSync(calibreConfigRepoPath, previousCalibreConfigFile, "utf8");
+        process.env.EBUP_VIEWER_CACHE_DIR = previousCacheDirEnv;
       }
-      if (previousCalibreCache === null) {
-        rmSync(calibreCachePath, { force: true });
+      if (previousCalibreConfigPathEnv === undefined) {
+        delete process.env.CALIBRE_CONFIG_PATH;
       } else {
-        mkdirSync(path.dirname(calibreCachePath), { recursive: true });
-        writeFileSync(calibreCachePath, previousCalibreCache, "utf8");
+        process.env.CALIBRE_CONFIG_PATH = previousCalibreConfigPathEnv;
       }
+      rmSync(runtimeCacheRoot, { recursive: true, force: true });
       rmSync(calibreConfigPath, { force: true });
       rmSync(calibreSourcePath, { force: true });
     }
@@ -1191,23 +1198,7 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
     "data-source-path",
     (value) => value.endsWith(pdfFileName)
   );
-  if (pdfSourcePhase === "finished" && pdfEventPhase === "finished") {
-    await waitForElement(driver, By.css("[data-testid='reader-close-session-button']"), 30000);
-    const pdfMarkerLiteral = xpathLiteral(pdfMarker);
-    await waitForElement(
-      driver,
-      By.xpath(
-        `//button[starts-with(@data-testid,'reader-sentence-') and contains(normalize-space(), ${pdfMarkerLiteral})]`
-      ),
-      20000
-    );
-    const closeSessionAfterPdf = await waitForElement(
-      driver,
-      By.css("[data-testid='reader-close-session-button']")
-    );
-    await closeSessionAfterPdf.click();
-    await waitForElement(driver, By.xpath("//h1[normalize-space()='Welcome']"), 20000);
-  } else {
+  if (pdfSourcePhase !== "finished" || pdfEventPhase !== "finished") {
     const sourceMessage = await waitForMarkerAttribute(
       driver,
       "app-last-source-open-event",
@@ -1222,12 +1213,25 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
       () => true,
       5000
     );
-    assert.ok(
-      sourceMessage.length > 0 || pdfMessage.length > 0,
-      "pdf open failure should include source/pdf diagnostic message"
+    throw new Error(
+      `PDF open should finish successfully (source=${pdfSourcePhase}, pdf=${pdfEventPhase}) source_message=${sourceMessage} pdf_message=${pdfMessage}`
     );
-    await waitForElement(driver, By.xpath("//h1[normalize-space()='Welcome']"), 20000);
   }
+  await waitForElement(driver, By.css("[data-testid='reader-close-session-button']"), 30000);
+  const pdfMarkerLiteral = xpathLiteral(pdfMarker);
+  await waitForElement(
+    driver,
+    By.xpath(
+      `//button[starts-with(@data-testid,'reader-sentence-') and contains(normalize-space(), ${pdfMarkerLiteral})]`
+    ),
+    20000
+  );
+  const closeSessionAfterPdf = await waitForElement(
+    driver,
+    By.css("[data-testid='reader-close-session-button']")
+  );
+  await closeSessionAfterPdf.click();
+  await waitForElement(driver, By.xpath("//h1[normalize-space()='Welcome']"), 20000);
 
   const calibreLoadButton = await waitForElement(
     driver,
@@ -1249,11 +1253,7 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
       () => true,
       5000
     );
-    assert.ok(
-      calibreMessage.length > 0,
-      "calibre load failure should include a diagnostic message"
-    );
-    return;
+    throw new Error(`Calibre load should finish successfully: ${calibreMessage}`);
   }
   const calibreCount = Number(
     await waitForMarkerAttribute(driver, "app-last-calibre-event", "data-count", () => true, 5000)
