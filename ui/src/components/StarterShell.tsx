@@ -98,8 +98,10 @@ export function StarterShell({
   const [path, setPath] = useState("");
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   const [calibreSearch, setCalibreSearch] = useState("");
+  const [recentsSearch, setRecentsSearch] = useState("");
   const [showCalibre, setShowCalibre] = useState(true);
   const [calibreSort, setCalibreSort] = useState<CalibreSort>("title_asc");
+  const [recentsSort, setRecentsSort] = useState<"recent_first" | "recent_last" | "title_asc" | "title_desc" | "path_asc" | "path_desc">("recent_first");
   const [calibreScrollTop, setCalibreScrollTop] = useState(0);
   const [logLevelValue, setLogLevelValue] = useState(runtimeLogLevel);
 
@@ -113,6 +115,38 @@ export function StarterShell({
   const filteredCalibre = useMemo(() => {
     return filterAndSortCalibreBooks(calibreBooks, calibreSearch, calibreSort);
   }, [calibreBooks, calibreSearch, calibreSort]);
+
+  const filteredRecents = useMemo(() => {
+    const needle = recentsSearch.trim().toLowerCase();
+    const matches = needle.length === 0
+      ? recents
+      : recents.filter((recent) => {
+          const title = recent.display_title.toLowerCase();
+          const sourcePath = recent.source_path.toLowerCase();
+          return title.includes(needle) || sourcePath.includes(needle);
+        });
+
+    const sorted = [...matches];
+    sorted.sort((a, b) => {
+      if (recentsSort === "recent_first") {
+        return b.last_opened_unix_secs - a.last_opened_unix_secs;
+      }
+      if (recentsSort === "recent_last") {
+        return a.last_opened_unix_secs - b.last_opened_unix_secs;
+      }
+      if (recentsSort === "title_asc") {
+        return a.display_title.localeCompare(b.display_title);
+      }
+      if (recentsSort === "title_desc") {
+        return b.display_title.localeCompare(a.display_title);
+      }
+      if (recentsSort === "path_asc") {
+        return a.source_path.localeCompare(b.source_path);
+      }
+      return b.source_path.localeCompare(a.source_path);
+    });
+    return sorted;
+  }, [recents, recentsSearch, recentsSort]);
 
   const virtualWindow = useMemo(() => {
     return computeVirtualWindow(
@@ -157,6 +191,7 @@ export function StarterShell({
   };
 
   const hasRecents = recents.length > 0;
+  const hasFilteredRecents = filteredRecents.length > 0;
   const sourceOpenStatus =
     sourceOpenEvent && sourceOpenEvent.phase !== "ready"
       ? `Open #${sourceOpenEvent.request_id}: ${sourceOpenEvent.phase}${
@@ -302,6 +337,53 @@ export function StarterShell({
                 </Button>
               </Stack>
 
+              <Stack spacing={1}>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
+                  <TextField
+                    size="small"
+                    fullWidth
+                    label="Search recents (title/path)"
+                    value={recentsSearch}
+                    inputProps={{ "data-testid": "starter-recents-search-input" }}
+                    onChange={(event) => setRecentsSearch(event.target.value)}
+                    disabled={busy || loadingRecents}
+                  />
+                  <FormControl size="small" className="md:min-w-56">
+                    <InputLabel id="recents-sort-label">Sort</InputLabel>
+                    <Select
+                      labelId="recents-sort-label"
+                      label="Sort"
+                      value={recentsSort}
+                      onChange={(event) =>
+                        setRecentsSort(
+                          event.target.value as
+                            | "recent_first"
+                            | "recent_last"
+                            | "title_asc"
+                            | "title_desc"
+                            | "path_asc"
+                            | "path_desc"
+                        )
+                      }
+                      disabled={busy || loadingRecents}
+                    >
+                      <MenuItem value="recent_first">Recently Opened</MenuItem>
+                      <MenuItem value="recent_last">Least Recently Opened</MenuItem>
+                      <MenuItem value="title_asc">Title (A-Z)</MenuItem>
+                      <MenuItem value="title_desc">Title (Z-A)</MenuItem>
+                      <MenuItem value="path_asc">Path (A-Z)</MenuItem>
+                      <MenuItem value="path_desc">Path (Z-A)</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Stack>
+
+                {!loadingRecents && hasRecents ? (
+                  <Typography variant="caption" color="text.secondary">
+                    Showing {filteredRecents.length.toLocaleString()} of {recents.length.toLocaleString()} recent entries
+                  </Typography>
+                ) : null}
+              </Stack>
+
               {loadingRecents ? (
                 <Stack direction="row" spacing={1} alignItems="center">
                   <CircularProgress size={18} />
@@ -311,16 +393,16 @@ export function StarterShell({
                 </Stack>
               ) : null}
 
-              {!hasRecents && !loadingRecents ? (
+              {!hasFilteredRecents && !loadingRecents ? (
                 <Typography variant="body2" color="text.secondary">
-                  No recent books yet.
+                  {hasRecents ? "No recent books match the current filters." : "No recent books yet."}
                 </Typography>
               ) : null}
 
-              {hasRecents ? (
+              {hasFilteredRecents ? (
                 <div className="overflow-y-auto pr-1" style={{ maxHeight: recentsViewportHeight }}>
                   <div className="grid grid-cols-1 gap-3">
-                    {recents.map((recent) => {
+                    {filteredRecents.map((recent) => {
                       const recentThumbnailSrc = toThumbnailSrc(recent.thumbnail_path);
                       return (
                     <Card
