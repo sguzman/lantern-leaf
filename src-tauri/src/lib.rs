@@ -418,6 +418,31 @@ fn configure_calibre_config_path_from_workspace() {
     );
 }
 
+fn configure_normalizer_config_path_from_workspace() {
+    if std::env::var_os("LANTERNLEAF_NORMALIZER_CONFIG_PATH").is_some() {
+        return;
+    }
+
+    let Some(root) = workspace_root_from_cwd() else {
+        return;
+    };
+
+    let normalizer_config_path = root.join("conf/normalizer.toml");
+    if !normalizer_config_path.exists() {
+        return;
+    }
+
+    // SAFETY: startup-time process env initialization before background worker threads are launched.
+    unsafe {
+        std::env::set_var("LANTERNLEAF_NORMALIZER_CONFIG_PATH", &normalizer_config_path);
+    }
+
+    info!(
+        path = %normalizer_config_path.display(),
+        "Configured normalizer config path from workspace context"
+    );
+}
+
 fn dev_logs_dir() -> PathBuf {
     if let Some(root) = workspace_root_from_cwd() {
         root.join("logs")
@@ -2432,6 +2457,7 @@ pub fn run() {
     configure_cache_dir_from_config(&startup_config, &config_path);
     configure_cache_dir_from_workspace();
     configure_calibre_config_path_from_workspace();
+    configure_normalizer_config_path_from_workspace();
     let mut log_builder = tauri_plugin_log::Builder::new()
         .level(log_level_to_filter(startup_config.log_level))
         .target(Target::new(TargetKind::Stdout))

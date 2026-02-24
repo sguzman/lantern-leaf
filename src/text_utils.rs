@@ -198,7 +198,7 @@ fn load_abbreviation_tokens() -> HashSet<String> {
         out.insert(default.to_string());
     }
 
-    let path = PathBuf::from("conf/normalizer.toml");
+    let path = resolve_normalizer_config_path();
     let Ok(contents) = fs::read_to_string(&path) else {
         return out;
     };
@@ -211,6 +211,33 @@ fn load_abbreviation_tokens() -> HashSet<String> {
         }
     }
     out
+}
+
+fn resolve_normalizer_config_path() -> PathBuf {
+    const NORMALIZER_CONFIG_ENV: &str = "LANTERNLEAF_NORMALIZER_CONFIG_PATH";
+    const NORMALIZER_CONFIG_REL_PATH: &str = "conf/normalizer.toml";
+
+    if let Some(value) = std::env::var_os(NORMALIZER_CONFIG_ENV) {
+        let candidate = PathBuf::from(value);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    let relative = PathBuf::from(NORMALIZER_CONFIG_REL_PATH);
+    if relative.exists() {
+        return relative;
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for ancestor in manifest_dir.ancestors() {
+        let candidate = ancestor.join(NORMALIZER_CONFIG_REL_PATH);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    PathBuf::from(NORMALIZER_CONFIG_REL_PATH)
 }
 
 fn normalize_abbreviation_token(raw: &str) -> String {

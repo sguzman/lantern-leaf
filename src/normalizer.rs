@@ -9,6 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_NORMALIZER_PATH: &str = "conf/normalizer.toml";
+const NORMALIZER_CONFIG_ENV: &str = "LANTERNLEAF_NORMALIZER_CONFIG_PATH";
 const SENTENCE_MARKER: &str = "\n<<__EBUP_SENTENCE_BOUNDARY__>>\n";
 
 static RE_INLINE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"`([^`]+)`").unwrap());
@@ -197,7 +198,8 @@ pub struct PageNormalization {
 
 impl TextNormalizer {
     pub fn load_default() -> Self {
-        Self::load(Path::new(DEFAULT_NORMALIZER_PATH))
+        let path = resolve_default_normalizer_path();
+        Self::load(path.as_path())
     }
 
     pub fn load(path: &Path) -> Self {
@@ -667,6 +669,30 @@ impl TextNormalizer {
 
         normalized
     }
+}
+
+fn resolve_default_normalizer_path() -> PathBuf {
+    if let Some(value) = std::env::var_os(NORMALIZER_CONFIG_ENV) {
+        let candidate = PathBuf::from(value);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    let relative = PathBuf::from(DEFAULT_NORMALIZER_PATH);
+    if relative.exists() {
+        return relative;
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for ancestor in manifest_dir.ancestors() {
+        let candidate = ancestor.join(DEFAULT_NORMALIZER_PATH);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    PathBuf::from(DEFAULT_NORMALIZER_PATH)
 }
 
 impl Default for TextNormalizer {
