@@ -1,5 +1,4 @@
 import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
@@ -62,15 +61,18 @@ function toThumbnailSrc(path: string | null | undefined): string | null {
   }
 
   const lower = path.toLowerCase();
-  if (lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("data:") || lower.startsWith("asset:")) {
+  if (
+    lower.startsWith("http://") ||
+    lower.startsWith("https://") ||
+    lower.startsWith("data:") ||
+    lower.startsWith("asset:")
+  ) {
     return path;
   }
 
-  try {
-    return convertFileSrc(path);
-  } catch {
-    return path;
-  }
+  const normalized = path.replace(/\\/g, "/");
+  const withLeadingSlash = normalized.startsWith("/") ? normalized : `/${normalized}`;
+  return encodeURI(`file://${withLeadingSlash}`);
 }
 
 export function StarterShell({
