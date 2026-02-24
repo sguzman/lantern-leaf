@@ -127,6 +127,7 @@ const mockReaderSnapshot = (): ReaderSnapshot => ({
     page_index: 1,
     total_pages: MOCK_PAGES.length,
     tts_progress_pct: 100,
+    global_progress_pct: 33.333,
     page_time_remaining_secs: 0,
     book_time_remaining_secs: 0,
     page_word_count: MOCK_PAGES[0].text.split(/\s+/).length,
@@ -225,6 +226,7 @@ function applyMockPage(reader: ReaderSnapshot, page: number): void {
   reader.stats.total_pages = MOCK_PAGES.length;
   reader.stats.page_word_count = wordsOnPage;
   reader.stats.page_sentence_count = pageData.sentences.length;
+  reader.stats.tts_progress_pct = 100;
   reader.stats.page_start_percent = Number(((wordsBeforePage / totalWords) * 100).toFixed(3));
   reader.stats.page_end_percent = Number(
     (((wordsBeforePage + wordsOnPage) / totalWords) * 100).toFixed(3)
@@ -235,6 +237,9 @@ function applyMockPage(reader: ReaderSnapshot, page: number): void {
   reader.stats.sentences_read_up_to_page_end = clampedPage + pageData.sentences.length;
   reader.stats.words_read_up_to_current_position = wordsBeforePage + wordsOnPage;
   reader.stats.sentences_read_up_to_current_position = clampedPage + pageData.sentences.length;
+  reader.stats.global_progress_pct = Number(
+    ((reader.stats.words_read_up_to_current_position / totalWords) * 100).toFixed(3)
+  );
 }
 
 async function mockOpenWithPath(path: string): Promise<OpenSourceResult> {

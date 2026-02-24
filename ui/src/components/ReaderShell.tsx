@@ -1203,7 +1203,10 @@ export const ReaderShell = memo(function ReaderShell({
                           Page index: {reader.stats.page_index} / {reader.stats.total_pages}
                         </Typography>
                         <Typography variant="body2">
-                          TTS progress: {reader.stats.tts_progress_pct.toFixed(3)}%
+                          TTS progress (page): {reader.stats.tts_progress_pct.toFixed(3)}%
+                        </Typography>
+                        <Typography variant="body2">
+                          TTS progress (global): {reader.stats.global_progress_pct.toFixed(3)}%
                         </Typography>
                         <Typography variant="body2">
                           Page time remaining: {formatSeconds(reader.stats.page_time_remaining_secs)}

@@ -2732,6 +2732,7 @@ mod tests {
                     page_index: 1,
                     total_pages: 1,
                     tts_progress_pct: 0.0,
+                    global_progress_pct: 0.0,
                     page_time_remaining_secs: 0.0,
                     book_time_remaining_secs: 0.0,
                     page_word_count: 1,
