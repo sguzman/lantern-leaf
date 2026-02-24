@@ -63,6 +63,12 @@ pub struct ReaderTtsView {
 #[ts(export)]
 pub struct ReaderSettingsPatch {
     #[ts(optional)]
+    pub theme: Option<config::ThemeMode>,
+    #[ts(optional)]
+    pub day_highlight: Option<config::HighlightColor>,
+    #[ts(optional)]
+    pub night_highlight: Option<config::HighlightColor>,
+    #[ts(optional)]
     pub font_family: Option<config::FontFamily>,
     #[ts(optional)]
     pub font_weight: Option<config::FontWeight>,
@@ -386,6 +392,25 @@ impl ReaderSession {
         let preserve = self.global_display_idx();
         let mut repaginate = false;
 
+        if let Some(theme) = patch.theme {
+            self.config.theme = theme;
+        }
+        if let Some(day_highlight) = patch.day_highlight {
+            self.config.day_highlight = config::HighlightColor {
+                r: day_highlight.r.clamp(0.0, 1.0),
+                g: day_highlight.g.clamp(0.0, 1.0),
+                b: day_highlight.b.clamp(0.0, 1.0),
+                a: day_highlight.a.clamp(0.0, 1.0),
+            };
+        }
+        if let Some(night_highlight) = patch.night_highlight {
+            self.config.night_highlight = config::HighlightColor {
+                r: night_highlight.r.clamp(0.0, 1.0),
+                g: night_highlight.g.clamp(0.0, 1.0),
+                b: night_highlight.b.clamp(0.0, 1.0),
+                a: night_highlight.a.clamp(0.0, 1.0),
+            };
+        }
         if let Some(font_family) = patch.font_family {
             self.config.font_family = font_family;
         }
@@ -1231,6 +1256,9 @@ mod tests {
 
         session.apply_settings_patch(
             ReaderSettingsPatch {
+                theme: None,
+                day_highlight: None,
+                night_highlight: None,
                 font_family: None,
                 font_weight: None,
                 font_size: None,
@@ -1300,6 +1328,9 @@ mod tests {
         let event = session.apply_command(
             SessionCommand::ApplySettings {
                 patch: ReaderSettingsPatch {
+                    theme: None,
+                    day_highlight: None,
+                    night_highlight: None,
                     font_family: None,
                     font_weight: None,
                     font_size: None,

@@ -31,8 +31,10 @@ import { computeReaderTypographyLayout } from "./readerTypography";
 import type {
   FontFamily,
   FontWeight,
+  HighlightColor,
   ReaderSettingsPatch,
   ReaderSnapshot,
+  ThemeMode,
   TtsStateEvent
 } from "../types";
 
@@ -126,6 +128,48 @@ function normalizeNumber(value: number, min: number, max: number, step: number, 
 function almostEqual(a: number, b: number, decimals: number): boolean {
   const threshold = Math.max(1e-8, Math.pow(10, -decimals) / 2);
   return Math.abs(a - b) <= threshold;
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function toHexColor(color: HighlightColor): string {
+  const r = Math.round(clamp01(color.r) * 255)
+    .toString(16)
+    .padStart(2, "0");
+  const g = Math.round(clamp01(color.g) * 255)
+    .toString(16)
+    .padStart(2, "0");
+  const b = Math.round(clamp01(color.b) * 255)
+    .toString(16)
+    .padStart(2, "0");
+  return `#${r}${g}${b}`;
+}
+
+function withHexColor(current: HighlightColor, hex: string): HighlightColor {
+  const normalized = hex.replace("#", "");
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return current;
+  }
+  const r = Number.parseInt(normalized.slice(0, 2), 16) / 255;
+  const g = Number.parseInt(normalized.slice(2, 4), 16) / 255;
+  const b = Number.parseInt(normalized.slice(4, 6), 16) / 255;
+  return {
+    r: clamp01(r),
+    g: clamp01(g),
+    b: clamp01(b),
+    a: clamp01(current.a)
+  };
+}
+
+function withAlpha(current: HighlightColor, alpha: number): HighlightColor {
+  return {
+    r: clamp01(current.r),
+    g: clamp01(current.g),
+    b: clamp01(current.b),
+    a: clamp01(alpha)
+  };
 }
 
 function scrollSentenceIntoView(
@@ -811,6 +855,97 @@ export function ReaderShell({
                             ))}
                           </Select>
                         </FormControl>
+                        <FormControl size="small">
+                          <InputLabel id="setting-theme-label">Theme</InputLabel>
+                          <Select
+                            labelId="setting-theme-label"
+                            label="Theme"
+                            value={reader.settings.theme}
+                            onChange={(event) =>
+                              void onApplySettings({
+                                theme: event.target.value as ThemeMode
+                              })
+                            }
+                            data-testid="setting-theme"
+                          >
+                            <MenuItem value="day">Day</MenuItem>
+                            <MenuItem value="night">Night</MenuItem>
+                          </Select>
+                        </FormControl>
+
+                        <Stack spacing={1}>
+                          <Typography variant="caption" fontWeight={700}>
+                            Day Highlight
+                          </Typography>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <TextField
+                              type="color"
+                              size="small"
+                              value={toHexColor(reader.settings.day_highlight)}
+                              onChange={(event) =>
+                                void onApplySettings({
+                                  day_highlight: withHexColor(
+                                    reader.settings.day_highlight,
+                                    event.target.value
+                                  )
+                                })
+                              }
+                              inputProps={{ "data-testid": "setting-day-highlight-color" }}
+                              sx={{ width: 76 }}
+                            />
+                            <NumericSettingControl
+                              label="Day Highlight Alpha"
+                              testId="setting-day-highlight-alpha"
+                              value={reader.settings.day_highlight.a}
+                              min={0}
+                              max={1}
+                              step={0.01}
+                              decimals={2}
+                              onCommit={async (next) => {
+                                await onApplySettings({
+                                  day_highlight: withAlpha(reader.settings.day_highlight, next)
+                                });
+                              }}
+                            />
+                          </Stack>
+                        </Stack>
+
+                        <Stack spacing={1}>
+                          <Typography variant="caption" fontWeight={700}>
+                            Night Highlight
+                          </Typography>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <TextField
+                              type="color"
+                              size="small"
+                              value={toHexColor(reader.settings.night_highlight)}
+                              onChange={(event) =>
+                                void onApplySettings({
+                                  night_highlight: withHexColor(
+                                    reader.settings.night_highlight,
+                                    event.target.value
+                                  )
+                                })
+                              }
+                              inputProps={{ "data-testid": "setting-night-highlight-color" }}
+                              sx={{ width: 76 }}
+                            />
+                            <NumericSettingControl
+                              label="Night Highlight Alpha"
+                              testId="setting-night-highlight-alpha"
+                              value={reader.settings.night_highlight.a}
+                              min={0}
+                              max={1}
+                              step={0.01}
+                              decimals={2}
+                              onCommit={async (next) => {
+                                await onApplySettings({
+                                  night_highlight: withAlpha(reader.settings.night_highlight, next)
+                                });
+                              }}
+                            />
+                          </Stack>
+                        </Stack>
 
                         <NumericSettingControl
                           label="Font Size"

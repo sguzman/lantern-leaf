@@ -2,12 +2,12 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_log::{Target, TargetKind, log::LevelFilter};
 use tracing::{info, warn};
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt};
 use ts_rs::TS;
 
 pub use lanternleaf_core::{
@@ -448,7 +448,14 @@ fn log_level_to_filter(level: config::LogLevel) -> LevelFilter {
     }
 }
 
-fn init_tracing(config: &config::AppConfig) {
+fn log_timestamp_slug() -> String {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(now) => format!("{}-{:03}", now.as_secs(), now.subsec_millis()),
+        Err(_) => "0-000".to_string(),
+    }
+}
+
+fn init_tracing(config: &config::AppConfig, timestamp_slug: &str) {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(config.log_level.as_filter_str()));
 
@@ -461,7 +468,8 @@ fn init_tracing(config: &config::AppConfig) {
             );
         }
 
-        let file_appender = tracing_appender::rolling::never(&logs_dir, "lanternleaf-dev.log");
+        let tracing_file_name = format!("lanternleaf-dev-{timestamp_slug}.log");
+        let file_appender = tracing_appender::rolling::never(&logs_dir, tracing_file_name);
         let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
         let _ = TRACING_LOG_GUARD.set(guard);
 
@@ -477,22 +485,20 @@ fn init_tracing(config: &config::AppConfig) {
             .with_file(true)
             .with_line_number(true);
 
-        let _ = tracing_subscriber::registry()
+        let subscriber = tracing_subscriber::registry()
             .with(filter)
             .with(stderr_layer)
-            .with(file_layer)
-            .try_init();
+            .with(file_layer);
+        let _ = tracing::subscriber::set_global_default(subscriber);
     } else {
-        let _ = tracing_subscriber::registry()
-            .with(filter)
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_writer(std::io::stderr)
-                    .with_target(true)
-                    .with_file(true)
-                    .with_line_number(true),
-            )
-            .try_init();
+        let subscriber = tracing_subscriber::registry().with(filter).with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_target(true)
+                .with_file(true)
+                .with_line_number(true),
+        );
+        let _ = tracing::subscriber::set_global_default(subscriber);
     }
 }
 
@@ -2146,7 +2152,8 @@ pub fn run() {
 
     let config_path = app_config_path();
     let startup_config = config::load_config(&config_path);
-    init_tracing(&startup_config);
+    let log_timestamp = log_timestamp_slug();
+    init_tracing(&startup_config, &log_timestamp);
     configure_cache_dir_from_config(&startup_config, &config_path);
     configure_cache_dir_from_workspace();
     let mut log_builder = tauri_plugin_log::Builder::new()
@@ -2158,7 +2165,7 @@ pub fn run() {
         let logs_dir = dev_logs_dir();
         log_builder = log_builder.target(Target::new(TargetKind::Folder {
             path: logs_dir.clone(),
-            file_name: Some("lanternleaf-webview-dev".to_string()),
+            file_name: Some(format!("lanternleaf-webview-dev-{log_timestamp}")),
         }));
         info!(
             mode = %runtime_mode_label(),
