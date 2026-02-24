@@ -260,6 +260,38 @@ fn bridge_error(code: &str, message: impl Into<String>) -> BridgeError {
     }
 }
 
+fn configure_cache_dir_from_workspace() {
+    if std::env::var_os(cache::CACHE_DIR_ENV).is_some() {
+        return;
+    }
+
+    let Ok(cwd) = std::env::current_dir() else {
+        return;
+    };
+
+    let cache_candidate = if cwd.file_name().and_then(|name| name.to_str()) == Some("src-tauri") {
+        cwd.parent()
+            .map(|parent| parent.join(cache::CACHE_DIR))
+            .unwrap_or_else(|| cwd.join(cache::CACHE_DIR))
+    } else {
+        cwd.join(cache::CACHE_DIR)
+    };
+
+    if !cache_candidate.exists() {
+        return;
+    }
+
+    // SAFETY: startup-time process env initialization before background worker threads are launched.
+    unsafe {
+        std::env::set_var(cache::CACHE_DIR_ENV, &cache_candidate);
+    }
+
+    info!(
+        cache_dir = %cache_candidate.display(),
+        "Configured cache root from workspace context"
+    );
+}
+
 fn app_config_path() -> PathBuf {
     std::env::var_os("LANTERNLEAF_CONFIG_PATH")
         .map(PathBuf::from)
@@ -1922,6 +1954,8 @@ const BRIDGE_EVENT_NAMES: &[&str] = &[
 pub fn run() {
     #[cfg(target_os = "linux")]
     configure_linux_display_backend();
+
+    configure_cache_dir_from_workspace();
 
     let startup_config = config::load_config(&app_config_path());
     let log_plugin = tauri_plugin_log::Builder::new()
