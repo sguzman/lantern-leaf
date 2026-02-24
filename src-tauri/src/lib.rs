@@ -7,32 +7,10 @@ use tauri_plugin_log::{Target, TargetKind, log::LevelFilter};
 use tracing::{info, warn};
 use ts_rs::TS;
 
-#[allow(dead_code, unused_imports)]
-#[path = "../../src/cache.rs"]
-mod cache;
-#[allow(dead_code, unused_imports)]
-#[path = "../../src/calibre.rs"]
-mod calibre;
-#[allow(dead_code, unused_imports)]
-#[path = "../../src/config/mod.rs"]
-mod config;
-#[allow(dead_code, unused_imports)]
-#[path = "../../src/epub_loader.rs"]
-mod epub_loader;
-#[allow(dead_code, unused_imports)]
-#[path = "../../src/normalizer.rs"]
-mod normalizer;
-#[allow(dead_code, unused_imports)]
-#[path = "../../src/pagination.rs"]
-mod pagination;
-#[allow(dead_code, unused_imports)]
-#[path = "../../src/quack_check/mod.rs"]
-mod quack_check;
-#[allow(dead_code, unused_imports)]
-#[path = "../../src/text_utils.rs"]
-mod text_utils;
-
-mod session;
+use ebup_core::session;
+pub use ebup_core::{
+    cache, calibre, config, epub_loader, normalizer, pagination, quack_check, text_utils,
+};
 
 const MAX_RECENT_LIMIT: usize = 512;
 const DEFAULT_RECENT_LIMIT: usize = 64;
@@ -564,15 +542,12 @@ fn emit_tts_state(
     );
 }
 
-fn apply_reader_update<F>(
+fn apply_reader_command(
     app: &tauri::AppHandle,
     state: &State<'_, Mutex<BackendState>>,
-    action: &str,
-    update: F,
-) -> Result<session::ReaderSnapshot, BridgeError>
-where
-    F: FnOnce(&mut session::ReaderSession, &normalizer::TextNormalizer),
-{
+    command: session::SessionCommand,
+) -> Result<session::ReaderSnapshot, BridgeError> {
+    let action = command.action();
     let (snapshot, request_id) = {
         let mut guard = state
             .lock()
@@ -584,8 +559,8 @@ where
             .reader
             .as_mut()
             .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
-        update(reader, &normalizer);
-        (reader.snapshot(panels, &normalizer), request_id)
+        let event = reader.apply_command(command, panels, &normalizer);
+        (event.snapshot, request_id)
     };
     emit_reader_state(app, request_id, action, &snapshot);
     emit_tts_state(app, request_id, action, &snapshot.tts);
@@ -1034,7 +1009,7 @@ fn reader_get_snapshot(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(&app, &state, "reader_get_snapshot", |_, _| {})
+    apply_reader_command(&app, &state, session::SessionCommand::GetSnapshot)
 }
 
 #[tauri::command]
@@ -1042,9 +1017,7 @@ fn reader_next_page(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(&app, &state, "reader_next_page", |reader, normalizer| {
-        reader.next_page(normalizer);
-    })
+    apply_reader_command(&app, &state, session::SessionCommand::NextPage)
 }
 
 #[tauri::command]
@@ -1052,9 +1025,7 @@ fn reader_prev_page(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(&app, &state, "reader_prev_page", |reader, normalizer| {
-        reader.prev_page(normalizer);
-    })
+    apply_reader_command(&app, &state, session::SessionCommand::PrevPage)
 }
 
 #[tauri::command]
@@ -1063,9 +1034,7 @@ fn reader_set_page(
     state: State<'_, Mutex<BackendState>>,
     page: usize,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(&app, &state, "reader_set_page", |reader, normalizer| {
-        reader.set_page(page, normalizer);
-    })
+    apply_reader_command(&app, &state, session::SessionCommand::SetPage { page })
 }
 
 #[tauri::command]
@@ -1074,13 +1043,10 @@ fn reader_sentence_click(
     state: State<'_, Mutex<BackendState>>,
     sentence_idx: usize,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(
+    apply_reader_command(
         &app,
         &state,
-        "reader_sentence_click",
-        |reader, normalizer| {
-            reader.sentence_click(sentence_idx, normalizer);
-        },
+        session::SessionCommand::SentenceClick { sentence_idx },
     )
 }
 
@@ -1089,14 +1055,7 @@ fn reader_next_sentence(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(
-        &app,
-        &state,
-        "reader_next_sentence",
-        |reader, normalizer| {
-            reader.select_next_sentence(normalizer);
-        },
-    )
+    apply_reader_command(&app, &state, session::SessionCommand::NextSentence)
 }
 
 #[tauri::command]
@@ -1104,14 +1063,7 @@ fn reader_prev_sentence(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(
-        &app,
-        &state,
-        "reader_prev_sentence",
-        |reader, normalizer| {
-            reader.select_prev_sentence(normalizer);
-        },
-    )
+    apply_reader_command(&app, &state, session::SessionCommand::PrevSentence)
 }
 
 #[tauri::command]
@@ -1119,14 +1071,7 @@ fn reader_toggle_text_only(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(
-        &app,
-        &state,
-        "reader_toggle_text_only",
-        |reader, normalizer| {
-            reader.toggle_text_only(normalizer);
-        },
-    )
+    apply_reader_command(&app, &state, session::SessionCommand::ToggleTextOnly)
 }
 
 #[tauri::command]
@@ -1135,13 +1080,10 @@ fn reader_apply_settings(
     state: State<'_, Mutex<BackendState>>,
     patch: session::ReaderSettingsPatch,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(
+    apply_reader_command(
         &app,
         &state,
-        "reader_apply_settings",
-        |reader, normalizer| {
-            reader.apply_settings_patch(patch, normalizer);
-        },
+        session::SessionCommand::ApplySettings { patch },
     )
 }
 
@@ -1151,13 +1093,10 @@ fn reader_search_set_query(
     state: State<'_, Mutex<BackendState>>,
     query: String,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(
+    apply_reader_command(
         &app,
         &state,
-        "reader_search_set_query",
-        |reader, normalizer| {
-            reader.set_search_query(query, normalizer);
-        },
+        session::SessionCommand::SearchSetQuery { query },
     )
 }
 
@@ -1166,9 +1105,7 @@ fn reader_search_next(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(&app, &state, "reader_search_next", |reader, normalizer| {
-        reader.search_next(normalizer);
-    })
+    apply_reader_command(&app, &state, session::SessionCommand::SearchNext)
 }
 
 #[tauri::command]
@@ -1176,9 +1113,7 @@ fn reader_search_prev(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(&app, &state, "reader_search_prev", |reader, normalizer| {
-        reader.search_prev(normalizer);
-    })
+    apply_reader_command(&app, &state, session::SessionCommand::SearchPrev)
 }
 
 #[tauri::command]
@@ -1186,9 +1121,7 @@ fn reader_tts_play(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(&app, &state, "reader_tts_play", |reader, normalizer| {
-        reader.tts_play(normalizer);
-    })
+    apply_reader_command(&app, &state, session::SessionCommand::TtsPlay)
 }
 
 #[tauri::command]
@@ -1196,9 +1129,7 @@ fn reader_tts_pause(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(&app, &state, "reader_tts_pause", |reader, _| {
-        reader.tts_pause();
-    })
+    apply_reader_command(&app, &state, session::SessionCommand::TtsPause)
 }
 
 #[tauri::command]
@@ -1206,14 +1137,7 @@ fn reader_tts_toggle_play_pause(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(
-        &app,
-        &state,
-        "reader_tts_toggle_play_pause",
-        |reader, normalizer| {
-            reader.tts_toggle_play_pause(normalizer);
-        },
-    )
+    apply_reader_command(&app, &state, session::SessionCommand::TtsTogglePlayPause)
 }
 
 #[tauri::command]
@@ -1221,14 +1145,7 @@ fn reader_tts_play_from_page_start(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(
-        &app,
-        &state,
-        "reader_tts_play_from_page_start",
-        |reader, normalizer| {
-            reader.tts_play_from_page_start(normalizer);
-        },
-    )
+    apply_reader_command(&app, &state, session::SessionCommand::TtsPlayFromPageStart)
 }
 
 #[tauri::command]
@@ -1236,14 +1153,7 @@ fn reader_tts_play_from_highlight(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(
-        &app,
-        &state,
-        "reader_tts_play_from_highlight",
-        |reader, normalizer| {
-            reader.tts_play_from_highlight(normalizer);
-        },
-    )
+    apply_reader_command(&app, &state, session::SessionCommand::TtsPlayFromHighlight)
 }
 
 #[tauri::command]
@@ -1251,14 +1161,7 @@ fn reader_tts_seek_next(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(
-        &app,
-        &state,
-        "reader_tts_seek_next",
-        |reader, normalizer| {
-            reader.tts_seek_next(normalizer);
-        },
-    )
+    apply_reader_command(&app, &state, session::SessionCommand::TtsSeekNext)
 }
 
 #[tauri::command]
@@ -1266,14 +1169,7 @@ fn reader_tts_seek_prev(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(
-        &app,
-        &state,
-        "reader_tts_seek_prev",
-        |reader, normalizer| {
-            reader.tts_seek_prev(normalizer);
-        },
-    )
+    apply_reader_command(&app, &state, session::SessionCommand::TtsSeekPrev)
 }
 
 #[tauri::command]
@@ -1281,14 +1177,7 @@ fn reader_tts_repeat_sentence(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_update(
-        &app,
-        &state,
-        "reader_tts_repeat_sentence",
-        |reader, normalizer| {
-            reader.tts_repeat_current_sentence(normalizer);
-        },
-    )
+    apply_reader_command(&app, &state, session::SessionCommand::TtsRepeatSentence)
 }
 
 #[tauri::command]
@@ -1569,41 +1458,9 @@ fn configure_linux_display_backend() {
     );
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    #[cfg(target_os = "linux")]
-    configure_linux_display_backend();
-
-    let startup_config = config::load_config(&app_config_path());
-    let log_plugin = tauri_plugin_log::Builder::new()
-        .level(log_level_to_filter(startup_config.log_level))
-        .target(Target::new(TargetKind::Stdout))
-        .target(Target::new(TargetKind::Webview))
-        .build();
-
-    info!("Starting ebup-viewer tauri bridge");
-    let builder = tauri::Builder::default()
-        .setup(|app| {
-            let app_handle = app.handle().clone();
-            if let Err(err) = ctrlc::set_handler(move || {
-                info!("Received Ctrl+C; running safe shutdown housekeeping");
-                let state = app_handle.state::<Mutex<BackendState>>();
-                finalize_shutdown_from_mutex(state.inner());
-                app_handle.exit(130);
-            }) {
-                warn!("Failed to install Ctrl+C signal handler: {err}");
-            }
-            Ok(())
-        })
-        .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-                let state = window.app_handle().state::<Mutex<BackendState>>();
-                finalize_shutdown_from_mutex(state.inner());
-            }
-        })
-        .manage(Mutex::new(BackendState::new()))
-        .plugin(log_plugin)
-        .invoke_handler(tauri::generate_handler![
+macro_rules! bridge_command_idents {
+    ($callback:ident) => {
+        $callback!(
             session_get_bootstrap,
             session_get_state,
             session_return_to_starter,
@@ -1639,7 +1496,73 @@ pub fn run() {
             logging_set_level,
             calibre_load_books,
             calibre_open_book
-        ]);
+        )
+    };
+}
+
+macro_rules! as_generate_handler {
+    ($($command:ident),* $(,)?) => {
+        tauri::generate_handler![$($command),*]
+    };
+}
+
+macro_rules! as_command_name_slice {
+    ($($command:ident),* $(,)?) => {
+        &[$(stringify!($command)),*]
+    };
+}
+
+const BRIDGE_COMMAND_NAMES: &[&str] = bridge_command_idents!(as_command_name_slice);
+const BRIDGE_EVENT_NAMES: &[&str] = &[
+    "source-open",
+    "calibre-load",
+    "session-state",
+    "reader-state",
+    "tts-state",
+    "pdf-transcription",
+    "log-level",
+];
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    #[cfg(target_os = "linux")]
+    configure_linux_display_backend();
+
+    let startup_config = config::load_config(&app_config_path());
+    let log_plugin = tauri_plugin_log::Builder::new()
+        .level(log_level_to_filter(startup_config.log_level))
+        .target(Target::new(TargetKind::Stdout))
+        .target(Target::new(TargetKind::Webview))
+        .build();
+
+    info!("Starting ebup-viewer tauri bridge");
+    info!(
+        command_count = BRIDGE_COMMAND_NAMES.len(),
+        event_count = BRIDGE_EVENT_NAMES.len(),
+        "Registered stable bridge surface"
+    );
+    let builder = tauri::Builder::default()
+        .setup(|app| {
+            let app_handle = app.handle().clone();
+            if let Err(err) = ctrlc::set_handler(move || {
+                info!("Received Ctrl+C; running safe shutdown housekeeping");
+                let state = app_handle.state::<Mutex<BackendState>>();
+                finalize_shutdown_from_mutex(state.inner());
+                app_handle.exit(130);
+            }) {
+                warn!("Failed to install Ctrl+C signal handler: {err}");
+            }
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                let state = window.app_handle().state::<Mutex<BackendState>>();
+                finalize_shutdown_from_mutex(state.inner());
+            }
+        })
+        .manage(Mutex::new(BackendState::new()))
+        .plugin(log_plugin)
+        .invoke_handler(bridge_command_idents!(as_generate_handler));
 
     if let Err(err) = builder.run(tauri::generate_context!()) {
         warn!("tauri runtime failed: {err}");
@@ -1659,6 +1582,36 @@ mod tests {
             .expect("clock should be after epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("ebup_viewer_test_{name}_{nanos}.{extension}"))
+    }
+
+    #[test]
+    fn bridge_command_surface_remains_stable() {
+        assert_eq!(BRIDGE_COMMAND_NAMES.len(), 35);
+        assert_eq!(BRIDGE_COMMAND_NAMES[0], "session_get_bootstrap");
+        assert_eq!(
+            BRIDGE_COMMAND_NAMES[BRIDGE_COMMAND_NAMES.len() - 1],
+            "calibre_open_book"
+        );
+        assert!(BRIDGE_COMMAND_NAMES.contains(&"source_open_path"));
+        assert!(BRIDGE_COMMAND_NAMES.contains(&"source_open_clipboard_text"));
+        assert!(BRIDGE_COMMAND_NAMES.contains(&"reader_tts_play"));
+        assert!(BRIDGE_COMMAND_NAMES.contains(&"reader_tts_repeat_sentence"));
+    }
+
+    #[test]
+    fn bridge_event_surface_remains_stable() {
+        assert_eq!(
+            BRIDGE_EVENT_NAMES,
+            &[
+                "source-open",
+                "calibre-load",
+                "session-state",
+                "reader-state",
+                "tts-state",
+                "pdf-transcription",
+                "log-level",
+            ]
+        );
     }
 
     #[test]

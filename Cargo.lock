@@ -1401,6 +1401,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
+name = "ebup-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "epub",
+ "html2text",
+ "image 0.25.9",
+ "once_cell",
+ "regex",
+ "reqwest 0.12.28",
+ "rodio",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sonic-rs-sys",
+ "toml 1.0.3+spec-1.1.0",
+ "tracing",
+ "tracing-subscriber",
+ "ts-rs",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "ebup-viewer"
 version = "0.1.0"
 dependencies = [
@@ -1431,24 +1454,15 @@ dependencies = [
 name = "ebup-viewer-tauri"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "ctrlc",
- "epub",
- "html2text",
- "image 0.25.9",
- "once_cell",
- "regex",
- "reqwest 0.12.28",
+ "ebup-core",
  "serde",
  "serde_json",
- "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-log",
- "toml 1.0.3+spec-1.1.0",
  "tracing",
  "ts-rs",
- "unicode-normalization",
 ]
 
 [[package]]

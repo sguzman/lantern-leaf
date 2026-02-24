@@ -119,6 +119,65 @@ pub struct ReaderSnapshot {
 }
 
 #[derive(Debug, Clone)]
+pub enum SessionCommand {
+    GetSnapshot,
+    NextPage,
+    PrevPage,
+    SetPage { page: usize },
+    SentenceClick { sentence_idx: usize },
+    NextSentence,
+    PrevSentence,
+    ToggleTextOnly,
+    ApplySettings { patch: ReaderSettingsPatch },
+    SearchSetQuery { query: String },
+    SearchNext,
+    SearchPrev,
+    TtsPlay,
+    TtsPause,
+    TtsTogglePlayPause,
+    TtsPlayFromPageStart,
+    TtsPlayFromHighlight,
+    TtsSeekNext,
+    TtsSeekPrev,
+    TtsRepeatSentence,
+    TtsStop,
+}
+
+impl SessionCommand {
+    pub fn action(&self) -> &'static str {
+        match self {
+            Self::GetSnapshot => "reader_get_snapshot",
+            Self::NextPage => "reader_next_page",
+            Self::PrevPage => "reader_prev_page",
+            Self::SetPage { .. } => "reader_set_page",
+            Self::SentenceClick { .. } => "reader_sentence_click",
+            Self::NextSentence => "reader_next_sentence",
+            Self::PrevSentence => "reader_prev_sentence",
+            Self::ToggleTextOnly => "reader_toggle_text_only",
+            Self::ApplySettings { .. } => "reader_apply_settings",
+            Self::SearchSetQuery { .. } => "reader_search_set_query",
+            Self::SearchNext => "reader_search_next",
+            Self::SearchPrev => "reader_search_prev",
+            Self::TtsPlay => "reader_tts_play",
+            Self::TtsPause => "reader_tts_pause",
+            Self::TtsTogglePlayPause => "reader_tts_toggle_play_pause",
+            Self::TtsPlayFromPageStart => "reader_tts_play_from_page_start",
+            Self::TtsPlayFromHighlight => "reader_tts_play_from_highlight",
+            Self::TtsSeekNext => "reader_tts_seek_next",
+            Self::TtsSeekPrev => "reader_tts_seek_prev",
+            Self::TtsRepeatSentence => "reader_tts_repeat_sentence",
+            Self::TtsStop => "reader_tts_stop",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionEvent {
+    pub action: &'static str,
+    pub snapshot: ReaderSnapshot,
+}
+
+#[derive(Debug, Clone)]
 pub struct ReaderSession {
     pub source_path: PathBuf,
     source_name: String,
@@ -249,6 +308,44 @@ impl ReaderSession {
             tts,
             stats,
             panels,
+        }
+    }
+
+    pub fn apply_command(
+        &mut self,
+        command: SessionCommand,
+        panels: PanelState,
+        normalizer: &normalizer::TextNormalizer,
+    ) -> SessionEvent {
+        let action = command.action();
+        match command {
+            SessionCommand::GetSnapshot => {}
+            SessionCommand::NextPage => self.next_page(normalizer),
+            SessionCommand::PrevPage => self.prev_page(normalizer),
+            SessionCommand::SetPage { page } => self.set_page(page, normalizer),
+            SessionCommand::SentenceClick { sentence_idx } => {
+                self.sentence_click(sentence_idx, normalizer)
+            }
+            SessionCommand::NextSentence => self.select_next_sentence(normalizer),
+            SessionCommand::PrevSentence => self.select_prev_sentence(normalizer),
+            SessionCommand::ToggleTextOnly => self.toggle_text_only(normalizer),
+            SessionCommand::ApplySettings { patch } => self.apply_settings_patch(patch, normalizer),
+            SessionCommand::SearchSetQuery { query } => self.set_search_query(query, normalizer),
+            SessionCommand::SearchNext => self.search_next(normalizer),
+            SessionCommand::SearchPrev => self.search_prev(normalizer),
+            SessionCommand::TtsPlay => self.tts_play(normalizer),
+            SessionCommand::TtsPause => self.tts_pause(),
+            SessionCommand::TtsTogglePlayPause => self.tts_toggle_play_pause(normalizer),
+            SessionCommand::TtsPlayFromPageStart => self.tts_play_from_page_start(normalizer),
+            SessionCommand::TtsPlayFromHighlight => self.tts_play_from_highlight(normalizer),
+            SessionCommand::TtsSeekNext => self.tts_seek_next(normalizer),
+            SessionCommand::TtsSeekPrev => self.tts_seek_prev(normalizer),
+            SessionCommand::TtsRepeatSentence => self.tts_repeat_current_sentence(normalizer),
+            SessionCommand::TtsStop => self.tts_stop(),
+        }
+        SessionEvent {
+            action,
+            snapshot: self.snapshot(panels, normalizer),
         }
     }
 
@@ -1113,5 +1210,61 @@ mod tests {
         session.tts_stop();
 
         assert_eq!(session.tts_state, TtsPlaybackState::Idle);
+    }
+
+    #[test]
+    fn session_command_dispatch_emits_expected_action_and_snapshot() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = build_test_session(&[&["A.", "B."], &["C.", "D."]]);
+
+        let event =
+            session.apply_command(SessionCommand::NextPage, PanelState::default(), &normalizer);
+
+        assert_eq!(event.action, "reader_next_page");
+        assert_eq!(event.snapshot.current_page, 1);
+        assert_eq!(event.snapshot.highlighted_sentence_idx, Some(0));
+    }
+
+    #[test]
+    fn session_command_dispatch_preserves_paused_tts_state() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = build_test_session(&[&["A.", "B."], &["C.", "D."]]);
+        session.tts_state = TtsPlaybackState::Paused;
+
+        let event =
+            session.apply_command(SessionCommand::NextPage, PanelState::default(), &normalizer);
+
+        assert_eq!(session.tts_state, TtsPlaybackState::Paused);
+        assert_eq!(event.snapshot.tts.state, TtsPlaybackState::Paused);
+    }
+
+    #[test]
+    fn session_command_dispatch_applies_settings_patch_with_rounding() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = build_test_session(&[&["A.", "B."]]);
+
+        let event = session.apply_command(
+            SessionCommand::ApplySettings {
+                patch: ReaderSettingsPatch {
+                    font_size: None,
+                    line_spacing: None,
+                    margin_horizontal: None,
+                    margin_vertical: None,
+                    lines_per_page: None,
+                    pause_after_sentence: Some(0.056),
+                    auto_scroll_tts: None,
+                    center_spoken_sentence: None,
+                    tts_speed: Some(2.5),
+                    tts_volume: Some(1.3),
+                },
+            },
+            PanelState::default(),
+            &normalizer,
+        );
+
+        assert_eq!(event.action, "reader_apply_settings");
+        assert!((event.snapshot.settings.pause_after_sentence - 0.06).abs() < f32::EPSILON);
+        assert!((event.snapshot.settings.tts_speed - 2.5).abs() < f32::EPSILON);
+        assert!((event.snapshot.settings.tts_volume - 1.3).abs() < f32::EPSILON);
     }
 }

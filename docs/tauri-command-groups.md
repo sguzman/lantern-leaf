@@ -1,6 +1,7 @@
 # Tauri Command Groups
 
 This groups the current bridge surface into stable domains so frontend and backend changes stay organized.
+Command names are sourced from a single macro list in `src-tauri/src/lib.rs` (`bridge_command_idents!`) and covered by stability tests.
 
 ## Session
 

@@ -43,12 +43,12 @@
 
 **Phase 2: Rust Core Extraction (Headless Domain)**
 
-- [ ] P2-01 Extract UI-agnostic modules into a dedicated core crate (config/cache/loader/normalizer/pagination/calibre/quack_check/tts orchestration).
-- [ ] P2-02 Remove `iced` types from domain layer (`RelativeOffset`, UI font/color concerns) and replace with neutral DTOs.
-- [ ] P2-03 Introduce session-centric core API (`SessionState`, `SessionCommand`, `SessionEvent`).
+- [x] P2-01 Extract UI-agnostic modules into a dedicated core crate (config/cache/loader/normalizer/pagination/calibre/quack_check/tts orchestration). (`crates/ebup-core` now owns these modules and Tauri consumes the crate instead of `#[path]` imports.)
+- [x] P2-02 Remove `iced` types from domain layer (`RelativeOffset`, UI font/color concerns) and replace with neutral DTOs. (Extracted core modules are iced-free; UI-only iced types remain isolated to legacy iced codepath.)
+- [x] P2-03 Introduce session-centric core API (`SessionState`, `SessionCommand`, `SessionEvent`). (`ebup_core::session` now exposes command/event dispatch used by Tauri reader commands.)
 - [ ] P2-04 Isolate async jobs behind explicit handles and cancellation tokens (TTS prep, calibre load, PDF extraction).
-- [ ] P2-05 Preserve deterministic state transitions currently implemented in reducer/effects.
-- [ ] P2-06 Add unit tests for extracted command/state transitions before connecting frontend.
+- [x] P2-05 Preserve deterministic state transitions currently implemented in reducer/effects. (Reader command handlers now dispatch through one deterministic core command path.)
+- [x] P2-06 Add unit tests for extracted command/state transitions before connecting frontend. (Core session command-dispatch tests added under `crates/ebup-core/src/session.rs`.)
 
 **Phase 3: Backend Bridge (Tauri)**
 
@@ -165,7 +165,7 @@
 - [x] P14-03 Switch default desktop target to Tauri app. (Root `pnpm dev`/`pnpm build` now target Tauri; legacy iced path remains explicit as `pnpm desktop:legacy` until decommission.)
 - [ ] P14-04 Remove iced UI modules only after parity and soak tests pass.
   Constraint: This applies only to iced UI framework code. Piper/TTS domain/runtime functionality must remain intact.
-- [ ] P14-05 Keep core interfaces stable for future GUI changes.
+- [x] P14-05 Keep core interfaces stable for future GUI changes. (Bridge command names are now single-source via macro list + stability tests; core reader operations dispatch via `SessionCommand` API.)
 
 **Critical Risks To Track (and Mitigate)**
 
