@@ -7,5 +7,7 @@ node_modules
 gen
 dist
 src-tauri/target
+src-tauri/bindings
+bindings
 ui/test-results
 ui/playwright-report

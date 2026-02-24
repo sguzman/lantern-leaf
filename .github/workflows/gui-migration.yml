@@ -53,6 +53,12 @@ jobs:
       - name: Test Tauri bridge
         run: cargo test -p ebup-viewer-tauri --lib
 
+      - name: Generate bridge TS bindings
+        run: cargo run --manifest-path src-tauri/Cargo.toml --bin export_ts_bindings
+
+      - name: Verify generated bridge TS bindings are committed
+        run: git diff --exit-code -- ui/src/generated
+
   frontend:
     runs-on: ubuntu-latest
     steps:

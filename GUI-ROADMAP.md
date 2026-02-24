@@ -6,7 +6,7 @@
 - [x] Reuse Voltlane’s state orchestration model in UI with Zustand (`tmp/voltlane/ui/src/store/projectStore.ts`).
 - [x] Reuse Voltlane’s Tauri build orchestration: Vite dev server + packaged frontend dist (`tmp/voltlane/src-tauri/tauri.conf.json`).
 - [x] Reuse Voltlane’s logging/bootstrap strategy in backend setup (`tmp/voltlane/src-tauri/src/lib.rs`).
-- [ ] Improve on Voltlane by adding generated API typings (optional `tauri-specta`) to avoid manual Rust/TS drift.
+- [x] Improve on Voltlane by adding generated API typings (optional `tauri-specta`) to avoid manual Rust/TS drift.
 - [x] Improve on Voltlane by adding Tailwind + Material UI integration rules up front (Voltlane currently uses plain CSS only).
 
 **Target Architecture For ebup-viewer**

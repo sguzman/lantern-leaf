@@ -5,6 +5,7 @@ use std::sync::Mutex;
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_log::{Target, TargetKind, log::LevelFilter};
 use tracing::{info, warn};
+use ts_rs::TS;
 
 #[allow(dead_code, unused_imports)]
 #[path = "../../src/cache.rs"]
@@ -36,14 +37,16 @@ mod session;
 const MAX_RECENT_LIMIT: usize = 512;
 const DEFAULT_RECENT_LIMIT: usize = 64;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 enum UiMode {
     Starter,
     Reader,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 struct BootstrapConfig {
     theme: config::ThemeMode,
     font_family: config::FontFamily,
@@ -66,14 +69,16 @@ struct BootstrapConfig {
     key_toggle_tts: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 struct BootstrapState {
     app_name: String,
     mode: String,
     config: BootstrapConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 struct SessionState {
     mode: UiMode,
     active_source_path: Option<String>,
@@ -81,84 +86,105 @@ struct SessionState {
     panels: session::PanelState,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 struct OpenSourceResult {
     session: SessionState,
     reader: session::ReaderSnapshot,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 struct RecentBook {
     source_path: String,
     display_title: String,
     thumbnail_path: Option<String>,
+    #[ts(type = "number")]
     last_opened_unix_secs: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 struct CalibreBookDto {
+    #[ts(type = "number")]
     id: u64,
     title: String,
     extension: String,
     authors: String,
     year: Option<i32>,
+    #[ts(type = "number | null")]
     file_size_bytes: Option<u64>,
     source_path: Option<String>,
     cover_thumbnail: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 struct SourceOpenEvent {
+    #[ts(type = "number")]
     request_id: u64,
     phase: String,
     source_path: Option<String>,
     message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 struct CalibreLoadEvent {
+    #[ts(type = "number")]
     request_id: u64,
     phase: String,
     count: Option<usize>,
     message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 struct TtsStateEvent {
+    #[ts(type = "number")]
     request_id: u64,
     action: String,
     tts: session::ReaderTtsView,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 struct PdfTranscriptionEvent {
+    #[ts(type = "number")]
     request_id: u64,
     phase: String,
     source_path: String,
     message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 struct LogLevelEvent {
+    #[ts(type = "number")]
     request_id: u64,
     level: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 struct SessionStateEvent {
+    #[ts(type = "number")]
     request_id: u64,
     action: String,
     session: SessionState,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 struct ReaderStateEvent {
+    #[ts(type = "number")]
     request_id: u64,
     action: String,
     reader: session::ReaderSnapshot,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 struct BridgeError {
     code: String,
     message: String,
@@ -315,6 +341,90 @@ fn map_calibre_book(book: calibre::CalibreBook) -> CalibreBookDto {
             .cover_thumbnail
             .map(|path| path.to_string_lossy().to_string()),
     }
+}
+
+fn export_single_type<T: TS + 'static>(out_dir: &Path) -> Result<(), String> {
+    T::export_all_to(out_dir).map_err(|err| err.to_string())
+}
+
+pub fn export_ts_bindings(out_dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(out_dir)
+        .map_err(|err| format!("Failed to create {}: {err}", out_dir.display()))?;
+
+    for entry in fs::read_dir(out_dir)
+        .map_err(|err| format!("Failed to list {}: {err}", out_dir.display()))?
+    {
+        let entry = entry.map_err(|err| format!("Failed to read entry: {err}"))?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("ts") {
+            fs::remove_file(&path)
+                .map_err(|err| format!("Failed to remove {}: {err}", path.display()))?;
+        }
+    }
+
+    export_single_type::<UiMode>(out_dir)?;
+    export_single_type::<BootstrapConfig>(out_dir)?;
+    export_single_type::<BootstrapState>(out_dir)?;
+    export_single_type::<SessionState>(out_dir)?;
+    export_single_type::<OpenSourceResult>(out_dir)?;
+    export_single_type::<RecentBook>(out_dir)?;
+    export_single_type::<CalibreBookDto>(out_dir)?;
+    export_single_type::<SourceOpenEvent>(out_dir)?;
+    export_single_type::<CalibreLoadEvent>(out_dir)?;
+    export_single_type::<TtsStateEvent>(out_dir)?;
+    export_single_type::<PdfTranscriptionEvent>(out_dir)?;
+    export_single_type::<LogLevelEvent>(out_dir)?;
+    export_single_type::<SessionStateEvent>(out_dir)?;
+    export_single_type::<ReaderStateEvent>(out_dir)?;
+    export_single_type::<BridgeError>(out_dir)?;
+    export_single_type::<session::PanelState>(out_dir)?;
+    export_single_type::<session::ReaderSettingsView>(out_dir)?;
+    export_single_type::<session::ReaderTtsView>(out_dir)?;
+    export_single_type::<session::ReaderSettingsPatch>(out_dir)?;
+    export_single_type::<session::ReaderStats>(out_dir)?;
+    export_single_type::<session::ReaderSnapshot>(out_dir)?;
+    export_single_type::<session::TtsPlaybackState>(out_dir)?;
+    export_single_type::<config::ThemeMode>(out_dir)?;
+    export_single_type::<config::FontFamily>(out_dir)?;
+    export_single_type::<config::FontWeight>(out_dir)?;
+    export_single_type::<config::HighlightColor>(out_dir)?;
+
+    let index_content = r#"export type { UiMode } from "./UiMode";
+export type { BootstrapConfig } from "./BootstrapConfig";
+export type { BootstrapState } from "./BootstrapState";
+export type { SessionState } from "./SessionState";
+export type { OpenSourceResult } from "./OpenSourceResult";
+export type { RecentBook } from "./RecentBook";
+export type { CalibreBookDto } from "./CalibreBookDto";
+export type { SourceOpenEvent } from "./SourceOpenEvent";
+export type { CalibreLoadEvent } from "./CalibreLoadEvent";
+export type { TtsStateEvent } from "./TtsStateEvent";
+export type { PdfTranscriptionEvent } from "./PdfTranscriptionEvent";
+export type { LogLevelEvent } from "./LogLevelEvent";
+export type { SessionStateEvent } from "./SessionStateEvent";
+export type { ReaderStateEvent } from "./ReaderStateEvent";
+export type { BridgeError } from "./BridgeError";
+export type { PanelState } from "./PanelState";
+export type { ReaderSettingsView } from "./ReaderSettingsView";
+export type { ReaderTtsView } from "./ReaderTtsView";
+export type { ReaderSettingsPatch } from "./ReaderSettingsPatch";
+export type { ReaderStats } from "./ReaderStats";
+export type { ReaderSnapshot } from "./ReaderSnapshot";
+export type { TtsPlaybackState } from "./TtsPlaybackState";
+export type { ThemeMode } from "./ThemeMode";
+export type { FontFamily } from "./FontFamily";
+export type { FontWeight } from "./FontWeight";
+export type { HighlightColor } from "./HighlightColor";
+"#;
+
+    fs::write(out_dir.join("index.ts"), index_content).map_err(|err| {
+        format!(
+            "Failed to write {}: {err}",
+            out_dir.join("index.ts").display()
+        )
+    })?;
+
+    Ok(())
 }
 
 fn persist_active_reader(state: &mut BackendState) {

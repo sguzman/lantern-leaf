@@ -8,6 +8,8 @@
     "ui:build": "pnpm --dir ui run build",
     "ui:check": "pnpm --dir ui run check",
     "ui:lint": "pnpm --dir ui run lint",
+    "types:generate": "cargo run --manifest-path src-tauri/Cargo.toml --bin export_ts_bindings",
+    "types:check": "pnpm run types:generate && git diff --exit-code -- ui/src/generated",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"

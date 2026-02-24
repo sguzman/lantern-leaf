@@ -1,7 +1,9 @@
 use serde::Deserialize;
+use ts_rs::TS;
 
 /// High-level app configuration; deserializable from TOML.
-#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize, TS)]
+#[ts(export)]
 pub struct AppConfig {
     #[serde(default)]
     pub theme: ThemeMode,
@@ -125,8 +127,9 @@ impl Default for AppConfig {
 }
 
 /// Theme mode.
-#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "kebab-case")]
+#[ts(export)]
 pub enum ThemeMode {
     Day,
     Night,
@@ -149,8 +152,9 @@ impl std::fmt::Display for ThemeMode {
 }
 
 /// Font family options.
-#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "kebab-case")]
+#[ts(export)]
 pub enum FontFamily {
     Sans,
     Serif,
@@ -195,8 +199,9 @@ impl std::fmt::Display for FontFamily {
 }
 
 /// Font weight options.
-#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "kebab-case")]
+#[ts(export)]
 pub enum FontWeight {
     Light,
     Normal,
@@ -220,7 +225,8 @@ impl std::fmt::Display for FontWeight {
     }
 }
 
-#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize, TS)]
+#[ts(export)]
 pub struct HighlightColor {
     pub r: f32,
     pub g: f32,
@@ -229,8 +235,9 @@ pub struct HighlightColor {
 }
 
 /// Supported logging verbosity levels.
-#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export)]
 pub enum LogLevel {
     Trace,
     Debug,

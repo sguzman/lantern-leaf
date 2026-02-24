@@ -6,7 +6,7 @@ This policy defines how the Rust Tauri bridge and the React/TypeScript client ev
 
 - Rust command handlers in `src-tauri/src/lib.rs`
 - Frontend adapter in `ui/src/api/tauri.ts`
-- Shared transport DTOs in `src-tauri/src/lib.rs` and `ui/src/types.ts`
+- Shared transport DTOs in `src-tauri/src/lib.rs` and generated TypeScript bindings in `ui/src/generated/` (re-exported by `ui/src/types.ts`)
 - Bridge events: `source-open`, `calibre-load`, `session-state`, `reader-state`
 
 ## Rules
@@ -29,12 +29,15 @@ This policy defines how the Rust Tauri bridge and the React/TypeScript client ev
 
 ## Required Validation For Contract Changes
 
-- Update Rust DTO definitions and corresponding TS types in the same change.
+- Update Rust DTO definitions and regenerate TS bindings in the same change.
+- Regenerate bindings with `pnpm run types:generate`.
+- Verify generated bindings are committed with `pnpm run types:check`.
 - Add/adjust Rust bridge contract tests in `src-tauri/src/lib.rs`.
 - Add/adjust adapter/store tests in `ui/tests`.
 - Run:
   - `cargo test -p ebup-viewer-tauri --lib`
   - `cargo check --workspace`
+  - `pnpm run types:check`
   - `pnpm --dir ui run check`
   - `pnpm --dir ui run test`
   - `pnpm --dir ui run build`

@@ -23,6 +23,7 @@ tauri = { version = "2.10.2", features = [] }
 tauri-plugin-log = "2.8.0"
 toml = "1"
 tracing = "0.1"
+ts-rs = { version = "10.0.0", features = ["serde-compat"] }
 unicode-normalization = "0.1.25"
 
 [build-dependencies]

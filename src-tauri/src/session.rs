@@ -2,18 +2,21 @@ use crate::{config, epub_loader, normalizer, pagination, text_utils};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use ts_rs::TS;
 
 const BASE_WPM: f64 = 170.0;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, TS)]
+#[ts(export)]
 pub struct PanelState {
     pub show_settings: bool,
     pub show_stats: bool,
     pub show_tts: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum TtsPlaybackState {
     #[default]
     Idle,
@@ -21,7 +24,8 @@ pub enum TtsPlaybackState {
     Paused,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 pub struct ReaderSettingsView {
     pub theme: config::ThemeMode,
     pub day_highlight: config::HighlightColor,
@@ -38,7 +42,8 @@ pub struct ReaderSettingsView {
     pub tts_volume: f32,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 pub struct ReaderTtsView {
     pub state: TtsPlaybackState,
     pub current_sentence_idx: Option<usize>,
@@ -48,21 +53,33 @@ pub struct ReaderTtsView {
     pub progress_pct: f64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export)]
 pub struct ReaderSettingsPatch {
+    #[ts(optional)]
     pub font_size: Option<u32>,
+    #[ts(optional)]
     pub line_spacing: Option<f32>,
+    #[ts(optional)]
     pub margin_horizontal: Option<u16>,
+    #[ts(optional)]
     pub margin_vertical: Option<u16>,
+    #[ts(optional)]
     pub lines_per_page: Option<usize>,
+    #[ts(optional)]
     pub pause_after_sentence: Option<f32>,
+    #[ts(optional)]
     pub auto_scroll_tts: Option<bool>,
+    #[ts(optional)]
     pub center_spoken_sentence: Option<bool>,
+    #[ts(optional)]
     pub tts_speed: Option<f32>,
+    #[ts(optional)]
     pub tts_volume: Option<f32>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 pub struct ReaderStats {
     pub page_index: usize,
     pub total_pages: usize,
@@ -81,7 +98,8 @@ pub struct ReaderStats {
     pub sentences_read_up_to_current_position: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 pub struct ReaderSnapshot {
     pub source_path: String,
     pub source_name: String,
