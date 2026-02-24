@@ -391,3 +391,121 @@ pub fn save_epub_config(epub_path: &Path, config: &AppConfig) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_source_path(ext: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let pid = std::process::id();
+        Path::new(CACHE_DIR)
+            .join("test-sources")
+            .join(format!("cache-test-{pid}-{nanos}.{ext}"))
+    }
+
+    fn write_source_file(path: &Path) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create parent dir");
+        }
+        let payload = format!(
+            "cache-test-payload-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        fs::write(path, payload).expect("write source");
+    }
+
+    fn cleanup_source_and_cache(path: &Path) {
+        let cache_path = hash_dir(path);
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_dir_all(cache_path);
+    }
+
+    #[test]
+    fn bookmark_roundtrip_preserves_sentence_and_scroll() {
+        let source = unique_source_path("epub");
+        write_source_file(&source);
+
+        let bookmark = Bookmark {
+            page: 42,
+            sentence_idx: Some(7),
+            sentence_text: Some("A saved sentence".to_string()),
+            scroll_y: 0.37,
+        };
+
+        save_bookmark(&source, &bookmark);
+        let loaded = load_bookmark(&source).expect("bookmark should load");
+
+        assert_eq!(loaded.page, 42);
+        assert_eq!(loaded.sentence_idx, Some(7));
+        assert_eq!(loaded.sentence_text.as_deref(), Some("A saved sentence"));
+        assert!((loaded.scroll_y - 0.37).abs() < f32::EPSILON);
+
+        cleanup_source_and_cache(&source);
+    }
+
+    #[test]
+    fn load_bookmark_defaults_scroll_for_legacy_cache_entries() {
+        let source = unique_source_path("epub");
+        write_source_file(&source);
+
+        let path = hash_dir(&source).join("bookmark.toml");
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create cache dir");
+        }
+        fs::write(
+            &path,
+            r#"
+page = 5
+sentence_idx = 2
+sentence_text = "legacy bookmark entry"
+"#,
+        )
+        .expect("write legacy bookmark");
+
+        let loaded = load_bookmark(&source).expect("legacy bookmark should load");
+        assert_eq!(loaded.page, 5);
+        assert_eq!(loaded.sentence_idx, Some(2));
+        assert_eq!(
+            loaded.sentence_text.as_deref(),
+            Some("legacy bookmark entry")
+        );
+        assert!((loaded.scroll_y - 0.0).abs() < f32::EPSILON);
+
+        cleanup_source_and_cache(&source);
+    }
+
+    #[test]
+    fn epub_config_roundtrip_preserves_reader_fields() {
+        let source = unique_source_path("epub");
+        write_source_file(&source);
+
+        let mut cfg = AppConfig::default();
+        cfg.font_size = 29;
+        cfg.lines_per_page = 731;
+        cfg.margin_horizontal = 123;
+        cfg.pause_after_sentence = 0.19;
+        cfg.tts_speed = 2.7;
+        cfg.key_toggle_tts = "ctrl+alt+y".to_string();
+
+        save_epub_config(&source, &cfg);
+        let loaded = load_epub_config(&source).expect("config should load");
+
+        assert_eq!(loaded.font_size, 29);
+        assert_eq!(loaded.lines_per_page, 731);
+        assert_eq!(loaded.margin_horizontal, 123);
+        assert!((loaded.pause_after_sentence - 0.19).abs() < f32::EPSILON);
+        assert!((loaded.tts_speed - 2.7).abs() < f32::EPSILON);
+        assert_eq!(loaded.key_toggle_tts, "ctrl+alt+y");
+
+        cleanup_source_and_cache(&source);
+    }
+}

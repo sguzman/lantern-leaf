@@ -151,7 +151,7 @@
 - [x] P13-01 Keep and run Rust unit/integration tests for core logic at every phase.
 - [x] P13-02 Add bridge command tests for all critical command paths.
 - [x] P13-03 Add frontend unit tests for reducers/store actions and command adapters.
-- [ ] P13-04 Add E2E scenarios (Playwright + Tauri runner) for core reading/TTS flows. (Playwright scenarios and CI execution added; dedicated Tauri runner wiring still pending.)
+- [x] P13-04 Add E2E scenarios (Playwright + Tauri runner) for core reading/TTS flows. (Playwright browser scenarios plus dedicated Tauri-runner smoke wiring added in CI.)
 - [x] P13-05 Add explicit regression scenarios from your prior incidents (sentence click halt, highlight drift, duplicate PDF jobs, close-during-tts).
 - [x] P13-06 Add large calibre dataset performance scenario and verify non-blocking UX.
 - [x] P13-07 Add PDF edge corpus tests with degraded pages and fallback paths.
@@ -169,12 +169,12 @@
 
 - [ ] R-01 Large text rendering performance in WebView with per-sentence spans.
 - [ ] R-02 Highlight/scroll mismatch from mixed Rust vs DOM coordinate systems.
-- [ ] R-03 Long-running TTS/PDF tasks outliving session context. (Mitigated with request-id stale-event guards; keep open until full Tauri-runner soak.)
+- [ ] R-03 Long-running TTS/PDF tasks outliving session context. (Mitigated with request-id stale-event guards and Tauri-runner smoke; keep open until broader soak.)
 - [x] R-04 Type drift between Rust DTOs and TS interfaces.
 - [x] R-05 Styling conflicts between MUI and Tailwind resets/utilities.
 - [ ] R-06 Tauri permission/capability restrictions breaking filesystem/subprocess workflows.
 - [x] R-07 Calibre table scale issues without virtualization.
-- [ ] R-08 Behavior drift in config/bookmark compatibility.
+- [ ] R-08 Behavior drift in config/bookmark compatibility. (Mitigated with cache bookmark/config roundtrip tests; keep open until full parity signoff.)
 
 **Definition Of Done**
 

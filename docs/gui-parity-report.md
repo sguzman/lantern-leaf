@@ -27,12 +27,13 @@ This report compares core workflows between the legacy iced UI path and the Taur
 | Runtime log-level updates | Supported | Supported | Command `logging_set_level` and event `log-level` in `src-tauri/src/lib.rs`; starter controls in `ui/src/components/StarterShell.tsx` |
 | Bridge progress/state events for TTS and PDF transcription | Supported | Supported | Events `tts-state` / `pdf-transcription` in `src-tauri/src/lib.rs`; store subscriptions in `ui/src/store/appStore.ts` |
 | Stale async event rejection | Supported | Supported | Request-id monotonic guards for source/calibre/tts/pdf/log events in `ui/src/store/slices/jobsSlice.ts`; coverage in `ui/tests/appStore.test.ts` |
+| Bookmark/config cache compatibility | Supported | Supported | Cache roundtrip/legacy tests in `src/cache.rs` (`bookmark_roundtrip_*`, `load_bookmark_defaults_scroll_*`, `epub_config_roundtrip_*`) |
 | Zustand domain slices | Supported | Supported | Physical slices in `ui/src/store/slices/` and selector projections in `ui/src/store/selectors.ts` |
 | PDF fallback robustness (quack-check native/split fallback) | Supported | Supported | Pipeline fallback tests in `src/quack_check/pipeline.rs` |
 
 ## Current Gaps
 
-- Dedicated Tauri-native E2E runner wiring is still pending (`P13-04`), though Playwright scenarios are now in place.
+- Tauri-native runner currently covers a smoke path; broader scenario coverage still needs expansion.
 
 ## Validation Snapshot
 
@@ -42,6 +43,7 @@ Latest migration verification run includes:
 - `pnpm --dir ui run lint`
 - `pnpm --dir ui run test`
 - `pnpm --dir ui run test:e2e`
+- `pnpm --dir ui run test:e2e:tauri`
 - `pnpm --dir ui run build`
 - `pnpm --dir ui run audit:bundle`
 - `cargo test -p ebup-viewer-tauri --lib`

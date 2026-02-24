@@ -2,6 +2,7 @@
 name = "ebup-viewer-tauri"
 version = "0.1.0"
 edition = "2024"
+default-run = "ebup-viewer-tauri"
 
 [lib]
 name = "ebup_viewer_tauri_lib"

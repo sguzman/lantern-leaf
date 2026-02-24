@@ -45,4 +45,5 @@ Use this checklist for explicit pass/fail gating before cutover.
 - [ ] `pnpm --dir ui run lint`
 - [ ] `pnpm --dir ui run test`
 - [ ] `pnpm --dir ui run test:e2e`
+- [ ] `pnpm --dir ui run test:e2e:tauri`
 - [ ] `pnpm --dir ui run build`

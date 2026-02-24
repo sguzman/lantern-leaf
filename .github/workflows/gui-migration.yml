@@ -96,3 +96,46 @@ jobs:
 
       - name: Build UI
         run: pnpm --dir ui run build
+
+  tauri-e2e:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            webkit2gtk-driver \
+            xvfb
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+
+      - name: Tauri E2E smoke
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" pnpm --dir ui run test:e2e:tauri
