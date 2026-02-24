@@ -1942,6 +1942,83 @@ fn reader_tts_repeat_sentence(
 }
 
 #[tauri::command]
+fn reader_tts_precompute_page(
+    app: tauri::AppHandle,
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<session::ReaderSnapshot, BridgeError> {
+    let (
+        snapshot,
+        request_id,
+        source_path,
+        sentences,
+        threads,
+        progress_log_interval,
+        model_path,
+        espeak_path,
+    ) = {
+        let mut guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        let normalizer = guard.normalizer.clone();
+        let panels = guard.panels;
+        let request_id = allocate_request_id(&mut guard);
+        let reader = guard
+            .reader
+            .as_mut()
+            .ok_or_else(|| bridge_error("no_reader", "No active reader session"))?;
+        let snapshot = reader.snapshot(panels, &normalizer);
+        let sentences = snapshot.sentences.clone();
+        (
+            snapshot,
+            request_id,
+            reader.source_path.clone(),
+            sentences,
+            reader.config.tts_threads.max(1),
+            Duration::from_secs_f64(reader.config.tts_progress_log_interval_secs.max(0.1) as f64),
+            PathBuf::from(reader.config.tts_model_path.clone()),
+            PathBuf::from(reader.config.tts_espeak_path.clone()),
+        )
+    };
+
+    emit_reader_state(&app, request_id, "reader_tts_precompute_page", &snapshot);
+    emit_tts_state(
+        &app,
+        request_id,
+        "reader_tts_precompute_page",
+        &snapshot.tts,
+    );
+
+    if sentences.is_empty() {
+        return Ok(snapshot);
+    }
+
+    let cache_root = cache::hash_dir(&source_path).join("tts");
+    let engine = tts::TtsEngine::new(model_path, espeak_path).map_err(|err| {
+        bridge_error(
+            "tts_engine_init_failed",
+            format!("Failed to initialize Piper TTS engine for precompute: {err}"),
+        )
+    })?;
+
+    let prepared = engine
+        .prepare_batch(cache_root, sentences, 0, threads, progress_log_interval)
+        .map_err(|err| {
+            bridge_error(
+                "tts_precompute_failed",
+                format!("Failed to precompute page TTS audio: {err}"),
+            )
+        })?;
+
+    info!(
+        request_id,
+        file_count = prepared.len(),
+        "Precomputed page TTS audio files"
+    );
+
+    Ok(snapshot)
+}
+
+#[tauri::command]
 fn reader_close_session(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
@@ -2301,6 +2378,7 @@ macro_rules! bridge_command_idents {
             reader_tts_seek_next,
             reader_tts_seek_prev,
             reader_tts_repeat_sentence,
+            reader_tts_precompute_page,
             reader_close_session,
             app_safe_quit,
             logging_set_level,
@@ -2417,7 +2495,7 @@ mod tests {
 
     #[test]
     fn bridge_command_surface_remains_stable() {
-        assert_eq!(BRIDGE_COMMAND_NAMES.len(), 36);
+        assert_eq!(BRIDGE_COMMAND_NAMES.len(), 38);
         assert_eq!(BRIDGE_COMMAND_NAMES[0], "session_get_bootstrap");
         assert_eq!(
             BRIDGE_COMMAND_NAMES[BRIDGE_COMMAND_NAMES.len() - 1],
@@ -2428,6 +2506,7 @@ mod tests {
         assert!(BRIDGE_COMMAND_NAMES.contains(&"source_open_clipboard_text"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"reader_tts_play"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"reader_tts_repeat_sentence"));
+        assert!(BRIDGE_COMMAND_NAMES.contains(&"reader_tts_precompute_page"));
     }
 
     #[test]

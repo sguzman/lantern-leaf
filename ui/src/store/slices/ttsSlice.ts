@@ -12,6 +12,7 @@ export function createTtsSliceActions({ set, backend }: SliceContext): Pick<
   | "readerTtsSeekNext"
   | "readerTtsSeekPrev"
   | "readerTtsRepeatSentence"
+  | "readerTtsPrecomputePage"
 > {
   const syncReader = async (
     fn: () => Promise<Awaited<ReturnType<typeof backend.readerGetSnapshot>>>
@@ -34,6 +35,7 @@ export function createTtsSliceActions({ set, backend }: SliceContext): Pick<
       syncReader(() => backend.readerTtsPlayFromHighlight()),
     readerTtsSeekNext: async () => syncReader(() => backend.readerTtsSeekNext()),
     readerTtsSeekPrev: async () => syncReader(() => backend.readerTtsSeekPrev()),
-    readerTtsRepeatSentence: async () => syncReader(() => backend.readerTtsRepeatSentence())
+    readerTtsRepeatSentence: async () => syncReader(() => backend.readerTtsRepeatSentence()),
+    readerTtsPrecomputePage: async () => syncReader(() => backend.readerTtsPrecomputePage())
   };
 }

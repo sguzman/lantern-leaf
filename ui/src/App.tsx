@@ -84,6 +84,7 @@ export default function App() {
     readerTtsSeekNext,
     readerTtsSeekPrev,
     readerTtsRepeatSentence,
+    readerTtsPrecomputePage,
     readerToggleTextOnly,
     readerSearchSetQuery,
     readerSearchNext,
@@ -229,6 +230,7 @@ export default function App() {
     readerTtsSeekNext,
     readerTtsSeekPrev,
     readerTtsRepeatSentence,
+    readerTtsPrecomputePage,
     toggleSettingsPanel,
     toggleStatsPanel,
     toggleTtsPanel
@@ -315,6 +317,7 @@ export default function App() {
                   onTtsSeekNext={readerTtsSeekNext}
                   onTtsSeekPrev={readerTtsSeekPrev}
                   onTtsRepeatSentence={readerTtsRepeatSentence}
+                  onTtsPrecomputePage={readerTtsPrecomputePage}
                   onApplySettings={readerApplySettings}
                   ttsStateEvent={ttsStateEvent}
                 />

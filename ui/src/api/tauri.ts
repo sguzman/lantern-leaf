@@ -431,6 +431,9 @@ async function mockReaderTtsRepeatSentence(): Promise<ReaderSnapshot> {
   return structuredClone(reader);
 }
 
+async function mockReaderTtsPrecomputePage(): Promise<ReaderSnapshot> {
+  return mockReaderGetSnapshot();
+}
 async function mockCalibreLoadBooks(): Promise<CalibreBook[]> {
   return structuredClone(mockState.calibreBooks);
 }
@@ -590,6 +593,7 @@ export interface BackendApi {
   readerTtsSeekNext: () => Promise<ReaderSnapshot>;
   readerTtsSeekPrev: () => Promise<ReaderSnapshot>;
   readerTtsRepeatSentence: () => Promise<ReaderSnapshot>;
+  readerTtsPrecomputePage: () => Promise<ReaderSnapshot>;
   readerCloseSession: () => Promise<SessionState>;
   loggingSetLevel: (level: string) => Promise<string>;
   calibreLoadCachedBooks: () => Promise<CalibreBook[]>;
@@ -642,6 +646,7 @@ function createTauriBackendApi(): BackendApi {
     readerTtsSeekNext: () => invokeCommand<ReaderSnapshot>("reader_tts_seek_next"),
     readerTtsSeekPrev: () => invokeCommand<ReaderSnapshot>("reader_tts_seek_prev"),
     readerTtsRepeatSentence: () => invokeCommand<ReaderSnapshot>("reader_tts_repeat_sentence"),
+    readerTtsPrecomputePage: () => invokeCommand<ReaderSnapshot>("reader_tts_precompute_page"),
     readerCloseSession: () => invokeCommand<SessionState>("reader_close_session"),
     loggingSetLevel: (level) => invokeCommand<string>("logging_set_level", { level }),
     calibreLoadCachedBooks: () => invokeCommand<CalibreBook[]>("calibre_load_cached_books"),
@@ -706,6 +711,7 @@ function createMockBackendApi(): BackendApi {
     readerTtsSeekNext: mockReaderTtsSeekNext,
     readerTtsSeekPrev: mockReaderTtsSeekPrev,
     readerTtsRepeatSentence: mockReaderTtsRepeatSentence,
+    readerTtsPrecomputePage: mockReaderTtsPrecomputePage,
     readerCloseSession: mockSessionReturnToStarter,
     loggingSetLevel: mockLoggingSetLevel,
     calibreLoadCachedBooks: mockCalibreLoadBooks,

@@ -72,6 +72,7 @@ interface ReaderShellProps {
   onTtsSeekNext: () => Promise<void>;
   onTtsSeekPrev: () => Promise<void>;
   onTtsRepeatSentence: () => Promise<void>;
+  onTtsPrecomputePage: () => Promise<void>;
   onApplySettings: (patch: ReaderSettingsPatch) => Promise<void>;
   ttsStateEvent: TtsStateEvent | null;
 }
@@ -538,6 +539,7 @@ export function ReaderShell({
   onTtsSeekNext,
   onTtsSeekPrev,
   onTtsRepeatSentence,
+  onTtsPrecomputePage,
   onApplySettings,
   ttsStateEvent
 }: ReaderShellProps) {
@@ -1341,6 +1343,15 @@ export function ReaderShell({
                               Next Sentence
                             </Button>
                           ) : null}
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => void onTtsPrecomputePage()}
+                            disabled={reader.tts.sentence_count === 0}
+                            data-testid="reader-tts-precompute-page-button"
+                          >
+                            Precompute Page
+                          </Button>
                           {ttsControlVisibility.showRepeatButton ? (
                             <Button
                               variant="outlined"

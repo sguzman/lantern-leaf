@@ -101,6 +101,7 @@ export interface AppStore {
   readerTtsSeekNext: () => Promise<void>;
   readerTtsSeekPrev: () => Promise<void>;
   readerTtsRepeatSentence: () => Promise<void>;
+  readerTtsPrecomputePage: () => Promise<void>;
   toggleSettingsPanel: () => Promise<void>;
   toggleStatsPanel: () => Promise<void>;
   toggleTtsPanel: () => Promise<void>;
