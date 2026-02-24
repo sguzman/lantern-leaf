@@ -48,6 +48,7 @@ tts_espeak_path = "/usr/share"
 tts_speed = 2.5
 tts_volume = 1.0
 tts_threads = 4
+normalizer_threads = 8
 tts_progress_log_interval_secs = 5.0
 
 [keybindings]

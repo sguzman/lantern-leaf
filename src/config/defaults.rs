@@ -42,6 +42,13 @@ pub(crate) fn default_tts_threads() -> usize {
     16
 }
 
+pub(crate) fn default_normalizer_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(4)
+        .max(1)
+}
+
 pub(crate) fn default_tts_progress_log_interval_secs() -> f32 {
     5.0
 }

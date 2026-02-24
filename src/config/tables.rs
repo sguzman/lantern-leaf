@@ -63,6 +63,7 @@ impl From<ConfigTables> for AppConfig {
             tts_speed: tables.tts.tts_speed,
             tts_volume: tables.tts.tts_volume,
             tts_threads: tables.tts.tts_threads,
+            normalizer_threads: tables.tts.normalizer_threads,
             tts_progress_log_interval_secs: tables.tts.tts_progress_log_interval_secs,
         }
     }
@@ -113,6 +114,7 @@ impl From<&AppConfig> for ConfigTables {
                 tts_speed: config.tts_speed,
                 tts_volume: config.tts_volume,
                 tts_threads: config.tts_threads,
+                normalizer_threads: config.normalizer_threads,
                 tts_progress_log_interval_secs: config.tts_progress_log_interval_secs,
             },
             keybindings: KeybindingsConfig {
@@ -280,6 +282,8 @@ struct TtsConfig {
     tts_volume: f32,
     #[serde(default = "defaults::default_tts_threads")]
     tts_threads: usize,
+    #[serde(default = "defaults::default_normalizer_threads")]
+    normalizer_threads: usize,
     #[serde(default = "defaults::default_tts_progress_log_interval_secs")]
     tts_progress_log_interval_secs: f32,
 }
@@ -292,6 +296,7 @@ impl Default for TtsConfig {
             tts_speed: defaults::default_tts_speed(),
             tts_volume: defaults::default_tts_volume(),
             tts_threads: defaults::default_tts_threads(),
+            normalizer_threads: defaults::default_normalizer_threads(),
             tts_progress_log_interval_secs: defaults::default_tts_progress_log_interval_secs(),
         }
     }

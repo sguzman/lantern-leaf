@@ -4,6 +4,7 @@ use crate::{
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use ts_rs::TS;
 
 const BASE_WPM: f64 = 170.0;
@@ -1084,6 +1085,7 @@ impl ReaderSession {
     fn precompute_normalization_cache(
         &self,
         normalizer: &normalizer::TextNormalizer,
+        threads: usize,
         cancel: Option<&CancellationToken>,
     ) -> Result<(), String> {
         let total_pages = self.raw_page_sentences.len();
@@ -1094,14 +1096,37 @@ impl ReaderSession {
         tracing::info!(
             path = %self.source_path.display(),
             total_pages,
+            threads = threads.max(1),
             "Precomputing normalization cache for loaded book"
         );
 
-        for (page_idx, display_sentences) in self.raw_page_sentences.iter().enumerate() {
-            if cancel.map(|token| token.is_cancelled()).unwrap_or(false) {
-                return Err("Session load cancelled during normalization precompute".to_string());
+        let worker_count = threads.max(1).min(total_pages);
+        let next_page = AtomicUsize::new(0);
+        let cancelled = AtomicBool::new(false);
+
+        std::thread::scope(|scope| {
+            for _ in 0..worker_count {
+                scope.spawn(|| loop {
+                    if cancelled.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    if cancel.map(|token| token.is_cancelled()).unwrap_or(false) {
+                        cancelled.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    let page_idx = next_page.fetch_add(1, Ordering::Relaxed);
+                    if page_idx >= total_pages {
+                        break;
+                    }
+                    let display_sentences = &self.raw_page_sentences[page_idx];
+                    let _ =
+                        normalizer.plan_page_cached(&self.source_path, page_idx, display_sentences);
+                });
             }
-            let _ = normalizer.plan_page_cached(&self.source_path, page_idx, display_sentences);
+        });
+
+        if cancelled.load(Ordering::Relaxed) {
+            return Err("Session load cancelled during normalization precompute".to_string());
         }
 
         tracing::info!(
@@ -1134,6 +1159,7 @@ pub fn load_session_for_source_with_cancel(
         overrides.tts_model_path = base_config.tts_model_path.clone();
         overrides.tts_espeak_path = base_config.tts_espeak_path.clone();
         overrides.tts_threads = base_config.tts_threads;
+        overrides.normalizer_threads = base_config.normalizer_threads;
         overrides.tts_progress_log_interval_secs = base_config.tts_progress_log_interval_secs;
         overrides.tts_pause_resume_behavior = base_config.tts_pause_resume_behavior;
         overrides.key_toggle_play_pause = base_config.key_toggle_play_pause.clone();
@@ -1148,9 +1174,10 @@ pub fn load_session_for_source_with_cancel(
         effective_config = overrides;
     }
     let bookmark = crate::cache::load_bookmark(&source_path);
+    let normalizer_threads = effective_config.normalizer_threads.max(1);
     let session =
         ReaderSession::load_with_cancel(source_path, effective_config, normalizer, bookmark, cancel)?;
-    session.precompute_normalization_cache(normalizer, cancel)?;
+    session.precompute_normalization_cache(normalizer, normalizer_threads, cancel)?;
     Ok(session)
 }
 

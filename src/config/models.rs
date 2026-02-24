@@ -41,6 +41,8 @@ pub struct AppConfig {
     pub tts_espeak_path: String,
     #[serde(default = "crate::config::defaults::default_tts_threads")]
     pub tts_threads: usize,
+    #[serde(default = "crate::config::defaults::default_normalizer_threads")]
+    pub normalizer_threads: usize,
     #[serde(default = "crate::config::defaults::default_tts_progress_log_interval_secs")]
     pub tts_progress_log_interval_secs: f32,
     #[serde(default = "crate::config::defaults::default_show_tts")]
@@ -106,6 +108,7 @@ impl Default for AppConfig {
             tts_volume: crate::config::defaults::default_tts_volume(),
             tts_espeak_path: crate::config::defaults::default_tts_espeak_path(),
             tts_threads: crate::config::defaults::default_tts_threads(),
+            normalizer_threads: crate::config::defaults::default_normalizer_threads(),
             tts_progress_log_interval_secs:
                 crate::config::defaults::default_tts_progress_log_interval_secs(),
             show_tts: crate::config::defaults::default_show_tts(),
