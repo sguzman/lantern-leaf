@@ -260,6 +260,15 @@ fn bridge_error(code: &str, message: impl Into<String>) -> BridgeError {
     }
 }
 
+fn workspace_root_from_cwd() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    if cwd.file_name().and_then(|name| name.to_str()) == Some("src-tauri") {
+        cwd.parent().map(Path::to_path_buf)
+    } else {
+        Some(cwd)
+    }
+}
+
 fn configure_cache_dir_from_config(config: &config::AppConfig, config_path: &Path) {
     if std::env::var_os(cache::CACHE_DIR_ENV).is_some() {
         return;
@@ -271,8 +280,11 @@ fn configure_cache_dir_from_config(config: &config::AppConfig, config_path: &Pat
     }
 
     let candidate = PathBuf::from(configured);
+    let workspace_root = workspace_root_from_cwd();
     let resolved = if candidate.is_absolute() {
         candidate
+    } else if let Some(root) = workspace_root {
+        root.join(candidate)
     } else {
         config_path
             .parent()
@@ -301,17 +313,11 @@ fn configure_cache_dir_from_workspace() {
         return;
     }
 
-    let Ok(cwd) = std::env::current_dir() else {
+    let Some(root) = workspace_root_from_cwd() else {
         return;
     };
 
-    let cache_candidate = if cwd.file_name().and_then(|name| name.to_str()) == Some("src-tauri") {
-        cwd.parent()
-            .map(|parent| parent.join(cache::CACHE_DIR))
-            .unwrap_or_else(|| cwd.join(cache::CACHE_DIR))
-    } else {
-        cwd.join(cache::CACHE_DIR)
-    };
+    let cache_candidate = root.join(cache::CACHE_DIR);
 
     if !cache_candidate.exists() {
         return;
@@ -329,11 +335,25 @@ fn configure_cache_dir_from_workspace() {
 }
 
 fn app_config_path() -> PathBuf {
-    std::env::var_os("LANTERNLEAF_CONFIG_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("conf/config.toml"))
-}
+    let workspace_root = workspace_root_from_cwd();
 
+    if let Some(value) = std::env::var_os("LANTERNLEAF_CONFIG_PATH") {
+        let candidate = PathBuf::from(value);
+        return if candidate.is_absolute() {
+            candidate
+        } else if let Some(root) = workspace_root {
+            root.join(candidate)
+        } else {
+            candidate
+        };
+    }
+
+    if let Some(root) = workspace_root {
+        return root.join("conf/config.toml");
+    }
+
+    PathBuf::from("conf/config.toml")
+}
 fn persist_base_config(config: &config::AppConfig, path: &Path) -> Result<(), BridgeError> {
     let serialized = config::serialize_config(config).map_err(|err| {
         bridge_error(
