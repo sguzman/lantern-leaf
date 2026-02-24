@@ -46,10 +46,11 @@ export function createSessionSliceActions({ set, get, backend }: SliceContext): 
       try {
         await ensureJobSubscriptions({ set, get, backend });
 
-        const [bootstrapState, session, recents] = await Promise.all([
+        const [bootstrapState, session, recents, calibreBooks] = await Promise.all([
           backend.sessionGetBootstrap(),
           backend.sessionGetState(),
-          backend.recentList()
+          backend.recentList(),
+          backend.calibreLoadCachedBooks().catch(() => [] as Awaited<ReturnType<typeof backend.calibreLoadCachedBooks>>)
         ]);
 
         let reader = null;
@@ -65,6 +66,7 @@ export function createSessionSliceActions({ set, get, backend }: SliceContext): 
           bootstrapState,
           session,
           recents,
+          calibreBooks,
           reader,
           runtimeLogLevel: bootstrapState.config.log_level
         });        finishTelemetry(set, get, "bootstrap", startedAt, true, null);

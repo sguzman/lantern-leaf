@@ -1900,6 +1900,21 @@ fn logging_set_level(
 }
 
 #[tauri::command]
+fn calibre_load_cached_books(
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<Vec<CalibreBookDto>, BridgeError> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+
+    let books = calibre::load_cached_books(&guard.calibre_config)
+        .map_err(|err| bridge_error("calibre_cache_load_failed", err.to_string()))?;
+
+    guard.calibre_books = books.clone();
+    Ok(books.into_iter().map(map_calibre_book).collect())
+}
+
+#[tauri::command]
 async fn calibre_load_books(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
@@ -2158,6 +2173,7 @@ macro_rules! bridge_command_idents {
             reader_close_session,
             app_safe_quit,
             logging_set_level,
+            calibre_load_cached_books,
             calibre_load_books,
             calibre_open_book
         )

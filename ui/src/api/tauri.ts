@@ -592,6 +592,7 @@ export interface BackendApi {
   readerTtsRepeatSentence: () => Promise<ReaderSnapshot>;
   readerCloseSession: () => Promise<SessionState>;
   loggingSetLevel: (level: string) => Promise<string>;
+  calibreLoadCachedBooks: () => Promise<CalibreBook[]>;
   calibreLoadBooks: (forceRefresh?: boolean) => Promise<CalibreBook[]>;
   calibreOpenBook: (bookId: number) => Promise<OpenSourceResult>;
   onSourceOpen: (handler: (event: SourceOpenEvent) => void) => Promise<UnlistenFn>;
@@ -643,6 +644,7 @@ function createTauriBackendApi(): BackendApi {
     readerTtsRepeatSentence: () => invokeCommand<ReaderSnapshot>("reader_tts_repeat_sentence"),
     readerCloseSession: () => invokeCommand<SessionState>("reader_close_session"),
     loggingSetLevel: (level) => invokeCommand<string>("logging_set_level", { level }),
+    calibreLoadCachedBooks: () => invokeCommand<CalibreBook[]>("calibre_load_cached_books"),
     calibreLoadBooks: (forceRefresh) =>
       invokeCommand<CalibreBook[]>("calibre_load_books", { forceRefresh }),
     calibreOpenBook: (bookId) => invokeCommand<OpenSourceResult>("calibre_open_book", { bookId }),
@@ -706,6 +708,7 @@ function createMockBackendApi(): BackendApi {
     readerTtsRepeatSentence: mockReaderTtsRepeatSentence,
     readerCloseSession: mockSessionReturnToStarter,
     loggingSetLevel: mockLoggingSetLevel,
+    calibreLoadCachedBooks: mockCalibreLoadBooks,
     calibreLoadBooks: mockCalibreLoadBooks,
     calibreOpenBook: mockCalibreOpenBook,
     onSourceOpen: mockOnSourceOpen,

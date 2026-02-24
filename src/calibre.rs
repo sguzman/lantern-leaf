@@ -255,6 +255,15 @@ pub fn load_books(config: &CalibreConfig, force_refresh: bool) -> Result<Vec<Cal
     load_books_with_cancel(config, force_refresh, None)
 }
 
+pub fn load_cached_books(config: &CalibreConfig) -> Result<Vec<CalibreBook>> {
+    if !config.enabled {
+        return Ok(Vec::new());
+    }
+
+    let signature = cache_signature(config);
+    Ok(try_load_cache(config, &signature, false, false)?.unwrap_or_default())
+}
+
 pub fn load_books_with_cancel(
     config: &CalibreConfig,
     force_refresh: bool,
