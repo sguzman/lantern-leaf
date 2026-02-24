@@ -72,7 +72,7 @@ Latest migration verification run includes:
 - `pnpm --dir ui run build`
 - `pnpm --dir ui run audit:bundle`
 - `pnpm run types:check`
-- `cargo test -p ebup-viewer-tauri --lib`
+- `cargo test -p lanternleaf-tauri --lib`
 - `cargo test`
 - `cargo check --workspace`
 

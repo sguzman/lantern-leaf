@@ -1,6 +1,14 @@
-# ebup-viewer
+# LanternLeaf
 
 Rust desktop reader for EPUB/TXT/Markdown with synchronized TTS playback, sentence highlighting, bookmark persistence, and a starter library flow (recent books + Calibre).
+
+## Branding
+
+- Product name: `LanternLeaf`
+- Mascot: `Pipwick` (chibi candle scholar)
+- Brand palette source: `branding/colors.css`
+- Mascot source image: `branding/mascot.png`
+- Generated favicon set: `branding/favicon/`
 
 ## Current Project Status
 

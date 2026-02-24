@@ -57,7 +57,7 @@ jobs:
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
       - name: Test Tauri bridge
-        run: cargo test -p ebup-viewer-tauri --lib
+        run: cargo test -p lanternleaf-tauri --lib
 
       - name: Generate bridge TS bindings
         run: cargo run --manifest-path src-tauri/Cargo.toml --bin export_ts_bindings

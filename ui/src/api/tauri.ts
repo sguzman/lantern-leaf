@@ -153,7 +153,7 @@ const mockReaderSnapshot = (): ReaderSnapshot => ({
 
 const mockState: MockBackendState = {
   bootstrap: {
-    app_name: "ebup-viewer",
+    app_name: "LanternLeaf",
     mode: "mock",
     config: {
       theme: "day",

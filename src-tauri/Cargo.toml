@@ -1,17 +1,17 @@
 [package]
-name = "ebup-viewer-tauri"
+name = "lanternleaf-tauri"
 version = "0.1.0"
 edition = "2024"
-default-run = "ebup-viewer-tauri"
+default-run = "lanternleaf-tauri"
 
 [lib]
-name = "ebup_viewer_tauri_lib"
+name = "lanternleaf_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 anyhow = "1"
 ctrlc = "3.5.2"
-ebup-core = { path = "../crates/ebup-core" }
+lanternleaf-core = { path = "../crates/ebup-core" }
 hound = "3.5"
 piper-rs = "0.1.9"
 serde = { version = "1", features = ["derive"] }

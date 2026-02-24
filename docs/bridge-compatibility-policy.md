@@ -35,7 +35,7 @@ This policy defines how the Rust Tauri bridge and the React/TypeScript client ev
 - Add/adjust Rust bridge contract tests in `src-tauri/src/lib.rs`.
 - Add/adjust adapter/store tests in `ui/tests`.
 - Run:
-  - `cargo test -p ebup-viewer-tauri --lib`
+  - `cargo test -p lanternleaf-tauri --lib`
   - `cargo check --workspace`
   - `pnpm run types:check`
   - `pnpm --dir ui run check`

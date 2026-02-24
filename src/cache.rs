@@ -22,7 +22,7 @@ use std::time::UNIX_EPOCH;
 use tracing::{debug, warn};
 
 pub const CACHE_DIR: &str = ".cache";
-pub const CACHE_DIR_ENV: &str = "EBUP_VIEWER_CACHE_DIR";
+pub const CACHE_DIR_ENV: &str = "LANTERNLEAF_CACHE_DIR";
 const SOURCE_PATH_FILE: &str = "source-path.txt";
 static CONTENT_DIGEST_CACHE: OnceLock<Mutex<HashMap<PathBuf, SourceDigestEntry>>> = OnceLock::new();
 
@@ -442,7 +442,7 @@ mod tests {
         let key = CACHE_DIR_ENV;
         let previous = std::env::var_os(key);
         let override_path = std::env::temp_dir().join(format!(
-            "ebup_viewer_cache_root_override_{}_{}",
+            "lanternleaf_cache_root_override_{}_{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)

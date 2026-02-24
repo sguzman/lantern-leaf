@@ -2,12 +2,12 @@
 
 :root {
   color-scheme: var(--app-color-scheme, light);
-  --app-bg: #f8fafc;
-  --app-fg: #0f172a;
-  --reader-highlight-bg: rgba(51, 102, 179, 0.15);
-  --reader-highlight-border: rgb(92, 140, 198);
-  --reader-search-bg: #38bdf822;
-  --reader-search-border: #0ea5e9;
+  --app-bg: var(--ll-bg, #f7f2e8);
+  --app-fg: var(--ll-text, #2d2418);
+  --reader-highlight-bg: rgba(95, 143, 47, 0.18);
+  --reader-highlight-border: rgb(95, 143, 47);
+  --reader-search-bg: rgba(242, 181, 68, 0.18);
+  --reader-search-border: #f2b544;
 }
 
 body {

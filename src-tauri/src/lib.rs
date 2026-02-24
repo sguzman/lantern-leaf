@@ -8,10 +8,10 @@ use tauri_plugin_log::{Target, TargetKind, log::LevelFilter};
 use tracing::{info, warn};
 use ts_rs::TS;
 
-pub use ebup_core::{
+pub use lanternleaf_core::{
     cache, calibre, config, epub_loader, normalizer, pagination, quack_check, text_utils, tts,
 };
-use ebup_core::{cancellation, session};
+use lanternleaf_core::{cancellation, session};
 
 const MAX_RECENT_LIMIT: usize = 512;
 const DEFAULT_RECENT_LIMIT: usize = 64;
@@ -261,7 +261,7 @@ fn bridge_error(code: &str, message: impl Into<String>) -> BridgeError {
 }
 
 fn app_config_path() -> PathBuf {
-    std::env::var_os("EBUP_VIEWER_CONFIG_PATH")
+    std::env::var_os("LANTERNLEAF_CONFIG_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("conf/config.toml"))
 }
@@ -1205,7 +1205,7 @@ fn session_get_bootstrap(
         .lock()
         .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
     Ok(BootstrapState {
-        app_name: "ebup-viewer".to_string(),
+        app_name: "LanternLeaf".to_string(),
         mode: "migration".to_string(),
         config: BootstrapConfig {
             theme: guard.base_config.theme,
@@ -1799,7 +1799,7 @@ fn configure_linux_display_backend() {
             Some(value) if value == "wayland"
         );
     let allow_x11 = matches!(
-        std::env::var("EBUP_VIEWER_ALLOW_X11")
+        std::env::var("LANTERNLEAF_ALLOW_X11")
             .ok()
             .map(|value| value.to_ascii_lowercase()),
         Some(value) if value == "1" || value == "true" || value == "yes"
@@ -1930,7 +1930,7 @@ pub fn run() {
         .target(Target::new(TargetKind::Webview))
         .build();
 
-    info!("Starting ebup-viewer tauri bridge");
+    info!("Starting LanternLeaf tauri bridge");
     info!(
         command_count = BRIDGE_COMMAND_NAMES.len(),
         event_count = BRIDGE_EVENT_NAMES.len(),
@@ -1976,7 +1976,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock should be after epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("ebup_viewer_test_{name}_{nanos}.{extension}"))
+        std::env::temp_dir().join(format!("lanternleaf_test_{name}_{nanos}.{extension}"))
     }
 
     #[test]
@@ -2012,7 +2012,7 @@ mod tests {
     #[test]
     fn bootstrap_state_roundtrips_json_contract() {
         let state = BootstrapState {
-            app_name: "ebup-viewer".to_string(),
+            app_name: "LanternLeaf".to_string(),
             mode: "migration".to_string(),
             config: BootstrapConfig {
                 theme: config::ThemeMode::Day,
@@ -2268,7 +2268,7 @@ mod tests {
 
     #[test]
     fn app_config_path_uses_override_env_when_present() {
-        let key = "EBUP_VIEWER_CONFIG_PATH";
+        let key = "LANTERNLEAF_CONFIG_PATH";
         let previous = std::env::var_os(key);
         let override_path = unique_temp_file("config_override_path", "toml");
         // SAFETY: test-scoped env mutation; restored before test exits.

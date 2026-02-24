@@ -110,14 +110,14 @@ export default function App() {
       palette: {
         mode: dark ? "dark" : "light",
         primary: {
-          main: dark ? "#60a5fa" : "#0f766e"
+          main: dark ? "#79b93f" : "#5f8f2f"
         },
         secondary: {
-          main: dark ? "#f59e0b" : "#1d4ed8"
+          main: dark ? "#f4bc52" : "#f2b544"
         },
         background: {
-          default: dark ? "#0b1220" : "#f8fafc",
-          paper: dark ? "#111827" : "#ffffff"
+          default: dark ? "#15110d" : "#f7f2e8",
+          paper: dark ? "#201912" : "#fffaf0"
         }
       },
       shape: {
@@ -136,12 +136,12 @@ export default function App() {
 
   useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty("--app-bg", activeThemeMode === "night" ? "#0b1220" : "#f8fafc");
-    root.style.setProperty("--app-fg", activeThemeMode === "night" ? "#e2e8f0" : "#0f172a");
+    root.style.setProperty("--app-bg", activeThemeMode === "night" ? "#15110d" : "#f7f2e8");
+    root.style.setProperty("--app-fg", activeThemeMode === "night" ? "#f4ecdd" : "#2d2418");
     root.style.setProperty("--reader-highlight-bg", toCssRgba(activeHighlight));
     root.style.setProperty("--reader-highlight-border", highlightBorder(activeHighlight));
-    root.style.setProperty("--reader-search-bg", activeThemeMode === "night" ? "#0ea5e933" : "#38bdf822");
-    root.style.setProperty("--reader-search-border", activeThemeMode === "night" ? "#38bdf8" : "#0ea5e9");
+    root.style.setProperty("--reader-search-bg", activeThemeMode === "night" ? "#f4bc5230" : "#f2b5442d");
+    root.style.setProperty("--reader-search-border", activeThemeMode === "night" ? "#f4bc52" : "#e39f21");
     root.style.setProperty("--app-color-scheme", activeThemeMode === "night" ? "dark" : "light");
   }, [activeHighlight, activeThemeMode]);
 

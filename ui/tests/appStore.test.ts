@@ -22,7 +22,7 @@ import type {
 
 function makeBootstrapState(): BootstrapState {
   return {
-    app_name: "ebup-viewer",
+    app_name: "LanternLeaf",
     mode: "test",
     config: {
       theme: "day",

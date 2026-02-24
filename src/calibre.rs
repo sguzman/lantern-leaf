@@ -1177,7 +1177,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock should be after epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("ebup_viewer_calibre_{name}_{nanos}.{extension}"))
+        std::env::temp_dir().join(format!("lanternleaf_calibre_{name}_{nanos}.{extension}"))
     }
 
     #[test]
@@ -1227,7 +1227,7 @@ allowed_extensions = ["epub", "pdf", "txt"]
         let key = crate::cache::CACHE_DIR_ENV;
         let previous = std::env::var_os(key);
         let override_path = std::env::temp_dir().join(format!(
-            "ebup_viewer_calibre_cache_root_{}_{}",
+            "lanternleaf_calibre_cache_root_{}_{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)

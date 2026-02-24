@@ -12,5 +12,5 @@ fn main() {
         return;
     }
     eprintln!("The iced desktop UI has been decommissioned.");
-    eprintln!("Run `pnpm tauri:dev` (or `cargo tauri dev`) to launch ebup-viewer.");
+    eprintln!("Run `pnpm tauri:dev` (or `cargo tauri dev`) to launch LanternLeaf.");
 }

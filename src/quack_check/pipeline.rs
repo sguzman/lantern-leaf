@@ -437,7 +437,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock should be after epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("ebup_viewer_quack_check_{prefix}_{now}"))
+        std::env::temp_dir().join(format!("lanternleaf_quack_check_{prefix}_{now}"))
     }
 
     fn create_dummy_pdf_file() -> PathBuf {

@@ -44,7 +44,7 @@ Last automated verification run: `2026-02-24` (local + Tauri runtime smoke + 3-i
 ## Test Gates
 
 - [x] `cargo test`
-- [x] `cargo test -p ebup-viewer-tauri --lib`
+- [x] `cargo test -p lanternleaf-tauri --lib`
 - [x] `cargo check --workspace`
 - [x] `pnpm --dir ui run check`
 - [x] `pnpm --dir ui run lint`

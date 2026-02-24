@@ -24,7 +24,7 @@ const DEFAULT_QUACK_TEXT_FILENAME = "transcript.txt";
 const CALIBRE_CACHE_REV = "calibre-cache-v1";
 
 function cacheRootFromEnv() {
-  const override = process.env.EBUP_VIEWER_CACHE_DIR;
+  const override = process.env.LANTERNLEAF_CACHE_DIR;
   if (typeof override === "string" && override.trim().length > 0) {
     return path.resolve(override.trim());
   }
@@ -292,7 +292,7 @@ function writeCalibreCacheFixture(cachePaths, signature, books) {
 }
 
 function resolveTauriBinary() {
-  const binaryName = process.platform === "win32" ? "ebup-viewer-tauri.exe" : "ebup-viewer-tauri";
+  const binaryName = process.platform === "win32" ? "lanternleaf-tauri.exe" : "lanternleaf-tauri";
   const candidates = [
     path.resolve(repoRoot, "src-tauri", "target", "debug", binaryName),
     path.resolve(repoRoot, "target", "debug", binaryName)
@@ -652,9 +652,9 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
   mkdirSync(tmpDir, { recursive: true });
   const uniqueRunId = Date.now();
   const runtimeCacheRoot = path.resolve(tmpDir, `tauri-e2e-cache-${uniqueRunId}`);
-  const previousCacheDirEnv = process.env.EBUP_VIEWER_CACHE_DIR;
+  const previousCacheDirEnv = process.env.LANTERNLEAF_CACHE_DIR;
   const previousCalibreConfigPathEnv = process.env.CALIBRE_CONFIG_PATH;
-  process.env.EBUP_VIEWER_CACHE_DIR = runtimeCacheRoot;
+  process.env.LANTERNLEAF_CACHE_DIR = runtimeCacheRoot;
   rmSync(runtimeCacheRoot, { recursive: true, force: true });
   mkdirSync(runtimeCacheRoot, { recursive: true });
   const sourceFileName = `tauri-e2e-source-${uniqueRunId}.txt`;
@@ -773,9 +773,9 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
     } finally {
       tauriDriver.kill();
       if (previousCacheDirEnv === undefined) {
-        delete process.env.EBUP_VIEWER_CACHE_DIR;
+        delete process.env.LANTERNLEAF_CACHE_DIR;
       } else {
-        process.env.EBUP_VIEWER_CACHE_DIR = previousCacheDirEnv;
+        process.env.LANTERNLEAF_CACHE_DIR = previousCacheDirEnv;
       }
       if (previousCalibreConfigPathEnv === undefined) {
         delete process.env.CALIBRE_CONFIG_PATH;

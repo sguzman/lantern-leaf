@@ -966,58 +966,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
-name = "ebup-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "epub",
- "html2text",
- "image",
- "once_cell",
- "regex",
- "reqwest 0.12.28",
- "rodio",
- "serde",
- "serde_json",
- "sha2",
- "sonic-rs-sys",
- "toml 1.0.3+spec-1.1.0",
- "tracing",
- "tracing-subscriber",
- "ts-rs",
- "unicode-normalization",
-]
-
-[[package]]
-name = "ebup-viewer"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "hound",
- "piper-rs",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "ebup-viewer-tauri"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ctrlc",
- "ebup-core",
- "hound",
- "piper-rs",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-log",
- "tracing",
- "ts-rs",
-]
-
-[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2216,6 +2164,58 @@ dependencies = [
  "html5ever 0.29.1",
  "indexmap 2.13.0",
  "selectors",
+]
+
+[[package]]
+name = "lanternleaf"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hound",
+ "piper-rs",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "lanternleaf-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "epub",
+ "html2text",
+ "image",
+ "once_cell",
+ "regex",
+ "reqwest 0.12.28",
+ "rodio",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sonic-rs-sys",
+ "toml 1.0.3+spec-1.1.0",
+ "tracing",
+ "tracing-subscriber",
+ "ts-rs",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "lanternleaf-tauri"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ctrlc",
+ "hound",
+ "lanternleaf-core",
+ "piper-rs",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-log",
+ "tracing",
+ "ts-rs",
 ]
 
 [[package]]

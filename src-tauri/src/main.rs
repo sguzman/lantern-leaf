@@ -5,5 +5,5 @@ fn main() {
     if tts_worker::maybe_run_worker() {
         return;
     }
-    ebup_viewer_tauri_lib::run();
+    lanternleaf_tauri_lib::run();
 }
