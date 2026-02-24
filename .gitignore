@@ -11,3 +11,4 @@ src-tauri/bindings
 bindings
 ui/test-results
 ui/playwright-report
+logs

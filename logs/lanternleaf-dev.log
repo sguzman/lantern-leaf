@@ -1,8 +1,0 @@
-2026-02-24T14:57:15.198071Z  INFO lanternleaf_tauri_lib: src-tauri/src/lib.rs:357: Configured cache root from config cache_dir=/home/admin/Code/projects/lantern-leaf/.cache
-2026-02-24T14:57:15.198104Z  INFO lanternleaf_tauri_lib: src-tauri/src/lib.rs:2137: Enabled dev file logging target mode=dev logs_dir=/home/admin/Code/projects/lantern-leaf/logs
-2026-02-24T14:57:15.198120Z  INFO lanternleaf_tauri_lib: src-tauri/src/lib.rs:2146: Starting LanternLeaf tauri bridge
-2026-02-24T14:57:15.198133Z  INFO lanternleaf_tauri_lib: src-tauri/src/lib.rs:2147: Registered stable bridge surface command_count=36 event_count=7
-2026-02-24T14:57:15.198231Z  INFO lanternleaf_core::config::io: crates/ebup-core/src/../../../src/config/io.rs:19: Loaded base config path=/home/admin/Code/projects/lantern-leaf/conf/config.toml
-2026-02-24T14:57:15.198435Z DEBUG lanternleaf_core::config::io: crates/ebup-core/src/../../../src/config/io.rs:33: Parsed configuration from disk
-2026-02-24T14:57:15.198464Z  WARN lanternleaf_core::normalizer: crates/ebup-core/src/../../../src/normalizer.rs:218: Falling back to default normalizer config: No such file or directory (os error 2) path=conf/normalizer.toml
-2026-02-24T14:57:15.203554Z  WARN lanternleaf_tauri_lib: src-tauri/src/lib.rs:2176: tauri runtime failed: failed to initialize plugin `log`: attempted to set a logger after the logging system was already initialized
