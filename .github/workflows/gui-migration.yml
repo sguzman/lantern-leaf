@@ -82,5 +82,11 @@ jobs:
       - name: Test UI
         run: pnpm --dir ui run test
 
+      - name: Install Playwright Browser
+        run: pnpm --dir ui exec playwright install --with-deps chromium
+
+      - name: E2E UI (Playwright)
+        run: pnpm --dir ui run test:e2e
+
       - name: Build UI
         run: pnpm --dir ui run build

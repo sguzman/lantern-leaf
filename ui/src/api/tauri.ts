@@ -77,14 +77,29 @@ type MockBackendState = {
   logLevel: string;
 };
 
+const MOCK_PAGES: Array<{ text: string; sentences: string[] }> = [
+  {
+    text: "This is the mock reader content on page one.",
+    sentences: ["This is the mock reader content on page one."]
+  },
+  {
+    text: "This is the mock reader content on page two.",
+    sentences: ["This is the mock reader content on page two."]
+  },
+  {
+    text: "This is the mock reader content on page three.",
+    sentences: ["This is the mock reader content on page three."]
+  }
+];
+
 const mockReaderSnapshot = (): ReaderSnapshot => ({
   source_path: ".cache/clipboard/mock.txt",
   source_name: "mock.txt",
   current_page: 0,
-  total_pages: 1,
+  total_pages: MOCK_PAGES.length,
   text_only_mode: false,
-  page_text: "This is the mock reader content.",
-  sentences: ["This is the mock reader content."],
+  page_text: MOCK_PAGES[0].text,
+  sentences: MOCK_PAGES[0].sentences,
   highlighted_sentence_idx: 0,
   search_query: "",
   search_matches: [],
@@ -106,19 +121,19 @@ const mockReaderSnapshot = (): ReaderSnapshot => ({
   },
   stats: {
     page_index: 1,
-    total_pages: 1,
+    total_pages: MOCK_PAGES.length,
     tts_progress_pct: 100,
     page_time_remaining_secs: 0,
     book_time_remaining_secs: 0,
-    page_word_count: 6,
+    page_word_count: MOCK_PAGES[0].text.split(/\s+/).length,
     page_sentence_count: 1,
     page_start_percent: 0,
-    page_end_percent: 100,
+    page_end_percent: 33.333,
     words_read_up_to_page_start: 0,
     sentences_read_up_to_page_start: 0,
-    words_read_up_to_page_end: 6,
+    words_read_up_to_page_end: MOCK_PAGES[0].text.split(/\s+/).length,
     sentences_read_up_to_page_end: 1,
-    words_read_up_to_current_position: 6,
+    words_read_up_to_current_position: MOCK_PAGES[0].text.split(/\s+/).length,
     sentences_read_up_to_current_position: 1
   },
   tts: {
@@ -183,6 +198,39 @@ function ensureMockReader(): ReaderSnapshot {
     mockState.reader = mockReaderSnapshot();
   }
   return mockState.reader;
+}
+
+function applyMockPage(reader: ReaderSnapshot, page: number): void {
+  const clampedPage = Math.max(0, Math.min(MOCK_PAGES.length - 1, Math.floor(page)));
+  const pageData = MOCK_PAGES[clampedPage];
+  const totalWords = MOCK_PAGES.reduce((sum, item) => sum + item.text.split(/\s+/).length, 0);
+  const wordsBeforePage = MOCK_PAGES.slice(0, clampedPage).reduce(
+    (sum, item) => sum + item.text.split(/\s+/).length,
+    0
+  );
+  const wordsOnPage = pageData.text.split(/\s+/).length;
+
+  reader.current_page = clampedPage;
+  reader.total_pages = MOCK_PAGES.length;
+  reader.page_text = pageData.text;
+  reader.sentences = pageData.sentences;
+  reader.highlighted_sentence_idx = 0;
+  reader.tts.current_sentence_idx = 0;
+  reader.tts.sentence_count = pageData.sentences.length;
+  reader.stats.page_index = clampedPage + 1;
+  reader.stats.total_pages = MOCK_PAGES.length;
+  reader.stats.page_word_count = wordsOnPage;
+  reader.stats.page_sentence_count = pageData.sentences.length;
+  reader.stats.page_start_percent = Number(((wordsBeforePage / totalWords) * 100).toFixed(3));
+  reader.stats.page_end_percent = Number(
+    (((wordsBeforePage + wordsOnPage) / totalWords) * 100).toFixed(3)
+  );
+  reader.stats.words_read_up_to_page_start = wordsBeforePage;
+  reader.stats.sentences_read_up_to_page_start = clampedPage;
+  reader.stats.words_read_up_to_page_end = wordsBeforePage + wordsOnPage;
+  reader.stats.sentences_read_up_to_page_end = clampedPage + pageData.sentences.length;
+  reader.stats.words_read_up_to_current_position = wordsBeforePage + wordsOnPage;
+  reader.stats.sentences_read_up_to_current_position = clampedPage + pageData.sentences.length;
 }
 
 async function mockOpenWithPath(path: string): Promise<OpenSourceResult> {
@@ -250,6 +298,24 @@ async function mockSourceOpenClipboardText(text: string): Promise<OpenSourceResu
 
 async function mockReaderGetSnapshot(): Promise<ReaderSnapshot> {
   return structuredClone(ensureMockReader());
+}
+
+async function mockReaderNextPage(): Promise<ReaderSnapshot> {
+  const reader = ensureMockReader();
+  applyMockPage(reader, reader.current_page + 1);
+  return structuredClone(reader);
+}
+
+async function mockReaderPrevPage(): Promise<ReaderSnapshot> {
+  const reader = ensureMockReader();
+  applyMockPage(reader, reader.current_page - 1);
+  return structuredClone(reader);
+}
+
+async function mockReaderSetPage(page: number): Promise<ReaderSnapshot> {
+  const reader = ensureMockReader();
+  applyMockPage(reader, page);
+  return structuredClone(reader);
 }
 
 async function mockReaderApplySettings(patch: ReaderSettingsPatch): Promise<ReaderSnapshot> {
@@ -603,9 +669,9 @@ function createMockBackendApi(): BackendApi {
     sourceOpenPath: mockSourceOpenPath,
     sourceOpenClipboardText: mockSourceOpenClipboardText,
     readerGetSnapshot: mockReaderGetSnapshot,
-    readerNextPage: mockReaderGetSnapshot,
-    readerPrevPage: mockReaderGetSnapshot,
-    readerSetPage: mockReaderGetSnapshot,
+    readerNextPage: mockReaderNextPage,
+    readerPrevPage: mockReaderPrevPage,
+    readerSetPage: mockReaderSetPage,
     readerSentenceClick: mockReaderGetSnapshot,
     readerNextSentence: mockReaderNextSentence,
     readerPrevSentence: mockReaderPrevSentence,

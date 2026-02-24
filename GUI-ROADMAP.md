@@ -12,8 +12,8 @@
 **Target Architecture For ebup-viewer**
 
 - [x] Target stack: Tauri 2 shell + Rust core domain crate + React/TypeScript frontend.
-- [ ] Keep Rust responsible for domain/data/IO/TTS/PDF pipeline.
-- [ ] Keep frontend responsible for rendering, layout, input handling, DOM-based scrolling/highlight positioning.
+- [x] Keep Rust responsible for domain/data/IO/TTS/PDF pipeline.
+- [x] Keep frontend responsible for rendering, layout, input handling, DOM-based scrolling/highlight positioning.
 - [x] Use Material UI for component primitives and interactions.
 - [x] Use Tailwind for layout and spacing utilities.
 - [x] Use a single UI state store (Zustand) that calls typed backend commands.
@@ -23,12 +23,12 @@
 
 **Phase 0: Baseline And Contract Freeze**
 
-- [ ] P0-01 Create a full feature inventory from current iced app flows (starter, reader, TTS, calibre, PDF, settings, stats, search, shortcuts, safe quit).
-- [ ] P0-02 Capture baseline behavior docs for all known “must not regress” items (highlight alignment, non-vertical button policy, pause semantics, close-session behavior).
-- [ ] P0-03 Capture baseline performance metrics: startup time, page switch latency, TTS start latency, window resize responsiveness.
-- [ ] P0-04 Capture baseline logs for key scenarios: EPUB open, PDF open, TTS batch generate, close while generating, resume from bookmark.
-- [ ] P0-05 Define parity acceptance checklist with explicit pass/fail criteria for each feature.
-- [ ] P0-06 Freeze feature additions during migration except migration-blocking fixes.
+- [x] P0-01 Create a full feature inventory from current iced app flows (starter, reader, TTS, calibre, PDF, settings, stats, search, shortcuts, safe quit).
+- [x] P0-02 Capture baseline behavior docs for all known “must not regress” items (highlight alignment, non-vertical button policy, pause semantics, close-session behavior).
+- [x] P0-03 Capture baseline performance metrics: startup time, page switch latency, TTS start latency, window resize responsiveness.
+- [x] P0-04 Capture baseline logs for key scenarios: EPUB open, PDF open, TTS batch generate, close while generating, resume from bookmark.
+- [x] P0-05 Define parity acceptance checklist with explicit pass/fail criteria for each feature.
+- [x] P0-06 Freeze feature additions during migration except migration-blocking fixes.
 
 **Phase 1: Repository Restructure**
 
@@ -83,7 +83,7 @@
 
 - [x] P6-01 Implement `ui/src/api/tauri.ts` style typed wrappers for all backend commands.
 - [x] P6-02 Implement runtime adapter: real Tauri invoke + optional mock adapter for browser-only UI dev.
-- [ ] P6-03 Build Zustand store slices: session, reader, tts, calibre, settings, stats, jobs, notifications. (Selectors added in `ui/src/store/selectors.ts`; full physical slice split still pending.)
+- [x] P6-03 Build Zustand store slices: session, reader, tts, calibre, settings, stats, jobs, notifications.
 - [x] P6-04 Centralize optimistic update policy and rollback logic.
 - [x] P6-05 Implement event subscription handlers to update store from backend progress/events.
 - [x] P6-06 Add telemetry fields in store actions for reproducible debugging.
@@ -151,7 +151,7 @@
 - [x] P13-01 Keep and run Rust unit/integration tests for core logic at every phase.
 - [x] P13-02 Add bridge command tests for all critical command paths.
 - [x] P13-03 Add frontend unit tests for reducers/store actions and command adapters.
-- [ ] P13-04 Add E2E scenarios (Playwright + Tauri runner) for core reading/TTS flows. (Playwright scenarios added; dedicated Tauri runner wiring still pending.)
+- [ ] P13-04 Add E2E scenarios (Playwright + Tauri runner) for core reading/TTS flows. (Playwright scenarios and CI execution added; dedicated Tauri runner wiring still pending.)
 - [x] P13-05 Add explicit regression scenarios from your prior incidents (sentence click halt, highlight drift, duplicate PDF jobs, close-during-tts).
 - [x] P13-06 Add large calibre dataset performance scenario and verify non-blocking UX.
 - [x] P13-07 Add PDF edge corpus tests with degraded pages and fallback paths.
