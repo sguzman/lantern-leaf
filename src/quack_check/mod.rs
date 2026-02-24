@@ -10,6 +10,7 @@ pub mod probe;
 pub mod report;
 pub mod util;
 
+use crate::cancellation::CancellationToken;
 use crate::quack_check::config::Config;
 use crate::quack_check::engine::python::PythonEngine;
 use crate::quack_check::pipeline::Pipeline;
@@ -26,6 +27,15 @@ pub struct RunResult {
 }
 
 pub fn run_pdf_to_text(config_path: &Path, input: &Path, out_root: &Path) -> Result<RunResult> {
+    run_pdf_to_text_with_cancel(config_path, input, out_root, None)
+}
+
+pub fn run_pdf_to_text_with_cancel(
+    config_path: &Path,
+    input: &Path,
+    out_root: &Path,
+    cancel: Option<CancellationToken>,
+) -> Result<RunResult> {
     let cfg = Config::load(config_path)?;
     validate_input(&cfg, input)?;
 
@@ -63,8 +73,8 @@ pub fn run_pdf_to_text(config_path: &Path, input: &Path, out_root: &Path) -> Res
         ensure_dir(Path::new(&cfg.paths.docling_artifacts_dir))?;
     }
 
-    let engine = PythonEngine::new(&cfg)?;
-    let pipeline = Pipeline::new(&cfg, engine);
+    let engine = PythonEngine::new_with_cancel(&cfg, cancel.clone())?;
+    let pipeline = Pipeline::new_with_cancel(&cfg, engine, cancel);
     let result = pipeline.run_job(input, &job_dir)?;
 
     if cfg.output.write_markdown {

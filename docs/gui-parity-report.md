@@ -33,7 +33,8 @@ This report compares core workflows between the legacy iced UI path and the Taur
 | Narrow-width topbar/TTS row no-vertical expansion in real runtime | Supported | Supported | Tauri-runner assertions against `reader-topbar` / `reader-tts-control-row` heights in `ui/e2e-tauri/smoke.test.mjs` |
 | TTS progress precision (3 decimals) | Supported | Supported | TTS display formatting in `ui/src/components/ReaderShell.tsx` |
 | Full TTS control surface in real runtime | Supported | Supported | Runtime smoke covers toggle/play/pause/play-from-page/play-from-highlight and seek/repeat pause semantics in `ui/e2e-tauri/smoke.test.mjs` |
-| Piper TTS retained as final-product feature | Supported | Required / Tracked | Migration roadmap and policy now explicitly lock Piper/TTS retention (`GUI-ROADMAP.md`, `docs/gui-migration-policy.md`) |
+| Piper playback runtime (audio + highlight progression + cancellation) | Supported | Supported | Runtime TTS orchestration in `src-tauri/src/lib.rs` (`sync_tts_runtime_after_reader_change`, `run_tts_runtime_loop`) with worker-backed Piper synthesis in `src/tts.rs` / `src/tts_worker.rs` |
+| Piper TTS retained as final-product feature | Supported | Supported | Migration roadmap/policy lock Piper retention (`GUI-ROADMAP.md`, `docs/gui-migration-policy.md`) and runtime playback wiring remains active in Tauri bridge |
 | Runtime log-level updates | Supported | Supported | Command `logging_set_level` and event `log-level` in `src-tauri/src/lib.rs`; starter controls in `ui/src/components/StarterShell.tsx` |
 | Runtime log-level persistence to config | Supported | Supported | Config persistence helper + override-path coverage in `src-tauri/src/lib.rs` tests (`persist_base_config_writes_updated_log_level`, `app_config_path_uses_override_env_when_present`) |
 | Reader shutdown housekeeping persistence | Supported | Supported | `cleanup_for_shutdown_persists_active_reader_housekeeping` test in `src-tauri/src/lib.rs` |
@@ -46,16 +47,16 @@ This report compares core workflows between the legacy iced UI path and the Taur
 
 ## Current Gaps
 
-- No blocking parity gaps remain in automated checks; remaining cutover work is iced-path decommission sequencing.
+- No blocking parity gaps remain in automated checks; iced decommission is complete.
 
 ## Soak Snapshot
 
 - Local soak run (`2026-02-24`) via `pnpm --dir ui run test:e2e:tauri:soak -- --iterations 3`:
   - Passes: `3/3`
-  - Avg smoke duration: `50101.590 ms`
-  - Min smoke duration: `49390.887 ms`
-  - Max smoke duration: `50578.461 ms`
-  - p95 smoke duration: `50578.461 ms`
+  - Avg smoke duration: `54568.524 ms`
+  - Min smoke duration: `54470.779 ms`
+  - Max smoke duration: `54635.085 ms`
+  - p95 smoke duration: `54635.085 ms`
 - Latest machine-readable report: `tmp/tauri-soak-report.json`
 
 ## Validation Snapshot

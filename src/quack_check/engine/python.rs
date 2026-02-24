@@ -1,4 +1,5 @@
 use super::{Engine, types::*};
+use crate::cancellation::CancellationToken;
 use crate::quack_check::config::Config;
 use anyhow::{Context, Result, anyhow};
 use std::io::Read;
@@ -11,10 +12,15 @@ pub struct PythonEngine {
     cfg: Config,
     scripts_dir: PathBuf,
     python_exe: PathBuf,
+    cancel: Option<CancellationToken>,
 }
 
 impl PythonEngine {
     pub fn new(cfg: &Config) -> Result<Self> {
+        Self::new_with_cancel(cfg, None)
+    }
+
+    pub fn new_with_cancel(cfg: &Config, cancel: Option<CancellationToken>) -> Result<Self> {
         let scripts_dir = PathBuf::from(&cfg.paths.scripts_dir);
         if cfg.security.pin_scripts_dir {
             let cwd = std::env::current_dir().with_context(|| "current_dir")?;
@@ -44,6 +50,7 @@ impl PythonEngine {
             cfg: cfg.clone(),
             scripts_dir,
             python_exe,
+            cancel,
         })
     }
 
@@ -92,7 +99,7 @@ impl PythonEngine {
         }
 
         let output = if let Some(secs) = timeout_seconds {
-            wait_with_timeout(&mut child, Duration::from_secs(secs))?
+            wait_with_timeout(&mut child, Duration::from_secs(secs), self.cancel.as_ref())?
         } else {
             child
                 .wait_with_output()
@@ -242,7 +249,11 @@ impl Engine for PythonEngine {
     }
 }
 
-fn wait_with_timeout(child: &mut Child, timeout: Duration) -> Result<Output> {
+fn wait_with_timeout(
+    child: &mut Child,
+    timeout: Duration,
+    cancel: Option<&CancellationToken>,
+) -> Result<Output> {
     // Drain pipes while waiting so verbose python logging can't deadlock the child
     // on a full stdout/stderr buffer.
     let stdout_reader = child.stdout.take();
@@ -266,6 +277,29 @@ fn wait_with_timeout(child: &mut Child, timeout: Duration) -> Result<Output> {
 
     let start = Instant::now();
     loop {
+        if let Some(token) = cancel
+            && token.is_cancelled()
+        {
+            warn!("python process cancelled by token");
+            let _ = child.kill();
+            let status = child.wait().with_context(|| "wait after cancel kill")?;
+            let stdout = stdout_thread
+                .join()
+                .map_err(|_| anyhow!("stdout reader thread panicked"))??;
+            let stderr = stderr_thread
+                .join()
+                .map_err(|_| anyhow!("stderr reader thread panicked"))??;
+            let output = Output {
+                status,
+                stdout,
+                stderr,
+            };
+            return Err(anyhow!(
+                "python process cancelled; stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
         if let Some(status) = child.try_wait().with_context(|| "try_wait")? {
             let stdout = stdout_thread
                 .join()

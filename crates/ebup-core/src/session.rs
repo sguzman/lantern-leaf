@@ -1,4 +1,6 @@
-use crate::{config, epub_loader, normalizer, pagination, text_utils};
+use crate::{
+    cancellation::CancellationToken, config, epub_loader, normalizer, pagination, text_utils,
+};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -202,11 +204,22 @@ pub struct ReaderSession {
 impl ReaderSession {
     pub fn load(
         source_path: PathBuf,
-        mut config: config::AppConfig,
+        config: config::AppConfig,
         normalizer: &normalizer::TextNormalizer,
         bookmark: Option<crate::cache::Bookmark>,
     ) -> Result<Self, String> {
-        let loaded = epub_loader::load_book_content(&source_path).map_err(|err| err.to_string())?;
+        Self::load_with_cancel(source_path, config, normalizer, bookmark, None)
+    }
+
+    pub fn load_with_cancel(
+        source_path: PathBuf,
+        mut config: config::AppConfig,
+        normalizer: &normalizer::TextNormalizer,
+        bookmark: Option<crate::cache::Bookmark>,
+        cancel: Option<&CancellationToken>,
+    ) -> Result<Self, String> {
+        let loaded = epub_loader::load_book_content_with_cancel(&source_path, cancel)
+            .map_err(|err| err.to_string())?;
         let source_name = source_path
             .file_name()
             .and_then(|name| name.to_str())
@@ -1023,6 +1036,15 @@ pub fn load_session_for_source(
     base_config: &config::AppConfig,
     normalizer: &normalizer::TextNormalizer,
 ) -> Result<ReaderSession, String> {
+    load_session_for_source_with_cancel(source_path, base_config, normalizer, None)
+}
+
+pub fn load_session_for_source_with_cancel(
+    source_path: PathBuf,
+    base_config: &config::AppConfig,
+    normalizer: &normalizer::TextNormalizer,
+    cancel: Option<&CancellationToken>,
+) -> Result<ReaderSession, String> {
     let mut effective_config = base_config.clone();
     if let Some(mut overrides) = crate::cache::load_epub_config(&source_path) {
         overrides.log_level = base_config.log_level;
@@ -1040,7 +1062,7 @@ pub fn load_session_for_source(
         effective_config = overrides;
     }
     let bookmark = crate::cache::load_bookmark(&source_path);
-    ReaderSession::load(source_path, effective_config, normalizer, bookmark)
+    ReaderSession::load_with_cancel(source_path, effective_config, normalizer, bookmark, cancel)
 }
 
 pub fn persist_session_housekeeping(session: &ReaderSession) {

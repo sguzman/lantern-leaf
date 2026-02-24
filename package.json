@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "pnpm tauri:dev",
     "build": "pnpm tauri:build",
-    "desktop:legacy": "cargo run",
     "ui:dev": "pnpm --dir ui run dev",
     "ui:build": "pnpm --dir ui run build",
     "ui:check": "pnpm --dir ui run check",

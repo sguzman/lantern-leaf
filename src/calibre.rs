@@ -12,6 +12,8 @@ use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
 
+use crate::cancellation::CancellationToken;
+
 const DEFAULT_CALIBRE_CONFIG_PATH: &str = "conf/calibre.toml";
 const CALIBRE_CACHE_FILE: &str = "calibre-books.toml";
 const CALIBRE_CACHE_REV: &str = "calibre-cache-v1";
@@ -242,6 +244,15 @@ fn resolve_config_path() -> Option<PathBuf> {
 }
 
 pub fn load_books(config: &CalibreConfig, force_refresh: bool) -> Result<Vec<CalibreBook>> {
+    load_books_with_cancel(config, force_refresh, None)
+}
+
+pub fn load_books_with_cancel(
+    config: &CalibreConfig,
+    force_refresh: bool,
+    cancel: Option<&CancellationToken>,
+) -> Result<Vec<CalibreBook>> {
+    ensure_not_cancelled(cancel, "calibre_load_start")?;
     if !config.enabled {
         return Ok(Vec::new());
     }
@@ -257,6 +268,7 @@ pub fn load_books(config: &CalibreConfig, force_refresh: bool) -> Result<Vec<Cal
 
     let signature = cache_signature(config);
     if !force_refresh {
+        ensure_not_cancelled(cancel, "before_cache_load")?;
         if let Some(mut cached) = try_load_cache(config, &signature, false)? {
             info!(book_count = cached.len(), "Using cached calibre catalog");
             let changed = hydrate_book_thumbnails(
@@ -264,6 +276,7 @@ pub fn load_books(config: &CalibreConfig, force_refresh: bool) -> Result<Vec<Cal
                 &mut cached,
                 THUMB_PREFETCH_LIMIT,
                 THUMB_PREFETCH_BUDGET,
+                cancel,
             );
             if changed {
                 let _ = write_cache(&signature, &cached);
@@ -278,7 +291,8 @@ pub fn load_books(config: &CalibreConfig, force_refresh: bool) -> Result<Vec<Cal
         info!("Calibre cache missing/incompatible; fetching from source");
     }
 
-    let mut books = fetch_books(config)?;
+    let mut books = fetch_books(config, cancel)?;
+    ensure_not_cancelled(cancel, "after_fetch_books")?;
     info!(
         book_count = books.len(),
         "Fetched calibre catalog from source"
@@ -288,7 +302,9 @@ pub fn load_books(config: &CalibreConfig, force_refresh: bool) -> Result<Vec<Cal
         &mut books,
         THUMB_PREFETCH_LIMIT,
         THUMB_PREFETCH_BUDGET,
+        cancel,
     );
+    ensure_not_cancelled(cancel, "before_write_cache")?;
     info!(book_count = books.len(), "Writing calibre cache file");
     write_cache(&signature, &books)?;
     info!(book_count = books.len(), "Calibre cache file updated");
@@ -365,8 +381,12 @@ pub fn materialize_book_path(config: &CalibreConfig, book: &CalibreBook) -> Resu
     ))
 }
 
-fn fetch_books(config: &CalibreConfig) -> Result<Vec<CalibreBook>> {
-    let rows = fetch_rows_from_targets(config)?;
+fn fetch_books(
+    config: &CalibreConfig,
+    cancel: Option<&CancellationToken>,
+) -> Result<Vec<CalibreBook>> {
+    ensure_not_cancelled(cancel, "fetch_books_start")?;
+    let rows = fetch_rows_from_targets(config, cancel)?;
     let allowed_extensions = config.sanitized_extensions();
     let allowed_set: HashSet<String> = allowed_extensions.iter().cloned().collect();
     let library = config.state_path.clone().or(config.library_path.clone());
@@ -377,6 +397,7 @@ fn fetch_books(config: &CalibreConfig) -> Result<Vec<CalibreBook>> {
 
     let mut books = Vec::new();
     for row in rows {
+        ensure_not_cancelled(cancel, "fetch_books_row_loop")?;
         let id = parse_u64_field(&row, "id");
         let Some(id) = id else {
             continue;
@@ -427,11 +448,16 @@ fn fetch_books(config: &CalibreConfig) -> Result<Vec<CalibreBook>> {
     Ok(books)
 }
 
-fn fetch_rows_from_targets(config: &CalibreConfig) -> Result<Vec<serde_json::Value>> {
+fn fetch_rows_from_targets(
+    config: &CalibreConfig,
+    cancel: Option<&CancellationToken>,
+) -> Result<Vec<serde_json::Value>> {
+    ensure_not_cancelled(cancel, "fetch_rows_start")?;
     let mut last_err = None;
     for target in calibre_targets(config) {
+        ensure_not_cancelled(cancel, "fetch_rows_target_loop")?;
         info!(target = %target.label, "Attempting calibre target");
-        match run_calibredb_list(config, &target) {
+        match run_calibredb_list(config, &target, cancel) {
             Ok(rows) => {
                 info!(target = %target.label, row_count = rows.len(), "Calibre target responded");
                 return Ok(rows);
@@ -448,7 +474,9 @@ fn fetch_rows_from_targets(config: &CalibreConfig) -> Result<Vec<serde_json::Val
 fn run_calibredb_list(
     config: &CalibreConfig,
     target: &CalibreTarget,
+    cancel: Option<&CancellationToken>,
 ) -> Result<Vec<serde_json::Value>> {
+    ensure_not_cancelled(cancel, "before_calibredb_list")?;
     let mut cmd = Command::new(&config.calibredb_bin);
     cmd.arg("--timeout")
         .arg(CALIBRE_DB_TIMEOUT_SECS.to_string());
@@ -467,6 +495,7 @@ fn run_calibredb_list(
     let output = cmd
         .output()
         .with_context(|| format!("failed to run calibredb list against {}", target.label))?;
+    ensure_not_cancelled(cancel, "after_calibredb_list")?;
     if !output.status.success() {
         return Err(anyhow!(
             String::from_utf8_lossy(&output.stderr).trim().to_string()
@@ -808,6 +837,7 @@ fn hydrate_book_thumbnails(
     books: &mut [CalibreBook],
     limit: usize,
     budget: Duration,
+    cancel: Option<&CancellationToken>,
 ) -> bool {
     let mut changed = false;
     let started = Instant::now();
@@ -816,6 +846,12 @@ fn hydrate_book_thumbnails(
     let mut available = 0usize;
     let prefetch_count = books.len().min(limit);
     for book in books.iter_mut().take(prefetch_count) {
+        if let Some(token) = cancel
+            && token.is_cancelled()
+        {
+            info!("Stopping calibre thumbnail prefetch due to cancellation");
+            break;
+        }
         if started.elapsed() >= budget {
             info!(
                 processed,
@@ -861,6 +897,13 @@ fn hydrate_book_thumbnails(
         "Finished calibre thumbnail prefetch pass"
     );
     changed
+}
+
+fn ensure_not_cancelled(cancel: Option<&CancellationToken>, stage: &'static str) -> Result<()> {
+    if let Some(token) = cancel {
+        token.check_cancelled(stage)?;
+    }
+    Ok(())
 }
 
 fn ensure_book_thumbnail(
@@ -1126,6 +1169,7 @@ fn now_unix_nanos() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cancellation::CancellationToken;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_temp_file(name: &str, extension: &str) -> PathBuf {
@@ -1220,5 +1264,20 @@ allowed_extensions = ["epub", "pdf", "txt"]
                 }
             }
         }
+    }
+
+    #[test]
+    fn load_books_honors_cancellation_token() {
+        let mut config = CalibreConfig::default();
+        config.enabled = true;
+        let token = CancellationToken::new();
+        token.cancel();
+
+        let err = load_books_with_cancel(&config, false, Some(&token))
+            .expect_err("cancelled calibre load should return an error");
+        assert!(
+            err.to_string().contains("operation cancelled"),
+            "unexpected error: {err}"
+        );
     }
 }

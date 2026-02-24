@@ -4,6 +4,7 @@
 //! image assets for rendering in the reading pane.
 
 use crate::cache::hash_dir;
+use crate::cancellation::CancellationToken;
 use anyhow::{Context, Result};
 use epub::doc::EpubDoc;
 use once_cell::sync::Lazy;
@@ -39,7 +40,17 @@ pub struct LoadedBook {
 
 /// Load a supported source file and return plain text plus extracted image paths.
 pub fn load_book_content(path: &Path) -> Result<LoadedBook> {
-    let text = load_source_text(path)?;
+    load_book_content_with_cancel(path, None)
+}
+
+/// Load a supported source file with an optional cooperative cancellation token.
+pub fn load_book_content_with_cancel(
+    path: &Path,
+    cancel: Option<&CancellationToken>,
+) -> Result<LoadedBook> {
+    ensure_not_cancelled(cancel, "load_book_content_start")?;
+    let text = load_source_text(path, cancel)?;
+    ensure_not_cancelled(cancel, "after_load_source_text")?;
     let images = match collect_images(path) {
         Ok(images) => images,
         Err(err) => {
@@ -55,7 +66,8 @@ pub fn load_book_content(path: &Path) -> Result<LoadedBook> {
     Ok(LoadedBook { text, images })
 }
 
-fn load_source_text(path: &Path) -> Result<String> {
+fn load_source_text(path: &Path, cancel: Option<&CancellationToken>) -> Result<String> {
+    ensure_not_cancelled(cancel, "load_source_text_start")?;
     if is_text_file(path) {
         info!(path = %path.display(), "Loading plain text content");
         let data = fs::read_to_string(path)
@@ -73,10 +85,10 @@ fn load_source_text(path: &Path) -> Result<String> {
     }
 
     if is_pdf(path) {
-        return load_pdf_with_quack_check(path);
+        return load_pdf_with_quack_check(path, cancel);
     }
 
-    match load_with_pandoc(path) {
+    match load_with_pandoc(path, cancel) {
         Ok(text) => return Ok(text),
         Err(err) => {
             warn!(
@@ -87,6 +99,7 @@ fn load_source_text(path: &Path) -> Result<String> {
     }
 
     if is_markdown(path) {
+        ensure_not_cancelled(cancel, "before_markdown_read")?;
         let data = fs::read_to_string(path)
             .with_context(|| format!("Failed to read markdown file at {}", path.display()))?;
         return Ok(data);
@@ -107,6 +120,7 @@ fn load_source_text(path: &Path) -> Result<String> {
     let mut chapters = 0usize;
 
     loop {
+        ensure_not_cancelled(cancel, "epub_chapter_loop")?;
         match doc.get_current_str() {
             Some((chapter, _mime)) => {
                 chapters += 1;
@@ -185,7 +199,8 @@ fn is_pdf(path: &Path) -> bool {
     )
 }
 
-fn load_pdf_with_quack_check(path: &Path) -> Result<String> {
+fn load_pdf_with_quack_check(path: &Path, cancel: Option<&CancellationToken>) -> Result<String> {
+    ensure_not_cancelled(cancel, "before_pdf_quack_check")?;
     let config_path = quack_check_config_path()?;
     let config_sha256 = hash_file(&config_path).with_context(|| {
         format!(
@@ -206,14 +221,18 @@ fn load_pdf_with_quack_check(path: &Path) -> Result<String> {
     }
 
     let (_, _, run_out_dir) = pdf_cache_paths(path);
-    let run = crate::quack_check::run_pdf_to_text(&config_path, path, &run_out_dir).with_context(
-        || {
-            format!(
-                "Failed to transcribe PDF with in-process quack-check module for {}",
-                path.display()
-            )
-        },
-    )?;
+    let run = crate::quack_check::run_pdf_to_text_with_cancel(
+        &config_path,
+        path,
+        &run_out_dir,
+        cancel.cloned(),
+    )
+    .with_context(|| {
+        format!(
+            "Failed to transcribe PDF with in-process quack-check module for {}",
+            path.display()
+        )
+    })?;
     let text = if run.text.trim().is_empty() {
         "No textual content found in this file.".to_string()
     } else {
@@ -281,7 +300,8 @@ fn flush_pdf_paragraph(out: &mut String, paragraph: &mut String) {
     paragraph.clear();
 }
 
-fn load_with_pandoc(path: &Path) -> Result<String> {
+fn load_with_pandoc(path: &Path, cancel: Option<&CancellationToken>) -> Result<String> {
+    ensure_not_cancelled(cancel, "before_pandoc")?;
     info!(
         path = %path.display(),
         "Converting source to plain text with pandoc"
@@ -318,6 +338,7 @@ fn load_with_pandoc(path: &Path) -> Result<String> {
 
     let text = String::from_utf8(output.stdout)
         .with_context(|| format!("pandoc returned non-UTF8 text for {}", path.display()))?;
+    ensure_not_cancelled(cancel, "after_pandoc")?;
     let text = if text.trim().is_empty() {
         "No textual content found in this file.".to_string()
     } else {
@@ -334,6 +355,13 @@ fn load_with_pandoc(path: &Path) -> Result<String> {
         "Finished pandoc conversion"
     );
     Ok(text)
+}
+
+fn ensure_not_cancelled(cancel: Option<&CancellationToken>, stage: &'static str) -> Result<()> {
+    if let Some(token) = cancel {
+        token.check_cancelled(stage)?;
+    }
+    Ok(())
 }
 
 fn collect_images(path: &Path) -> Result<Vec<BookImage>> {
@@ -766,13 +794,10 @@ fn quack_check_config_path() -> Result<PathBuf> {
 
 fn project_root() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    if manifest_dir.join("conf").exists() {
-        return manifest_dir;
-    }
-    if let Some(parent) = manifest_dir.parent() {
-        let parent = parent.to_path_buf();
-        if parent.join("conf").exists() {
-            return parent;
+    for ancestor in manifest_dir.ancestors() {
+        let candidate = ancestor.to_path_buf();
+        if candidate.join("conf").exists() {
+            return candidate;
         }
     }
     manifest_dir
@@ -800,5 +825,46 @@ fn quack_check_text_filename(config_path: &Path) -> Result<String> {
         Ok(QUACK_CHECK_TEXT_FILENAME_DEFAULT.to_string())
     } else {
         Ok(trimmed.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_file(name: &str, extension: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("ebup_epub_loader_{name}_{nanos}.{extension}"))
+    }
+
+    #[test]
+    fn load_book_content_honors_cancellation_token() {
+        let path = unique_temp_file("cancelled_txt", "txt");
+        fs::write(&path, "hello world").expect("write txt fixture");
+        let token = CancellationToken::new();
+        token.cancel();
+
+        let err = load_book_content_with_cancel(&path, Some(&token))
+            .expect_err("cancelled load should return an error");
+        assert!(
+            err.to_string().contains("operation cancelled"),
+            "unexpected error: {err}"
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn project_root_finds_workspace_conf_directory() {
+        let root = project_root();
+        assert!(
+            root.join("conf").exists(),
+            "expected conf directory at {}",
+            root.display()
+        );
     }
 }

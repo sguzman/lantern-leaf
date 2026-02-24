@@ -1,3 +1,4 @@
+use crate::cancellation::CancellationToken;
 use crate::quack_check::{
     chunk_plan::ChunkPlan,
     config::Config,
@@ -14,6 +15,7 @@ use tracing::{debug, info, warn};
 pub struct Pipeline<E: Engine> {
     cfg: Config,
     engine: E,
+    cancel: Option<CancellationToken>,
 }
 
 pub struct JobOutput {
@@ -24,16 +26,23 @@ pub struct JobOutput {
 
 impl<E: Engine> Pipeline<E> {
     pub fn new(cfg: &Config, engine: E) -> Self {
+        Self::new_with_cancel(cfg, engine, None)
+    }
+
+    pub fn new_with_cancel(cfg: &Config, engine: E, cancel: Option<CancellationToken>) -> Self {
         Self {
             cfg: cfg.clone(),
             engine,
+            cancel,
         }
     }
 
     pub fn run_job(&self, input: &Path, job_dir: &Path) -> Result<JobOutput> {
         let started = Instant::now();
+        self.ensure_not_cancelled("job_start")?;
 
         let probe_res = probe::probe_pdf(&self.cfg, &self.engine, input)?;
+        self.ensure_not_cancelled("after_probe")?;
         let decision = policy::decide(&self.cfg, &probe_res);
         let mut plan = ChunkPlan::from_probe(&self.cfg, &probe_res)?;
 
@@ -75,6 +84,7 @@ impl<E: Engine> Pipeline<E> {
 
         let chunks_dir = job_dir.join("chunks");
         ensure_dir(&chunks_dir)?;
+        self.ensure_not_cancelled("before_prepare_chunks")?;
 
         let chunk_inputs = match self.prepare_chunks(input, &plan, &chunks_dir) {
             Ok(inputs) => inputs,
@@ -83,6 +93,7 @@ impl<E: Engine> Pipeline<E> {
                     warn!("physical split failed; falling back to page_range: {err}");
                     let mut fallback = plan.clone();
                     fallback.strategy = "page_range".to_string();
+                    self.ensure_not_cancelled("before_prepare_chunks_fallback")?;
                     self.prepare_chunks(input, &fallback, &chunks_dir)?
                 } else {
                     return Err(err);
@@ -94,6 +105,7 @@ impl<E: Engine> Pipeline<E> {
         let mut markdown_parts = Vec::new();
 
         for (i, ch) in chunk_inputs.iter().enumerate() {
+            self.ensure_not_cancelled("before_chunk_convert")?;
             if self.cfg.limits.job_timeout_seconds > 0
                 && started.elapsed().as_secs() > self.cfg.limits.job_timeout_seconds
             {
@@ -180,8 +192,10 @@ impl<E: Engine> Pipeline<E> {
             });
 
             markdown_parts.push(out.markdown);
+            self.ensure_not_cancelled("after_chunk_convert")?;
         }
 
+        self.ensure_not_cancelled("before_merge")?;
         let merged_md = postprocess::merge_markdown(&self.cfg, markdown_parts)?;
         let merged_txt = postprocess::markdown_to_text(&self.cfg, &merged_md)?;
 
@@ -201,6 +215,13 @@ impl<E: Engine> Pipeline<E> {
             text: merged_txt,
             report,
         })
+    }
+
+    fn ensure_not_cancelled(&self, stage: &'static str) -> Result<()> {
+        if let Some(token) = &self.cancel {
+            token.check_cancelled(stage)?;
+        }
+        Ok(())
     }
 
     fn prepare_chunks(

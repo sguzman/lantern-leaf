@@ -2,18 +2,20 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_log::{Target, TargetKind, log::LevelFilter};
 use tracing::{info, warn};
 use ts_rs::TS;
 
-use ebup_core::session;
 pub use ebup_core::{
-    cache, calibre, config, epub_loader, normalizer, pagination, quack_check, text_utils,
+    cache, calibre, config, epub_loader, normalizer, pagination, quack_check, text_utils, tts,
 };
+use ebup_core::{cancellation, session};
 
 const MAX_RECENT_LIMIT: usize = 512;
 const DEFAULT_RECENT_LIMIT: usize = 64;
+const TTS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -168,6 +170,27 @@ struct BridgeError {
     message: String,
 }
 
+#[derive(Debug, Clone)]
+struct TtsRequestRuntime {
+    request_id: u64,
+    cancel_token: cancellation::CancellationToken,
+}
+
+#[derive(Debug, Clone)]
+struct TtsPlaybackPlan {
+    source_path: PathBuf,
+    page: usize,
+    sentences: Vec<String>,
+    start_idx: usize,
+    pause_after: Duration,
+    speed: f32,
+    volume: f32,
+    threads: usize,
+    progress_log_interval: Duration,
+    model_path: PathBuf,
+    espeak_path: PathBuf,
+}
+
 #[derive(Debug)]
 struct BackendState {
     mode: UiMode,
@@ -175,6 +198,10 @@ struct BackendState {
     active_open_source_path: Option<PathBuf>,
     open_in_flight: bool,
     active_open_request: Option<u64>,
+    open_cancel_token: Option<cancellation::CancellationToken>,
+    calibre_load_request: Option<u64>,
+    calibre_cancel_token: Option<cancellation::CancellationToken>,
+    tts_request: Option<TtsRequestRuntime>,
     next_request_id: u64,
     panels: session::PanelState,
     base_config: config::AppConfig,
@@ -199,6 +226,10 @@ impl BackendState {
             active_open_source_path: None,
             open_in_flight: false,
             active_open_request: None,
+            open_cancel_token: None,
+            calibre_load_request: None,
+            calibre_cancel_token: None,
+            tts_request: None,
             next_request_id: 1,
             panels,
             base_config,
@@ -433,12 +464,26 @@ fn persist_active_reader(state: &mut BackendState) {
     }
 }
 
+fn cancel_tts_request(state: &mut BackendState) {
+    if let Some(runtime) = state.tts_request.take() {
+        runtime.cancel_token.cancel();
+    }
+}
+
 fn cleanup_for_shutdown(state: &mut BackendState) -> Option<u64> {
     let cancelled_open_request = if state.open_in_flight {
         state.active_open_request
     } else {
         None
     };
+    if let Some(token) = state.open_cancel_token.take() {
+        token.cancel();
+    }
+    if let Some(token) = state.calibre_cancel_token.take() {
+        token.cancel();
+    }
+    cancel_tts_request(state);
+    state.calibre_load_request = None;
     if let Some(reader) = state.reader.as_mut() {
         reader.tts_stop();
     }
@@ -480,7 +525,10 @@ fn allocate_request_id(state: &mut BackendState) -> u64 {
     request_id
 }
 
-fn begin_open_request(state: &mut BackendState, source_path: &Path) -> Result<u64, BridgeError> {
+fn begin_open_request(
+    state: &mut BackendState,
+    source_path: &Path,
+) -> Result<(u64, cancellation::CancellationToken), BridgeError> {
     if state.open_in_flight {
         return Err(bridge_error(
             "operation_conflict",
@@ -488,10 +536,12 @@ fn begin_open_request(state: &mut BackendState, source_path: &Path) -> Result<u6
         ));
     }
     let request_id = allocate_request_id(state);
+    let cancel_token = cancellation::CancellationToken::new();
     state.open_in_flight = true;
     state.active_open_request = Some(request_id);
     state.active_open_source_path = Some(source_path.to_path_buf());
-    Ok(request_id)
+    state.open_cancel_token = Some(cancel_token.clone());
+    Ok((request_id, cancel_token))
 }
 
 fn emit_session_state(
@@ -542,6 +592,306 @@ fn emit_tts_state(
     );
 }
 
+fn build_tts_playback_plan(state: &mut BackendState) -> Option<TtsPlaybackPlan> {
+    let normalizer = state.normalizer.clone();
+    let panels = state.panels;
+    let reader = state.reader.as_mut()?;
+    let snapshot = reader.snapshot(panels, &normalizer);
+    if snapshot.tts.state != session::TtsPlaybackState::Playing {
+        return None;
+    }
+    if snapshot.sentences.is_empty() {
+        return None;
+    }
+    let start_idx = snapshot
+        .tts
+        .current_sentence_idx
+        .unwrap_or(0)
+        .min(snapshot.sentences.len().saturating_sub(1));
+    Some(TtsPlaybackPlan {
+        source_path: reader.source_path.clone(),
+        page: snapshot.current_page,
+        sentences: snapshot.sentences,
+        start_idx,
+        pause_after: Duration::from_secs_f64(reader.config.pause_after_sentence.max(0.0) as f64),
+        speed: reader.config.tts_speed,
+        volume: reader.config.tts_volume,
+        threads: reader.config.tts_threads.max(1),
+        progress_log_interval: Duration::from_secs_f64(
+            reader.config.tts_progress_log_interval_secs.max(0.1) as f64,
+        ),
+        model_path: PathBuf::from(reader.config.tts_model_path.clone()),
+        espeak_path: PathBuf::from(reader.config.tts_espeak_path.clone()),
+    })
+}
+
+fn clear_tts_request_if_current(app: &tauri::AppHandle, runtime_request_id: u64) {
+    let state = app.state::<Mutex<BackendState>>();
+    if let Ok(mut guard) = state.lock() {
+        let current_request_id = guard.tts_request.as_ref().map(|runtime| runtime.request_id);
+        if current_request_id == Some(runtime_request_id) {
+            guard.tts_request = None;
+        }
+    }
+}
+
+fn transition_tts_runtime_to_paused(
+    app: &tauri::AppHandle,
+    runtime_request_id: u64,
+    action: &str,
+    message: &str,
+) {
+    let state = app.state::<Mutex<BackendState>>();
+    let maybe_emit = {
+        let mut guard = match state.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        let current_request_id = guard.tts_request.as_ref().map(|runtime| runtime.request_id);
+        if current_request_id != Some(runtime_request_id) {
+            return;
+        }
+
+        let normalizer = guard.normalizer.clone();
+        let panels = guard.panels;
+        let reader = match guard.reader.as_mut() {
+            Some(reader) => reader,
+            None => return,
+        };
+
+        let event = reader.apply_command(session::SessionCommand::TtsPause, panels, &normalizer);
+        let request_id = allocate_request_id(&mut guard);
+        Some((request_id, event.snapshot))
+    };
+
+    if let Some((request_id, snapshot)) = maybe_emit {
+        warn!(runtime_request_id, error = %message, "TTS runtime transitioned to paused");
+        emit_reader_state(app, request_id, action, &snapshot);
+        emit_tts_state(app, request_id, action, &snapshot.tts);
+    }
+}
+
+fn collect_tts_playback_plan(
+    app: &tauri::AppHandle,
+    runtime_request_id: u64,
+) -> Option<TtsPlaybackPlan> {
+    let state = app.state::<Mutex<BackendState>>();
+    let mut guard = state.lock().ok()?;
+    let current_request_id = guard.tts_request.as_ref().map(|runtime| runtime.request_id);
+    if current_request_id != Some(runtime_request_id) {
+        return None;
+    }
+    build_tts_playback_plan(&mut guard)
+}
+
+fn advance_tts_runtime_cursor(app: &tauri::AppHandle, runtime_request_id: u64) -> bool {
+    let state = app.state::<Mutex<BackendState>>();
+    let maybe_emit = {
+        let mut guard = match state.lock() {
+            Ok(guard) => guard,
+            Err(_) => return false,
+        };
+        let current_request_id = guard.tts_request.as_ref().map(|runtime| runtime.request_id);
+        if current_request_id != Some(runtime_request_id) {
+            return false;
+        }
+
+        let normalizer = guard.normalizer.clone();
+        let panels = guard.panels;
+        let reader = match guard.reader.as_mut() {
+            Some(reader) => reader,
+            None => return false,
+        };
+
+        let current_snapshot = reader.snapshot(panels, &normalizer);
+        if current_snapshot.tts.state != session::TtsPlaybackState::Playing {
+            return false;
+        }
+
+        let event = reader.apply_command(session::SessionCommand::TtsSeekNext, panels, &normalizer);
+        let emit_request_id = allocate_request_id(&mut guard);
+        Some((emit_request_id, event.snapshot))
+    };
+
+    if let Some((emit_request_id, snapshot)) = maybe_emit {
+        emit_reader_state(app, emit_request_id, "reader_tts_runtime_step", &snapshot);
+        emit_tts_state(
+            app,
+            emit_request_id,
+            "reader_tts_runtime_step",
+            &snapshot.tts,
+        );
+        snapshot.tts.state == session::TtsPlaybackState::Playing
+    } else {
+        false
+    }
+}
+
+fn run_tts_runtime_loop(
+    app: tauri::AppHandle,
+    runtime_request_id: u64,
+    cancel_token: cancellation::CancellationToken,
+) {
+    let mut engine: Option<tts::TtsEngine> = None;
+    loop {
+        if cancel_token.is_cancelled() {
+            break;
+        }
+
+        let Some(plan) = collect_tts_playback_plan(&app, runtime_request_id) else {
+            break;
+        };
+        if plan.start_idx >= plan.sentences.len() {
+            break;
+        }
+
+        if engine.is_none() {
+            let built_engine =
+                match tts::TtsEngine::new(plan.model_path.clone(), plan.espeak_path.clone()) {
+                    Ok(engine) => engine,
+                    Err(err) => {
+                        transition_tts_runtime_to_paused(
+                            &app,
+                            runtime_request_id,
+                            "reader_tts_runtime_error",
+                            &format!("Failed to initialize Piper TTS engine: {err}"),
+                        );
+                        break;
+                    }
+                };
+            engine = Some(built_engine);
+        }
+
+        let cache_root = cache::hash_dir(&plan.source_path).join("tts");
+        let prepared = match engine.as_ref().unwrap().prepare_batch(
+            cache_root,
+            plan.sentences.clone(),
+            plan.start_idx,
+            plan.threads,
+            plan.progress_log_interval,
+        ) {
+            Ok(batch) => batch,
+            Err(err) => {
+                if cancel_token.is_cancelled() {
+                    break;
+                }
+                transition_tts_runtime_to_paused(
+                    &app,
+                    runtime_request_id,
+                    "reader_tts_runtime_error",
+                    &format!("Failed to prepare TTS audio batch: {err}"),
+                );
+                break;
+            }
+        };
+
+        if prepared.is_empty() {
+            transition_tts_runtime_to_paused(
+                &app,
+                runtime_request_id,
+                "reader_tts_runtime_stopped",
+                "Prepared TTS batch was empty",
+            );
+            break;
+        }
+
+        let files: Vec<PathBuf> = prepared.into_iter().map(|(path, _)| path).collect();
+        let playback = match engine.as_ref().unwrap().play_files(
+            &files,
+            plan.pause_after,
+            plan.speed,
+            plan.volume,
+            false,
+        ) {
+            Ok(playback) => playback,
+            Err(err) => {
+                if cancel_token.is_cancelled() {
+                    break;
+                }
+                transition_tts_runtime_to_paused(
+                    &app,
+                    runtime_request_id,
+                    "reader_tts_runtime_error",
+                    &format!("Failed to start Piper playback: {err}"),
+                );
+                break;
+            }
+        };
+
+        let sentence_durations = playback.sentence_durations().to_vec();
+        let mut continue_playback = true;
+        for duration in sentence_durations {
+            let sentence_deadline = Instant::now() + duration.saturating_add(plan.pause_after);
+            while Instant::now() < sentence_deadline {
+                if cancel_token.is_cancelled() {
+                    playback.stop();
+                    clear_tts_request_if_current(&app, runtime_request_id);
+                    return;
+                }
+                std::thread::sleep(TTS_PROGRESS_POLL_INTERVAL);
+            }
+
+            if cancel_token.is_cancelled() {
+                playback.stop();
+                clear_tts_request_if_current(&app, runtime_request_id);
+                return;
+            }
+
+            if !advance_tts_runtime_cursor(&app, runtime_request_id) {
+                continue_playback = false;
+                break;
+            }
+        }
+
+        playback.stop();
+
+        if !continue_playback {
+            break;
+        }
+    }
+    clear_tts_request_if_current(&app, runtime_request_id);
+}
+
+fn sync_tts_runtime_after_reader_change(
+    app: &tauri::AppHandle,
+    state: &State<'_, Mutex<BackendState>>,
+) {
+    let maybe_runtime = {
+        let mut guard = match state.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+
+        let Some(plan) = build_tts_playback_plan(&mut guard) else {
+            cancel_tts_request(&mut guard);
+            return;
+        };
+
+        cancel_tts_request(&mut guard);
+        let request_id = allocate_request_id(&mut guard);
+        let cancel_token = cancellation::CancellationToken::new();
+        guard.tts_request = Some(TtsRequestRuntime {
+            request_id,
+            cancel_token: cancel_token.clone(),
+        });
+        Some((request_id, cancel_token, plan))
+    };
+
+    if let Some((request_id, cancel_token, plan)) = maybe_runtime {
+        info!(
+            request_id,
+            page = plan.page + 1,
+            sentence_idx = plan.start_idx,
+            sentence_count = plan.sentences.len(),
+            "Starting TTS runtime playback job"
+        );
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            run_tts_runtime_loop(app_handle, request_id, cancel_token);
+        });
+    }
+}
+
 fn apply_reader_command(
     app: &tauri::AppHandle,
     state: &State<'_, Mutex<BackendState>>,
@@ -564,6 +914,7 @@ fn apply_reader_command(
     };
     emit_reader_state(app, request_id, action, &snapshot);
     emit_tts_state(app, request_id, action, &snapshot.tts);
+    sync_tts_runtime_after_reader_change(app, state);
     Ok(snapshot)
 }
 
@@ -606,13 +957,17 @@ async fn open_resolved_source(
     state: &State<'_, Mutex<BackendState>>,
     source_path: PathBuf,
 ) -> Result<OpenSourceResult, BridgeError> {
-    let (request_id, started_session): (u64, SessionState) = {
+    let (request_id, cancel_token, started_session): (
+        u64,
+        cancellation::CancellationToken,
+        SessionState,
+    ) = {
         let mut guard = state
             .lock()
             .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-        let request_id = begin_open_request(&mut guard, &source_path)?;
+        let (request_id, cancel_token) = begin_open_request(&mut guard, &source_path)?;
         let started_session = to_session_state(&guard);
-        (request_id, started_session)
+        (request_id, cancel_token, started_session)
     };
 
     emit_session_state(app, request_id, "source_open_started", &started_session);
@@ -662,8 +1017,14 @@ async fn open_resolved_source(
 
     let source_path_for_task = source_path.clone();
     let normalizer_for_task = normalizer.clone();
+    let open_cancel_for_task = cancel_token.clone();
     let reader_result = tauri::async_runtime::spawn_blocking(move || {
-        session::load_session_for_source(source_path_for_task, &base_config, &normalizer_for_task)
+        session::load_session_for_source_with_cancel(
+            source_path_for_task,
+            &base_config,
+            &normalizer_for_task,
+            Some(&open_cancel_for_task),
+        )
     })
     .await;
 
@@ -709,6 +1070,7 @@ async fn open_resolved_source(
     }
     guard.open_in_flight = false;
     guard.active_open_request = None;
+    guard.open_cancel_token = None;
     guard.active_open_source_path = None;
     let reader_result = match reader_result {
         Ok(result) => result,
@@ -1276,12 +1638,21 @@ async fn calibre_load_books(
     force_refresh: Option<bool>,
 ) -> Result<Vec<CalibreBookDto>, BridgeError> {
     let force_refresh = force_refresh.unwrap_or(false);
-    let (config, request_id) = {
+    let (config, request_id, cancel_token) = {
         let mut guard = state
             .lock()
             .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        if guard.calibre_load_request.is_some() {
+            return Err(bridge_error(
+                "operation_conflict",
+                "A calibre load operation is already in progress",
+            ));
+        }
         let request_id = allocate_request_id(&mut guard);
-        (guard.calibre_config.clone(), request_id)
+        let cancel_token = cancellation::CancellationToken::new();
+        guard.calibre_load_request = Some(request_id);
+        guard.calibre_cancel_token = Some(cancel_token.clone());
+        (guard.calibre_config.clone(), request_id, cancel_token)
     };
 
     info!(request_id, force_refresh, "Starting calibre load request");
@@ -1296,22 +1667,48 @@ async fn calibre_load_books(
         },
     );
 
-    let books_result =
-        tauri::async_runtime::spawn_blocking(move || calibre::load_books(&config, force_refresh))
-            .await
-            .map_err(|err| {
-                bridge_error(
-                    "task_join_error",
-                    format!("Failed to join calibre task: {err}"),
-                )
-            })
-            .and_then(|result| {
-                result.map_err(|err| bridge_error("calibre_load_failed", err.to_string()))
-            });
+    let cancel_for_task = cancel_token.clone();
+    let books_result = tauri::async_runtime::spawn_blocking(move || {
+        calibre::load_books_with_cancel(&config, force_refresh, Some(&cancel_for_task))
+    })
+    .await
+    .map_err(|err| {
+        bridge_error(
+            "task_join_error",
+            format!("Failed to join calibre task: {err}"),
+        )
+    })
+    .and_then(|result| result.map_err(|err| bridge_error("calibre_load_failed", err.to_string())));
+
+    let mut guard = state
+        .lock()
+        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+    let stale_or_cancelled = guard.calibre_load_request != Some(request_id);
+    if !stale_or_cancelled {
+        guard.calibre_load_request = None;
+        guard.calibre_cancel_token = None;
+    }
+
+    if stale_or_cancelled || cancel_token.is_cancelled() {
+        drop(guard);
+        let message = "Calibre load request was cancelled".to_string();
+        let _ = app.emit(
+            "calibre-load",
+            CalibreLoadEvent {
+                request_id,
+                phase: "cancelled".to_string(),
+                count: None,
+                message: Some(message.clone()),
+            },
+        );
+        info!(request_id, force_refresh, "Calibre load request cancelled");
+        return Err(bridge_error("operation_cancelled", message));
+    }
 
     let books = match books_result {
         Ok(books) => books,
         Err(err) => {
+            drop(guard);
             warn!(
                 request_id,
                 force_refresh,
@@ -1331,10 +1728,8 @@ async fn calibre_load_books(
         }
     };
 
-    let mut guard = state
-        .lock()
-        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
     guard.calibre_books = books.clone();
+    drop(guard);
 
     let _ = app.emit(
         "calibre-load",
@@ -2030,10 +2425,13 @@ mod tests {
         let first_source = PathBuf::from("/tmp/first.epub");
         let second_source = PathBuf::from("/tmp/second.pdf");
 
-        let request_id = begin_open_request(&mut state, &first_source).expect("first open request");
+        let (request_id, cancel_token) =
+            begin_open_request(&mut state, &first_source).expect("first open request");
         assert_eq!(request_id, 1);
         assert!(state.open_in_flight);
         assert_eq!(state.active_open_request, Some(1));
+        assert!(state.open_cancel_token.is_some());
+        assert!(!cancel_token.is_cancelled());
         assert_eq!(
             state.active_open_source_path.as_deref(),
             Some(first_source.as_path())
@@ -2047,5 +2445,30 @@ mod tests {
             state.active_open_source_path.as_deref(),
             Some(first_source.as_path())
         );
+    }
+
+    #[test]
+    fn cleanup_for_shutdown_cancels_registered_job_tokens() {
+        let mut state = BackendState::new();
+        let (_, open_token) = begin_open_request(&mut state, Path::new("/tmp/open.epub"))
+            .expect("open request should register token");
+        let calibre_token = cancellation::CancellationToken::new();
+        let tts_token = cancellation::CancellationToken::new();
+        state.calibre_load_request = Some(42);
+        state.calibre_cancel_token = Some(calibre_token.clone());
+        state.tts_request = Some(TtsRequestRuntime {
+            request_id: 99,
+            cancel_token: tts_token.clone(),
+        });
+
+        let _ = cleanup_for_shutdown(&mut state);
+
+        assert!(open_token.is_cancelled());
+        assert!(calibre_token.is_cancelled());
+        assert!(tts_token.is_cancelled());
+        assert!(state.open_cancel_token.is_none());
+        assert!(state.calibre_cancel_token.is_none());
+        assert!(state.calibre_load_request.is_none());
+        assert!(state.tts_request.is_none());
     }
 }

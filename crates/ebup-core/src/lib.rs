@@ -2,6 +2,8 @@
 pub mod cache;
 #[path = "../../../src/calibre.rs"]
 pub mod calibre;
+#[path = "../../../src/cancellation.rs"]
+pub mod cancellation;
 #[path = "../../../src/config/mod.rs"]
 pub mod config;
 #[path = "../../../src/epub_loader.rs"]

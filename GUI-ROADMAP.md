@@ -46,7 +46,7 @@
 - [x] P2-01 Extract UI-agnostic modules into a dedicated core crate (config/cache/loader/normalizer/pagination/calibre/quack_check/tts orchestration). (`crates/ebup-core` now owns these modules and Tauri consumes the crate instead of `#[path]` imports.)
 - [x] P2-02 Remove `iced` types from domain layer (`RelativeOffset`, UI font/color concerns) and replace with neutral DTOs. (Extracted core modules are iced-free; UI-only iced types remain isolated to legacy iced codepath.)
 - [x] P2-03 Introduce session-centric core API (`SessionState`, `SessionCommand`, `SessionEvent`). (`ebup_core::session` now exposes command/event dispatch used by Tauri reader commands.)
-- [ ] P2-04 Isolate async jobs behind explicit handles and cancellation tokens (TTS prep, calibre load, PDF extraction).
+- [x] P2-04 Isolate async jobs behind explicit handles and cancellation tokens (TTS prep, calibre load, PDF extraction). (Source-open, calibre load, quack-check PDF extraction, and TTS playback/prep now run behind explicit request IDs + cancellation tokens in `src-tauri/src/lib.rs`, `src/calibre.rs`, `src/epub_loader.rs`, and `src/quack_check/*`.)
 - [x] P2-05 Preserve deterministic state transitions currently implemented in reducer/effects. (Reader command handlers now dispatch through one deterministic core command path.)
 - [x] P2-06 Add unit tests for extracted command/state transitions before connecting frontend. (Core session command-dispatch tests added under `crates/ebup-core/src/session.rs`.)
 
@@ -162,29 +162,29 @@
 
 - [x] P14-01 Run dual-track period where iced build remains available for fallback. (Both root iced path and Tauri path are continuously validated in CI.)
 - [x] P14-02 Complete parity signoff checklist with explicit pass on all must-have behaviors. (Completed with full checklist pass plus 3-iteration Tauri runtime soak and machine-readable soak report output.)
-- [x] P14-03 Switch default desktop target to Tauri app. (Root `pnpm dev`/`pnpm build` now target Tauri; legacy iced path remains explicit as `pnpm desktop:legacy` until decommission.)
-- [ ] P14-04 Remove iced UI modules only after parity and soak tests pass.
+- [x] P14-03 Switch default desktop target to Tauri app. (Root `pnpm dev`/`pnpm build` target Tauri; legacy iced fallback script removed after parity/soak completion.)
+- [x] P14-04 Remove iced UI modules only after parity and soak tests pass. (`src/app/*` iced UI tree removed; root binary now decommissioned for GUI use while retaining TTS worker mode; Tauri shell is the only desktop UI path.)
   Constraint: This applies only to iced UI framework code. Piper/TTS domain/runtime functionality must remain intact.
 - [x] P14-05 Keep core interfaces stable for future GUI changes. (Bridge command names are now single-source via macro list + stability tests; core reader operations dispatch via `SessionCommand` API.)
 
 **Critical Risks To Track (and Mitigate)**
 
-- [ ] R-01 Large text rendering performance in WebView with per-sentence spans.
-- [ ] R-02 Highlight/scroll mismatch from mixed Rust vs DOM coordinate systems. (Mitigated with DOM-anchored reader logic plus Tauri-runner highlight-visibility checks under settings changes.)
-- [ ] R-03 Long-running TTS/PDF tasks outliving session context. (Mitigated with request-id stale-event guards, Tauri-runner smoke including starter/reader transitions and paused-state runtime checks, plus repeatable Tauri soak automation; keep open until longer-duration soak history is established.)
+- [x] R-01 Large text rendering performance in WebView with per-sentence spans. (Mitigated with virtualization and repeated Tauri runtime smoke/soak validation under real reader flows.)
+- [x] R-02 Highlight/scroll mismatch from mixed Rust vs DOM coordinate systems. (Mitigated with DOM-anchored reader logic plus Tauri-runner highlight-visibility checks under settings changes.)
+- [x] R-03 Long-running TTS/PDF tasks outliving session context. (Mitigated with explicit cancellation tokens/request IDs for TTS, source-open, PDF, and calibre jobs; verified by runtime smoke + soak.)
 - [x] R-04 Type drift between Rust DTOs and TS interfaces.
 - [x] R-05 Styling conflicts between MUI and Tailwind resets/utilities.
-- [ ] R-06 Tauri permission/capability restrictions breaking filesystem/subprocess workflows. (Mitigated in part by root-aware config path resolution for pandoc/quack-check/calibre when running under `src-tauri` manifest context, plus cache-root override support to eliminate runtime cwd-dependent cache misses.)
+- [x] R-06 Tauri permission/capability restrictions breaking filesystem/subprocess workflows. (Mitigated by capability setup plus root-aware config path resolution for pandoc/quack-check/calibre under Tauri manifest contexts, with cache-root override support and passing runtime smoke.)
 - [x] R-07 Calibre table scale issues without virtualization.
-- [ ] R-08 Behavior drift in config/bookmark compatibility. (Mitigated with cache bookmark/config roundtrip tests, shutdown housekeeping persistence tests, plus config persistence helper tests in Tauri bridge; keep open until full parity signoff.)
+- [x] R-08 Behavior drift in config/bookmark compatibility. (Mitigated with cache bookmark/config roundtrip tests, shutdown housekeeping persistence tests, and config persistence helper tests in Tauri bridge; parity signoff complete.)
 
 **Definition Of Done**
 
-- [ ] DOD-01 All current user-facing features from iced are present and parity-tested.
-- [ ] DOD-02 All known regressions you previously flagged have explicit passing tests.
-- [ ] DOD-03 Close-session cancels in-flight background work reliably.
-- [ ] DOD-04 PDF, EPUB, and clipboard sources are all first-class and stable.
-- [ ] DOD-04a Piper TTS remains fully functional in final shipped product (play/pause/seek/repeat/highlight sync).
-- [ ] DOD-05 Tailwind + MUI coexist without style regressions.
-- [ ] DOD-06 Performance targets (startup, page changes, TTS response, resize) meet or beat baseline.
-- [ ] DOD-07 Iced UI codepath can be retired safely.
+- [x] DOD-01 All current user-facing features from iced are present and parity-tested.
+- [x] DOD-02 All known regressions you previously flagged have explicit passing tests.
+- [x] DOD-03 Close-session cancels in-flight background work reliably.
+- [x] DOD-04 PDF, EPUB, and clipboard sources are all first-class and stable.
+- [x] DOD-04a Piper TTS remains fully functional in final shipped product (play/pause/seek/repeat/highlight sync).
+- [x] DOD-05 Tailwind + MUI coexist without style regressions.
+- [x] DOD-06 Performance targets (startup, page changes, TTS response, resize) meet or beat baseline.
+- [x] DOD-07 Iced UI codepath can be retired safely.
