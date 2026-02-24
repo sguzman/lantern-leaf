@@ -1080,6 +1080,38 @@ impl ReaderSession {
             sentences_read_up_to_current_position: sentences_up_to_current_position,
         }
     }
+
+    fn precompute_normalization_cache(
+        &self,
+        normalizer: &normalizer::TextNormalizer,
+        cancel: Option<&CancellationToken>,
+    ) -> Result<(), String> {
+        let total_pages = self.raw_page_sentences.len();
+        if total_pages == 0 {
+            return Ok(());
+        }
+
+        tracing::info!(
+            path = %self.source_path.display(),
+            total_pages,
+            "Precomputing normalization cache for loaded book"
+        );
+
+        for (page_idx, display_sentences) in self.raw_page_sentences.iter().enumerate() {
+            if cancel.map(|token| token.is_cancelled()).unwrap_or(false) {
+                return Err("Session load cancelled during normalization precompute".to_string());
+            }
+            let _ = normalizer.plan_page_cached(&self.source_path, page_idx, display_sentences);
+        }
+
+        tracing::info!(
+            path = %self.source_path.display(),
+            total_pages,
+            "Finished normalization cache precompute for loaded book"
+        );
+
+        Ok(())
+    }
 }
 
 pub fn load_session_for_source(
@@ -1116,7 +1148,10 @@ pub fn load_session_for_source_with_cancel(
         effective_config = overrides;
     }
     let bookmark = crate::cache::load_bookmark(&source_path);
-    ReaderSession::load_with_cancel(source_path, effective_config, normalizer, bookmark, cancel)
+    let session =
+        ReaderSession::load_with_cancel(source_path, effective_config, normalizer, bookmark, cancel)?;
+    session.precompute_normalization_cache(normalizer, cancel)?;
+    Ok(session)
 }
 
 pub fn persist_session_housekeeping(session: &ReaderSession) {
