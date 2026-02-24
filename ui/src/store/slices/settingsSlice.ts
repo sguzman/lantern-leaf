@@ -11,13 +11,39 @@ export function createSettingsSliceActions({ set, get, backend }: SliceContext):
   | "setRuntimeLogLevel"
   | "toggleTheme"
 > {
+  let applySettingsRequestSeq = 0;
+
   return {
     readerApplySettings: async (patch) => {
+      const requestSeq = ++applySettingsRequestSeq;
+      const previousReader = get().reader;
+
+      if (previousReader) {
+        set({
+          reader: {
+            ...previousReader,
+            settings: {
+              ...previousReader.settings,
+              ...patch
+            }
+          }
+        });
+      }
+
       try {
         const reader = await backend.readerApplySettings(patch);
+        if (requestSeq !== applySettingsRequestSeq) {
+          return;
+        }
         set({ reader });
       } catch (error) {
-        set({ error: toBridgeError(error).message });
+        if (requestSeq !== applySettingsRequestSeq) {
+          return;
+        }
+        set({
+          reader: previousReader,
+          error: toBridgeError(error).message
+        });
       }
     },
 
@@ -82,6 +108,57 @@ export function createSettingsSliceActions({ set, get, backend }: SliceContext):
       await withBusy(set, get, "toggleTheme", async () => {
         const previousBootstrap = get().bootstrapState;
         const previousReader = get().reader;
+        const session = get().session;
+
+        // In reader mode, theme must be written through reader settings so future
+        // reader snapshots keep the same mode and highlight palette.
+        if (session?.mode === "reader" && previousReader) {
+          const optimisticTheme = previousReader.settings.theme === "night" ? "day" : "night";
+
+          set({
+            reader: {
+              ...previousReader,
+              settings: {
+                ...previousReader.settings,
+                theme: optimisticTheme
+              }
+            },
+            bootstrapState: previousBootstrap
+              ? {
+                  ...previousBootstrap,
+                  config: {
+                    ...previousBootstrap.config,
+                    theme: optimisticTheme
+                  }
+                }
+              : previousBootstrap
+          });
+
+          try {
+            const reader = await backend.readerApplySettings({ theme: optimisticTheme });
+            set({
+              reader,
+              bootstrapState: previousBootstrap
+                ? {
+                    ...previousBootstrap,
+                    config: {
+                      ...previousBootstrap.config,
+                      theme: reader.settings.theme
+                    }
+                  }
+                : previousBootstrap
+            });
+          } catch (error) {
+            const bridgeError = toBridgeError(error);
+            set({
+              bootstrapState: previousBootstrap,
+              reader: previousReader,
+              error: bridgeError.message
+            });
+            throw bridgeError;
+          }
+          return;
+        }
 
         if (previousBootstrap) {
           const optimisticTheme =
