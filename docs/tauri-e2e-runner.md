@@ -16,6 +16,7 @@ This project now has a dedicated Tauri-native smoke E2E path in addition to brow
 - Verifies text-only/pretty toggle behavior.
 - Verifies settings/stats/TTS panel exclusivity.
 - Verifies sentence navigation updates TTS sentence position.
+- Verifies topbar and TTS control rows stay single-line (no vertical expansion) under a narrower window width.
 - Verifies TTS toggle label transitions in the reader.
 
 ## Local Prerequisites

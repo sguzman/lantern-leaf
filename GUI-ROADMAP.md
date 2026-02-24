@@ -168,7 +168,7 @@
 **Critical Risks To Track (and Mitigate)**
 
 - [ ] R-01 Large text rendering performance in WebView with per-sentence spans.
-- [ ] R-02 Highlight/scroll mismatch from mixed Rust vs DOM coordinate systems.
+- [ ] R-02 Highlight/scroll mismatch from mixed Rust vs DOM coordinate systems. (Mitigated with DOM-anchored reader logic plus Tauri-runner highlight-visibility checks under settings changes.)
 - [ ] R-03 Long-running TTS/PDF tasks outliving session context. (Mitigated with request-id stale-event guards and Tauri-runner smoke; keep open until broader soak.)
 - [x] R-04 Type drift between Rust DTOs and TS interfaces.
 - [x] R-05 Styling conflicts between MUI and Tailwind resets/utilities.

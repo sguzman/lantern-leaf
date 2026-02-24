@@ -59,6 +59,7 @@ interface NumericSettingControlProps {
   max: number;
   step: number;
   decimals?: number;
+  testId?: string;
   onCommit: (value: number) => Promise<void>;
 }
 
@@ -118,6 +119,7 @@ function NumericSettingControl({
   max,
   step,
   decimals = 2,
+  testId,
   onCommit
 }: NumericSettingControlProps) {
   const [inputValue, setInputValue] = useState(value.toFixed(decimals));
@@ -200,7 +202,8 @@ function NumericSettingControl({
             void onCommit(next);
           }}
           inputProps={{
-            inputMode: "decimal"
+            inputMode: "decimal",
+            ...(testId ? { "data-testid": `${testId}-input` } : {})
           }}
           sx={{
             width: 92,
@@ -408,6 +411,7 @@ export function ReaderShell({
             direction="row"
             alignItems="center"
             spacing={1}
+            data-testid="reader-topbar"
             sx={{
               flexWrap: "nowrap",
               overflow: "hidden",
@@ -562,6 +566,7 @@ export function ReaderShell({
               <div
                 ref={sentenceScrollRef}
                 className="h-full overflow-y-auto"
+                data-testid="reader-sentence-scroll-container"
                 style={{
                   paddingLeft: `${readerTypography.horizontalMarginPx}px`,
                   paddingRight: `${readerTypography.horizontalMarginPx}px`,
@@ -619,6 +624,7 @@ export function ReaderShell({
                     <Stack spacing={1.5}>
                       <NumericSettingControl
                         label="Font Size"
+                        testId="setting-font-size"
                         value={reader.settings.font_size}
                         min={12}
                         max={36}
@@ -630,6 +636,7 @@ export function ReaderShell({
                       />
                       <NumericSettingControl
                         label="Lines Per Page"
+                        testId="setting-lines-per-page"
                         value={reader.settings.lines_per_page}
                         min={8}
                         max={1000}
@@ -641,6 +648,7 @@ export function ReaderShell({
                       />
                       <NumericSettingControl
                         label="Horizontal Margin"
+                        testId="setting-horizontal-margin"
                         value={reader.settings.margin_horizontal}
                         min={0}
                         max={600}
@@ -652,6 +660,7 @@ export function ReaderShell({
                       />
                       <NumericSettingControl
                         label="Line Spacing"
+                        testId="setting-line-spacing"
                         value={reader.settings.line_spacing}
                         min={0.8}
                         max={3}
@@ -754,6 +763,7 @@ export function ReaderShell({
                         ref={ttsControlRowRef}
                         direction="row"
                         spacing={1}
+                        data-testid="reader-tts-control-row"
                         sx={{
                           flexWrap: "nowrap",
                           overflow: "hidden",
@@ -848,6 +858,7 @@ export function ReaderShell({
                       <Divider />
                       <NumericSettingControl
                         label="Playback Speed"
+                        testId="setting-tts-speed"
                         value={reader.settings.tts_speed}
                         min={0.25}
                         max={4}
@@ -859,6 +870,7 @@ export function ReaderShell({
                       />
                       <NumericSettingControl
                         label="Volume"
+                        testId="setting-tts-volume"
                         value={reader.settings.tts_volume}
                         min={0}
                         max={2}
@@ -870,6 +882,7 @@ export function ReaderShell({
                       />
                       <NumericSettingControl
                         label="Pause After Sentence"
+                        testId="setting-pause-after-sentence"
                         value={reader.settings.pause_after_sentence}
                         min={0}
                         max={3}

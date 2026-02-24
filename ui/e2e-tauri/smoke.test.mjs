@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { Builder, By, Capabilities } from "selenium-webdriver";
+import { Builder, By, Capabilities, Key } from "selenium-webdriver";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
@@ -104,6 +104,108 @@ async function waitForText(driver, locator, expectedText, timeoutMs = 10000) {
     await delay(200);
   }
   throw new Error(`Timed out waiting for ${locator.toString()} text "${expectedText}"`);
+}
+
+async function waitForInputValue(driver, locator, expectedValue, timeoutMs = 10000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    try {
+      const value = await driver.findElement(locator).getAttribute("value");
+      if (String(value) === expectedValue) {
+        return value;
+      }
+    } catch {
+      // keep polling
+    }
+    await delay(200);
+  }
+  throw new Error(`Timed out waiting for ${locator.toString()} value "${expectedValue}"`);
+}
+
+async function setNumericSetting(driver, baseTestId, nextValue) {
+  const locator = By.css(`[data-testid='${baseTestId}-input']`);
+  const input = await waitForElement(driver, locator);
+  await input.click();
+  await input.sendKeys(Key.chord(Key.CONTROL, "a"));
+  await input.sendKeys(String(nextValue));
+  await input.sendKeys(Key.ENTER);
+  const renderedValue = await waitForInputValue(driver, locator, String(nextValue), 2500).catch(
+    async () => {
+      const startedAt = Date.now();
+      while (Date.now() - startedAt <= 10000) {
+        const value = await driver.findElement(locator).getAttribute("value");
+        const asNumber = Number(value);
+        if (Number.isFinite(asNumber) && Math.abs(asNumber - Number(nextValue)) < 0.011) {
+          return value;
+        }
+        await delay(200);
+      }
+      throw new Error(
+        `Timed out waiting for ${locator.toString()} numeric value close to ${nextValue}`
+      );
+    }
+  );
+  return renderedValue;
+}
+
+async function assertHighlightedSentenceVisible(driver, timeoutMs = 15000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    const result = await driver.executeScript(() => {
+      const container = document.querySelector("[data-testid='reader-sentence-scroll-container']");
+      if (!container) {
+        return { ready: false, visible: false };
+      }
+      const highlighted = container.querySelector("[data-highlighted='1']");
+      if (!highlighted) {
+        return { ready: false, visible: false };
+      }
+      const containerRect = container.getBoundingClientRect();
+      const highlightedRect = highlighted.getBoundingClientRect();
+      const visible =
+        highlightedRect.top >= containerRect.top && highlightedRect.bottom <= containerRect.bottom;
+      return {
+        ready: true,
+        visible
+      };
+    });
+    if (result.ready && result.visible) {
+      return;
+    }
+    await delay(200);
+  }
+  throw new Error("Highlighted sentence is not visible inside the sentence scroll container");
+}
+
+async function maybeSetWindowRect(driver, width, height) {
+  try {
+    await driver.manage().window().setRect({ width, height });
+    await delay(300);
+  } catch {
+    // Some platforms/drivers do not support setRect; continue without failing.
+  }
+}
+
+async function assertElementHeightAtMost(driver, testId, maxHeight, timeoutMs = 10000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    const result = await driver.executeScript(
+      (currentTestId) => {
+        const node = document.querySelector(`[data-testid='${currentTestId}']`);
+        if (!node) {
+          return { ready: false, height: 0 };
+        }
+        const rect = node.getBoundingClientRect();
+        return { ready: true, height: rect.height };
+      },
+      testId
+    );
+    if (result.ready && result.height > 0 && result.height <= maxHeight) {
+      return result.height;
+    }
+    await delay(200);
+  }
+  throw new Error(`Element ${testId} exceeded max height ${maxHeight}px`);
 }
 
 function parseSentencePosition(summaryText) {
@@ -211,6 +313,19 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
   await settingsToggle.click();
   await waitForText(driver, panelTitleLocator, "Settings");
 
+  const sentence14 = await waitForElement(driver, By.css("[data-testid='reader-sentence-14']"));
+  await sentence14.click();
+  await assertHighlightedSentenceVisible(driver);
+
+  await setNumericSetting(driver, "setting-font-size", 30);
+  await assertHighlightedSentenceVisible(driver);
+
+  await setNumericSetting(driver, "setting-horizontal-margin", 180);
+  await assertHighlightedSentenceVisible(driver);
+
+  await setNumericSetting(driver, "setting-line-spacing", 1.8);
+  await assertHighlightedSentenceVisible(driver);
+
   const ttsPanelToggle = await waitForElement(
     driver,
     By.css("[data-testid='reader-toggle-tts-panel-button']")
@@ -224,6 +339,10 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
     await ttsPanelToggle.click();
     await waitForText(driver, panelTitleLocator, "TTS Options", 6000);
   }
+
+  await maybeSetWindowRect(driver, 1080, 860);
+  await assertElementHeightAtMost(driver, "reader-topbar", 64);
+  await assertElementHeightAtMost(driver, "reader-tts-control-row", 56);
 
   const ttsSummary = await waitForElement(driver, By.css("[data-testid='reader-tts-state-summary']"));
   const beforePosition = parseSentencePosition(await ttsSummary.getText());
