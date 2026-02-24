@@ -1,4 +1,5 @@
 import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
@@ -53,6 +54,23 @@ interface StarterShellProps {
   calibreLoadEvent: CalibreLoadEvent | null;
   pdfTranscriptionEvent: PdfTranscriptionEvent | null;
   runtimeLogLevel: string;
+}
+
+function toThumbnailSrc(path: string | null | undefined): string | null {
+  if (!path) {
+    return null;
+  }
+
+  const lower = path.toLowerCase();
+  if (lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("data:") || lower.startsWith("asset:")) {
+    return path;
+  }
+
+  try {
+    return convertFileSrc(path);
+  } catch {
+    return path;
+  }
 }
 
 export function StarterShell({
@@ -300,7 +318,9 @@ export function StarterShell({
               {hasRecents ? (
                 <div className="overflow-y-auto pr-1" style={{ maxHeight: recentsViewportHeight }}>
                   <div className="grid grid-cols-1 gap-3">
-                    {recents.map((recent) => (
+                    {recents.map((recent) => {
+                      const recentThumbnailSrc = toThumbnailSrc(recent.thumbnail_path);
+                      return (
                     <Card
                       key={recent.source_path}
                       variant="outlined"
@@ -309,13 +329,23 @@ export function StarterShell({
                       data-recent-path={recent.source_path}
                     >
                       <CardContent className="pb-3">
-                        <Stack spacing={0.75}>
-                          <Typography variant="subtitle1" fontWeight={700} noWrap>
-                            {recent.display_title}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary" className="truncate">
-                            {recent.source_path}
-                          </Typography>
+                        <Stack direction="row" spacing={1.25} alignItems="center">
+                          {recentThumbnailSrc ? (
+                            <img
+                              src={recentThumbnailSrc}
+                              alt={recent.display_title}
+                              className="h-11 w-9 shrink-0 rounded border border-slate-200 object-cover"
+                              loading="lazy"
+                            />
+                          ) : null}
+                          <Stack spacing={0.75} className="min-w-0">
+                            <Typography variant="subtitle1" fontWeight={700} noWrap>
+                              {recent.display_title}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" className="truncate">
+                              {recent.source_path}
+                            </Typography>
+                          </Stack>
                         </Stack>
                       </CardContent>
                       <CardActions className="px-4 pb-4 pt-0">
@@ -343,7 +373,8 @@ export function StarterShell({
                         </Button>
                       </CardActions>
                     </Card>
-                    ))}
+                    );
+                    })}
                   </div>
                 </div>
               ) : null}
@@ -454,17 +485,29 @@ export function StarterShell({
                     {virtualWindow.topSpacerPx > 0 ? (
                       <div style={{ height: virtualWindow.topSpacerPx }} />
                     ) : null}
-                    {virtualWindow.items.map((book) => (
+                    {virtualWindow.items.map((book) => {
+                      const calibreThumbnailSrc = toThumbnailSrc(book.cover_thumbnail);
+                      return (
                       <div key={book.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                        <Stack spacing={0.25} className="min-w-0">
-                          <Typography variant="subtitle2" noWrap>
-                            {book.title}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary" noWrap>
-                            {book.authors || "Unknown author"} · {book.extension.toUpperCase()}
-                            {book.year ? ` · ${book.year}` : ""}
-                          </Typography>
-                        </Stack>
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          {calibreThumbnailSrc ? (
+                            <img
+                              src={calibreThumbnailSrc}
+                              alt={book.title}
+                              className="h-11 w-9 shrink-0 rounded border border-slate-200 object-cover"
+                              loading="lazy"
+                            />
+                          ) : null}
+                          <Stack spacing={0.25} className="min-w-0">
+                            <Typography variant="subtitle2" noWrap>
+                              {book.title}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" noWrap>
+                              {book.authors || "Unknown author"} · {book.extension.toUpperCase()}
+                              {book.year ? " · " + book.year : ""}
+                            </Typography>
+                          </Stack>
+                        </div>
                         <Button
                           size="small"
                           variant="contained"
@@ -476,7 +519,8 @@ export function StarterShell({
                           Open
                         </Button>
                       </div>
-                    ))}
+                    );
+                    })}
                     {virtualWindow.bottomSpacerPx > 0 ? (
                       <div style={{ height: virtualWindow.bottomSpacerPx }} />
                     ) : null}
