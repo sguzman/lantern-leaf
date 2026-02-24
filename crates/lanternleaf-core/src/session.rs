@@ -1099,6 +1099,8 @@ pub fn load_session_for_source_with_cancel(
     let mut effective_config = base_config.clone();
     if let Some(mut overrides) = crate::cache::load_epub_config(&source_path) {
         overrides.log_level = base_config.log_level;
+        overrides.tts_model_path = base_config.tts_model_path.clone();
+        overrides.tts_espeak_path = base_config.tts_espeak_path.clone();
         overrides.tts_threads = base_config.tts_threads;
         overrides.tts_progress_log_interval_secs = base_config.tts_progress_log_interval_secs;
         overrides.key_toggle_play_pause = base_config.key_toggle_play_pause.clone();
