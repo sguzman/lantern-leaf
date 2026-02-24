@@ -1477,8 +1477,58 @@ async fn calibre_open_book(
     open_resolved_source(&app, &state, path).await
 }
 
+#[cfg(target_os = "linux")]
+fn configure_linux_display_backend() {
+    let wayland_available = std::env::var_os("WAYLAND_DISPLAY").is_some()
+        || matches!(
+            std::env::var("XDG_SESSION_TYPE")
+                .ok()
+                .map(|value| value.to_ascii_lowercase()),
+            Some(value) if value == "wayland"
+        );
+    let allow_x11 = matches!(
+        std::env::var("EBUP_VIEWER_ALLOW_X11")
+            .ok()
+            .map(|value| value.to_ascii_lowercase()),
+        Some(value) if value == "1" || value == "true" || value == "yes"
+    );
+
+    if !wayland_available || allow_x11 {
+        return;
+    }
+
+    let current_gdk_backend = std::env::var("GDK_BACKEND")
+        .ok()
+        .map(|value| value.to_ascii_lowercase());
+    let current_winit_backend = std::env::var("WINIT_UNIX_BACKEND")
+        .ok()
+        .map(|value| value.to_ascii_lowercase());
+
+    if current_gdk_backend.as_deref() != Some("wayland") {
+        // SAFETY: Startup-time process env initialization before Tauri runtime threads start.
+        unsafe {
+            std::env::set_var("GDK_BACKEND", "wayland");
+        }
+    }
+    if current_winit_backend.as_deref() != Some("wayland") {
+        // SAFETY: Startup-time process env initialization before Tauri runtime threads start.
+        unsafe {
+            std::env::set_var("WINIT_UNIX_BACKEND", "wayland");
+        }
+    }
+
+    info!(
+        gdk_backend = "wayland",
+        winit_backend = "wayland",
+        "Configured Linux display backend defaults"
+    );
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    configure_linux_display_backend();
+
     let startup_config = config::load_config(Path::new("conf/config.toml"));
     let log_plugin = tauri_plugin_log::Builder::new()
         .level(log_level_to_filter(startup_config.log_level))
