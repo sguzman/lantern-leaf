@@ -51,14 +51,28 @@ impl Config {
 
 impl Config {
     fn resolve_relative_paths(&mut self, config_path: &Path) {
-        let base_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
-        self.paths.out_dir = absolutize_path_value(&self.paths.out_dir, base_dir);
-        self.paths.work_dir = absolutize_path_value(&self.paths.work_dir, base_dir);
-        self.paths.cache_dir = absolutize_path_value(&self.paths.cache_dir, base_dir);
+        let base_dir = resolve_config_base_dir(config_path);
+        self.paths.out_dir = absolutize_path_value(&self.paths.out_dir, &base_dir);
+        self.paths.work_dir = absolutize_path_value(&self.paths.work_dir, &base_dir);
+        self.paths.cache_dir = absolutize_path_value(&self.paths.cache_dir, &base_dir);
         self.paths.docling_artifacts_dir =
-            absolutize_path_value(&self.paths.docling_artifacts_dir, base_dir);
-        self.paths.scripts_dir = absolutize_path_value(&self.paths.scripts_dir, base_dir);
+            absolutize_path_value(&self.paths.docling_artifacts_dir, &base_dir);
+        self.paths.scripts_dir = absolutize_path_value(&self.paths.scripts_dir, &base_dir);
     }
+}
+
+fn resolve_config_base_dir(config_path: &Path) -> PathBuf {
+    let parent = config_path.parent().unwrap_or_else(|| Path::new("."));
+    if parent
+        .file_name()
+        .map(|name| name == std::ffi::OsStr::new("conf"))
+        .unwrap_or(false)
+    {
+        if let Some(workspace_root) = parent.parent() {
+            return workspace_root.to_path_buf();
+        }
+    }
+    parent.to_path_buf()
 }
 
 fn absolutize_path_value(raw: &str, base_dir: &Path) -> String {
