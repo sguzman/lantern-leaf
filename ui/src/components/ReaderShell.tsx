@@ -407,12 +407,9 @@ function ReaderQuickActions({
         icon={<SpeedDialIcon />}
         direction="down"
         open={open}
-        onClose={(_, reason) => {
-          if (reason !== "toggle") {
-            setOpen(false);
-          }
-        }}
+        onClose={() => {}}
         onOpen={() => {}}
+        transitionDuration={120}
         FabProps={{
           size: "small",
           color: "primary",
@@ -429,7 +426,20 @@ function ReaderQuickActions({
             tooltip: {
               open: true,
               title: isNightTheme ? "Switch to Day" : "Switch to Night",
-              placement: "left"
+              placement: "left",
+              arrow: true,
+              sx: {
+                "& .MuiTooltip-tooltip": {
+                  backgroundColor: "#fff",
+                  color: "#111827",
+                  border: "1px solid #cbd5e1",
+                  fontWeight: 700,
+                  fontSize: 12
+                },
+                "& .MuiTooltip-arrow": {
+                  color: "#fff"
+                }
+              }
             }
           }}
           onClick={() => {
@@ -445,7 +455,20 @@ function ReaderQuickActions({
             tooltip: {
               open: true,
               title: isTextOnly ? "Pretty Text" : "Text-only",
-              placement: "left"
+              placement: "left",
+              arrow: true,
+              sx: {
+                "& .MuiTooltip-tooltip": {
+                  backgroundColor: "#fff",
+                  color: "#111827",
+                  border: "1px solid #cbd5e1",
+                  fontWeight: 700,
+                  fontSize: 12
+                },
+                "& .MuiTooltip-arrow": {
+                  color: "#fff"
+                }
+              }
             }
           }}
           onClick={() => {
@@ -461,7 +484,20 @@ function ReaderQuickActions({
             tooltip: {
               open: true,
               title: showSettings ? "Hide Settings" : "Settings",
-              placement: "left"
+              placement: "left",
+              arrow: true,
+              sx: {
+                "& .MuiTooltip-tooltip": {
+                  backgroundColor: "#fff",
+                  color: "#111827",
+                  border: "1px solid #cbd5e1",
+                  fontWeight: 700,
+                  fontSize: 12
+                },
+                "& .MuiTooltip-arrow": {
+                  color: "#fff"
+                }
+              }
             }
           }}
           onClick={() => {
@@ -477,7 +513,20 @@ function ReaderQuickActions({
             tooltip: {
               open: true,
               title: showStats ? "Hide Stats" : "Stats",
-              placement: "left"
+              placement: "left",
+              arrow: true,
+              sx: {
+                "& .MuiTooltip-tooltip": {
+                  backgroundColor: "#fff",
+                  color: "#111827",
+                  border: "1px solid #cbd5e1",
+                  fontWeight: 700,
+                  fontSize: 12
+                },
+                "& .MuiTooltip-arrow": {
+                  color: "#fff"
+                }
+              }
             }
           }}
           onClick={() => {
@@ -493,7 +542,20 @@ function ReaderQuickActions({
             tooltip: {
               open: true,
               title: showTts ? "Hide TTS Controls" : "TTS Controls",
-              placement: "left"
+              placement: "left",
+              arrow: true,
+              sx: {
+                "& .MuiTooltip-tooltip": {
+                  backgroundColor: "#fff",
+                  color: "#111827",
+                  border: "1px solid #cbd5e1",
+                  fontWeight: 700,
+                  fontSize: 12
+                },
+                "& .MuiTooltip-arrow": {
+                  color: "#fff"
+                }
+              }
             }
           }}
           onClick={() => {
