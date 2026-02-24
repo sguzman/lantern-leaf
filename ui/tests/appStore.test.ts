@@ -332,4 +332,81 @@ describe("appStore event handling", () => {
     expect(state.runtimeLogLevel).toBe("error");
     expect(state.toast?.message).toContain("error");
   });
+
+  it("ignores stale source/calibre/pdf/tts/log events by request id", async () => {
+    const { backend, hooks } = createBackend();
+    const store = createTestStore(backend);
+    await store.getState().bootstrap();
+
+    hooks.source?.({
+      request_id: 50,
+      phase: "started",
+      source_path: "/tmp/new.epub",
+      message: null
+    });
+    hooks.source?.({
+      request_id: 49,
+      phase: "failed",
+      source_path: "/tmp/old.epub",
+      message: "stale"
+    });
+
+    hooks.calibre?.({
+      request_id: 40,
+      phase: "finished",
+      count: 100,
+      message: null
+    });
+    hooks.calibre?.({
+      request_id: 39,
+      phase: "failed",
+      count: null,
+      message: "stale"
+    });
+
+    hooks.tts?.({
+      request_id: 30,
+      action: "reader_tts_play",
+      tts: makeReaderSnapshot("/tmp/new.epub", "New").tts
+    });
+    hooks.tts?.({
+      request_id: 29,
+      action: "reader_tts_pause",
+      tts: makeReaderSnapshot("/tmp/old.epub", "Old").tts
+    });
+
+    hooks.pdf?.({
+      request_id: 20,
+      phase: "started",
+      source_path: "/tmp/new.pdf",
+      message: null
+    });
+    hooks.pdf?.({
+      request_id: 19,
+      phase: "failed",
+      source_path: "/tmp/old.pdf",
+      message: "stale"
+    });
+
+    hooks.logLevel?.({
+      request_id: 10,
+      level: "warn"
+    });
+    hooks.logLevel?.({
+      request_id: 9,
+      level: "debug"
+    });
+
+    const state = store.getState();
+    expect(state.sourceOpenEvent?.request_id).toBe(50);
+    expect(state.lastSourceOpenEventRequestId).toBe(50);
+    expect(state.calibreLoadEvent?.request_id).toBe(40);
+    expect(state.lastCalibreEventRequestId).toBe(40);
+    expect(state.ttsStateEvent?.request_id).toBe(30);
+    expect(state.lastTtsEventRequestId).toBe(30);
+    expect(state.pdfTranscriptionEvent?.request_id).toBe(20);
+    expect(state.lastPdfEventRequestId).toBe(20);
+    expect(state.runtimeLogLevel).toBe("warn");
+    expect(state.lastLogLevelEventRequestId).toBe(10);
+  });
 });

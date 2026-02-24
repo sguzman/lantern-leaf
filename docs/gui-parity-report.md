@@ -26,6 +26,7 @@ This report compares core workflows between the legacy iced UI path and the Taur
 | TTS progress precision (3 decimals) | Supported | Supported | TTS display formatting in `ui/src/components/ReaderShell.tsx` |
 | Runtime log-level updates | Supported | Supported | Command `logging_set_level` and event `log-level` in `src-tauri/src/lib.rs`; starter controls in `ui/src/components/StarterShell.tsx` |
 | Bridge progress/state events for TTS and PDF transcription | Supported | Supported | Events `tts-state` / `pdf-transcription` in `src-tauri/src/lib.rs`; store subscriptions in `ui/src/store/appStore.ts` |
+| Stale async event rejection | Supported | Supported | Request-id monotonic guards for source/calibre/tts/pdf/log events in `ui/src/store/slices/jobsSlice.ts`; coverage in `ui/tests/appStore.test.ts` |
 | Zustand domain slices | Supported | Supported | Physical slices in `ui/src/store/slices/` and selector projections in `ui/src/store/selectors.ts` |
 | PDF fallback robustness (quack-check native/split fallback) | Supported | Supported | Pipeline fallback tests in `src/quack_check/pipeline.rs` |
 

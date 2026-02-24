@@ -169,7 +169,7 @@
 
 - [ ] R-01 Large text rendering performance in WebView with per-sentence spans.
 - [ ] R-02 Highlight/scroll mismatch from mixed Rust vs DOM coordinate systems.
-- [ ] R-03 Long-running TTS/PDF tasks outliving session context.
+- [ ] R-03 Long-running TTS/PDF tasks outliving session context. (Mitigated with request-id stale-event guards; keep open until full Tauri-runner soak.)
 - [x] R-04 Type drift between Rust DTOs and TS interfaces.
 - [x] R-05 Styling conflicts between MUI and Tailwind resets/utilities.
 - [ ] R-06 Tauri permission/capability restrictions breaking filesystem/subprocess workflows.

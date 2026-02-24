@@ -5,7 +5,15 @@ import type { SliceContext } from "./types";
 export async function ensureJobSubscriptions({ set, get, backend }: SliceContext): Promise<void> {
   if (!get().sourceOpenSubscribed) {
     await backend.onSourceOpen((event) => {
-      set({ sourceOpenEvent: event });
+      set((current) => {
+        if (event.request_id < current.lastSourceOpenEventRequestId) {
+          return {};
+        }
+        return {
+          sourceOpenEvent: event,
+          lastSourceOpenEventRequestId: event.request_id
+        };
+      });
       if (event.phase === "cancelled") {
         const suffix = event.request_id > 0 ? ` (request ${event.request_id})` : "";
         set({
@@ -25,7 +33,15 @@ export async function ensureJobSubscriptions({ set, get, backend }: SliceContext
 
   if (!get().calibreSubscribed) {
     await backend.onCalibreLoad((event) => {
-      set({ calibreLoadEvent: event });
+      set((current) => {
+        if (event.request_id < current.lastCalibreEventRequestId) {
+          return {};
+        }
+        return {
+          calibreLoadEvent: event,
+          lastCalibreEventRequestId: event.request_id
+        };
+      });
       if (event.phase === "failed") {
         const suffix = event.request_id > 0 ? ` (request ${event.request_id})` : "";
         set({
@@ -38,14 +54,30 @@ export async function ensureJobSubscriptions({ set, get, backend }: SliceContext
 
   if (!get().ttsStateSubscribed) {
     await backend.onTtsState((event) => {
-      set({ ttsStateEvent: event });
+      set((current) => {
+        if (event.request_id < current.lastTtsEventRequestId) {
+          return {};
+        }
+        return {
+          ttsStateEvent: event,
+          lastTtsEventRequestId: event.request_id
+        };
+      });
     });
     set({ ttsStateSubscribed: true });
   }
 
   if (!get().pdfTranscriptionSubscribed) {
     await backend.onPdfTranscription((event) => {
-      set({ pdfTranscriptionEvent: event });
+      set((current) => {
+        if (event.request_id < current.lastPdfEventRequestId) {
+          return {};
+        }
+        return {
+          pdfTranscriptionEvent: event,
+          lastPdfEventRequestId: event.request_id
+        };
+      });
       if (event.phase === "failed") {
         const suffix = event.request_id > 0 ? ` (request ${event.request_id})` : "";
         set({
@@ -58,9 +90,15 @@ export async function ensureJobSubscriptions({ set, get, backend }: SliceContext
 
   if (!get().logLevelSubscribed) {
     await backend.onLogLevel((event) => {
-      set({
-        logLevelEvent: event,
-        runtimeLogLevel: event.level
+      set((current) => {
+        if (event.request_id < current.lastLogLevelEventRequestId) {
+          return {};
+        }
+        return {
+          logLevelEvent: event,
+          runtimeLogLevel: event.level,
+          lastLogLevelEventRequestId: event.request_id
+        };
       });
     });
     set({ logLevelSubscribed: true });

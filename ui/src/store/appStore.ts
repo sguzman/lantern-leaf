@@ -68,6 +68,11 @@ export interface AppStore {
   readerStateSubscribed: boolean;
   lastSessionEventRequestId: number;
   lastReaderEventRequestId: number;
+  lastSourceOpenEventRequestId: number;
+  lastCalibreEventRequestId: number;
+  lastTtsEventRequestId: number;
+  lastPdfEventRequestId: number;
+  lastLogLevelEventRequestId: number;
   appSafeQuit: () => Promise<void>;
   bootstrap: () => Promise<void>;
   refreshRecents: () => Promise<void>;
@@ -136,6 +141,11 @@ const initialStoreState: Pick<
   | "readerStateSubscribed"
   | "lastSessionEventRequestId"
   | "lastReaderEventRequestId"
+  | "lastSourceOpenEventRequestId"
+  | "lastCalibreEventRequestId"
+  | "lastTtsEventRequestId"
+  | "lastPdfEventRequestId"
+  | "lastLogLevelEventRequestId"
 > = {
   bootstrapState: null,
   session: null,
@@ -163,7 +173,12 @@ const initialStoreState: Pick<
   sessionStateSubscribed: false,
   readerStateSubscribed: false,
   lastSessionEventRequestId: 0,
-  lastReaderEventRequestId: 0
+  lastReaderEventRequestId: 0,
+  lastSourceOpenEventRequestId: 0,
+  lastCalibreEventRequestId: 0,
+  lastTtsEventRequestId: 0,
+  lastPdfEventRequestId: 0,
+  lastLogLevelEventRequestId: 0
 };
 
 export function createAppStoreState(backend: BackendApi): StateCreator<AppStore> {
