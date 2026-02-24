@@ -1973,7 +1973,7 @@ fn reader_tts_precompute_page(
             request_id,
             reader.source_path.clone(),
             sentences,
-            reader.config.tts_threads.max(1),
+            reader.config.tts_threads.max(1).min(2),
             Duration::from_secs_f64(reader.config.tts_progress_log_interval_secs.max(0.1) as f64),
             PathBuf::from(reader.config.tts_model_path.clone()),
             PathBuf::from(reader.config.tts_espeak_path.clone()),
@@ -1992,32 +1992,40 @@ fn reader_tts_precompute_page(
         return Ok(snapshot);
     }
 
-    let cache_root = cache::hash_dir(&source_path).join("tts");
-    let engine = tts::TtsEngine::new(model_path, espeak_path).map_err(|err| {
-        bridge_error(
-            "tts_engine_init_failed",
-            format!("Failed to initialize Piper TTS engine for precompute: {err}"),
-        )
-    })?;
+    std::thread::spawn(move || {
+        let cache_root = cache::hash_dir(&source_path).join("tts");
+        let engine = match tts::TtsEngine::new(model_path, espeak_path) {
+            Ok(engine) => engine,
+            Err(err) => {
+                warn!(
+                    request_id,
+                    error = %err,
+                    "Failed to initialize Piper TTS engine for page precompute"
+                );
+                return;
+            }
+        };
 
-    let prepared = engine
-        .prepare_batch(cache_root, sentences, 0, threads, progress_log_interval)
-        .map_err(|err| {
-            bridge_error(
-                "tts_precompute_failed",
-                format!("Failed to precompute page TTS audio: {err}"),
-            )
-        })?;
-
-    info!(
-        request_id,
-        file_count = prepared.len(),
-        "Precomputed page TTS audio files"
-    );
+        match engine.prepare_batch(cache_root, sentences, 0, threads, progress_log_interval) {
+            Ok(prepared) => {
+                info!(
+                    request_id,
+                    file_count = prepared.len(),
+                    "Precomputed page TTS audio files"
+                );
+            }
+            Err(err) => {
+                warn!(
+                    request_id,
+                    error = %err,
+                    "Failed to precompute page TTS audio"
+                );
+            }
+        }
+    });
 
     Ok(snapshot)
 }
-
 #[tauri::command]
 fn reader_close_session(
     app: tauri::AppHandle,

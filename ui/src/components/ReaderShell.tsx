@@ -1266,9 +1266,16 @@ export function ReaderShell({
                           data-testid="reader-tts-control-row"
                           sx={{
                             flexWrap: "nowrap",
-                            overflow: "hidden",
+                            overflowX: "auto",
+                            overflowY: "hidden",
                             whiteSpace: "nowrap",
-                            minHeight: 36
+                            minHeight: 36,
+                            pb: 0.25,
+                            scrollbarWidth: "thin",
+                            "& .MuiButton-root": {
+                              flexShrink: 0,
+                              whiteSpace: "nowrap"
+                            }
                           }}
                         >
                           <Button
