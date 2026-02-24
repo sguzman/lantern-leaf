@@ -33,6 +33,7 @@ This report compares core workflows between the legacy iced UI path and the Taur
 | Narrow-width topbar/TTS row no-vertical expansion in real runtime | Supported | Supported | Tauri-runner assertions against `reader-topbar` / `reader-tts-control-row` heights in `ui/e2e-tauri/smoke.test.mjs` |
 | TTS progress precision (3 decimals) | Supported | Supported | TTS display formatting in `ui/src/components/ReaderShell.tsx` |
 | Full TTS control surface in real runtime | Supported | Supported | Runtime smoke covers toggle/play/pause/play-from-page/play-from-highlight and seek/repeat pause semantics in `ui/e2e-tauri/smoke.test.mjs` |
+| Piper TTS retained as final-product feature | Supported | Required / Tracked | Migration roadmap and policy now explicitly lock Piper/TTS retention (`GUI-ROADMAP.md`, `docs/gui-migration-policy.md`) |
 | Runtime log-level updates | Supported | Supported | Command `logging_set_level` and event `log-level` in `src-tauri/src/lib.rs`; starter controls in `ui/src/components/StarterShell.tsx` |
 | Runtime log-level persistence to config | Supported | Supported | Config persistence helper + override-path coverage in `src-tauri/src/lib.rs` tests (`persist_base_config_writes_updated_log_level`, `app_config_path_uses_override_env_when_present`) |
 | Reader shutdown housekeeping persistence | Supported | Supported | `cleanup_for_shutdown_persists_active_reader_housekeeping` test in `src-tauri/src/lib.rs` |

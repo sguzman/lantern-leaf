@@ -26,6 +26,7 @@ Last automated verification run: `2026-02-24` (local + Tauri runtime smoke + 3-i
 - [x] Play/pause/toggle/play-from-page/play-from-highlight all work.
 - [x] Prev/next/repeat sentence controls maintain pause semantics.
 - [x] 3-decimal progress remains stable in TTS and stats displays.
+- [x] Piper-backed TTS remains part of final product scope (not removed by GUI decommission tasks).
 
 ## Layout/UX Rules
 

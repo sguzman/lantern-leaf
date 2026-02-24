@@ -18,6 +18,7 @@
 - [x] Use Tailwind for layout and spacing utilities.
 - [x] Use a single UI state store (Zustand) that calls typed backend commands.
 - [x] Preserve all existing behavior before introducing UX changes.
+- [x] Preserve Piper-based TTS as a non-negotiable final-product capability (must not be removed during GUI decommission work).
 
 **Roadmap**
 
@@ -163,6 +164,7 @@
 - [x] P14-02 Complete parity signoff checklist with explicit pass on all must-have behaviors. (Completed with full checklist pass plus 3-iteration Tauri runtime soak and machine-readable soak report output.)
 - [x] P14-03 Switch default desktop target to Tauri app. (Root `pnpm dev`/`pnpm build` now target Tauri; legacy iced path remains explicit as `pnpm desktop:legacy` until decommission.)
 - [ ] P14-04 Remove iced UI modules only after parity and soak tests pass.
+  Constraint: This applies only to iced UI framework code. Piper/TTS domain/runtime functionality must remain intact.
 - [ ] P14-05 Keep core interfaces stable for future GUI changes.
 
 **Critical Risks To Track (and Mitigate)**
@@ -182,6 +184,7 @@
 - [ ] DOD-02 All known regressions you previously flagged have explicit passing tests.
 - [ ] DOD-03 Close-session cancels in-flight background work reliably.
 - [ ] DOD-04 PDF, EPUB, and clipboard sources are all first-class and stable.
+- [ ] DOD-04a Piper TTS remains fully functional in final shipped product (play/pause/seek/repeat/highlight sync).
 - [ ] DOD-05 Tailwind + MUI coexist without style regressions.
 - [ ] DOD-06 Performance targets (startup, page changes, TTS response, resize) meet or beat baseline.
 - [ ] DOD-07 Iced UI codepath can be retired safely.
