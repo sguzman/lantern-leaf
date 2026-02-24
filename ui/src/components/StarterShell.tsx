@@ -269,220 +269,224 @@ export function StarterShell({
 
           <Divider />
 
-          <Stack direction="row" alignItems="center" justifyContent="space-between">
-            <Typography variant="h6" component="h2" fontWeight={700}>
-              Recent Books
-            </Typography>
-            <Button
-              size="small"
-              variant="text"
-              startIcon={<RefreshIcon />}
-              onClick={() => void onRefreshRecents()}
-              disabled={busy || loadingRecents}
-            >
-              Refresh
-            </Button>
-          </Stack>
-
-          {loadingRecents ? (
-            <Stack direction="row" spacing={1} alignItems="center">
-              <CircularProgress size={18} />
-              <Typography variant="body2" color="text.secondary">
-                Loading recent books...
-              </Typography>
-            </Stack>
-          ) : null}
-
-          {!hasRecents && !loadingRecents ? (
-            <Typography variant="body2" color="text.secondary">
-              No recent books yet.
-            </Typography>
-          ) : null}
-
-          {hasRecents ? (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {recents.map((recent) => (
-                <Card
-                  key={recent.source_path}
-                  variant="outlined"
-                  className="rounded-2xl border-slate-200 shadow-none"
-                  data-testid="starter-recent-card"
-                  data-recent-path={recent.source_path}
-                >
-                  <CardContent className="pb-3">
-                    <Stack spacing={0.75}>
-                      <Typography variant="subtitle1" fontWeight={700} noWrap>
-                        {recent.display_title}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" className="truncate">
-                        {recent.source_path}
-                      </Typography>
-                    </Stack>
-                  </CardContent>
-                  <CardActions className="px-4 pb-4 pt-0">
-                    <Button
-                      size="small"
-                      variant="contained"
-                      onClick={() => void onOpenPath(recent.source_path)}
-                      disabled={busy}
-                      data-testid="starter-recent-open-button"
-                      data-recent-path={recent.source_path}
-                    >
-                      Open
-                    </Button>
-                    <Button
-                      size="small"
-                      color="error"
-                      variant="outlined"
-                      startIcon={<DeleteOutlineIcon />}
-                      onClick={() => void onDeleteRecent(recent.source_path)}
-                      disabled={busy}
-                      data-testid="starter-recent-delete-button"
-                      data-recent-path={recent.source_path}
-                    >
-                      Delete
-                    </Button>
-                  </CardActions>
-                </Card>
-              ))}
-            </div>
-          ) : null}
-
-          <Divider />
-
-          <Stack direction="row" alignItems="center" justifyContent="space-between">
-            <Typography variant="h6" component="h2" fontWeight={700}>
-              Calibre Library
-            </Typography>
-            <Stack direction="row" spacing={1}>
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={() => setShowCalibre((current) => !current)}
-                disabled={busy}
-                data-testid="starter-calibre-toggle-button"
-              >
-                {showCalibre ? "Hide" : "Show"}
-              </Button>
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={() => void onLoadCalibre(false)}
-                disabled={busy || loadingCalibre}
-                data-testid="starter-calibre-load-button"
-              >
-                Load
-              </Button>
-              <Button
-                size="small"
-                variant="text"
-                startIcon={<RefreshIcon />}
-                onClick={() => void onLoadCalibre(true)}
-                disabled={busy || loadingCalibre}
-                data-testid="starter-calibre-refresh-button"
-              >
-                Refresh
-              </Button>
-            </Stack>
-          </Stack>
-
-          {showCalibre ? (
-            <Stack spacing={1}>
-              <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
-                <TextField
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <Stack spacing={2.5}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between">
+                <Typography variant="h6" component="h2" fontWeight={700}>
+                  Recent Books
+                </Typography>
+                <Button
                   size="small"
-                  fullWidth
-                  label="Search calibre (title/author/format)"
-                  value={calibreSearch}
-                  inputProps={{ "data-testid": "starter-calibre-search-input" }}
-                  onChange={(event) => setCalibreSearch(event.target.value)}
-                  disabled={busy || loadingCalibre}
-                />
-                <FormControl size="small" className="md:min-w-56">
-                  <InputLabel id="calibre-sort-label">Sort</InputLabel>
-                  <Select
-                    labelId="calibre-sort-label"
-                    label="Sort"
-                    value={calibreSort}
-                    onChange={(event) => setCalibreSort(event.target.value as CalibreSort)}
-                    disabled={busy || loadingCalibre}
-                  >
-                    <MenuItem value="title_asc">Title (A-Z)</MenuItem>
-                    <MenuItem value="title_desc">Title (Z-A)</MenuItem>
-                    <MenuItem value="author_asc">Author (A-Z)</MenuItem>
-                    <MenuItem value="author_desc">Author (Z-A)</MenuItem>
-                    <MenuItem value="year_desc">Year (Newest)</MenuItem>
-                    <MenuItem value="year_asc">Year (Oldest)</MenuItem>
-                    <MenuItem value="id_asc">Book ID (Ascending)</MenuItem>
-                    <MenuItem value="id_desc">Book ID (Descending)</MenuItem>
-                  </Select>
-                </FormControl>
+                  variant="text"
+                  startIcon={<RefreshIcon />}
+                  onClick={() => void onRefreshRecents()}
+                  disabled={busy || loadingRecents}
+                >
+                  Refresh
+                </Button>
               </Stack>
 
-              {!loadingCalibre && filteredCalibre.length > 0 ? (
-                <Typography variant="caption" color="text.secondary">
-                  Showing {filteredCalibre.length.toLocaleString()} calibre entries
+              {loadingRecents ? (
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <CircularProgress size={18} />
+                  <Typography variant="body2" color="text.secondary">
+                    Loading recent books...
+                  </Typography>
+                </Stack>
+              ) : null}
+
+              {!hasRecents && !loadingRecents ? (
+                <Typography variant="body2" color="text.secondary">
+                  No recent books yet.
                 </Typography>
               ) : null}
-            </Stack>
-          ) : null}
 
-          {loadingCalibre ? (
-            <Stack direction="row" spacing={1} alignItems="center">
-              <CircularProgress size={18} />
-              <Typography variant="body2" color="text.secondary">
-                Loading calibre books...
-              </Typography>
-            </Stack>
-          ) : null}
-
-          {!loadingCalibre && filteredCalibre.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              No calibre books loaded yet.
-            </Typography>
-          ) : null}
-
-          {showCalibre && filteredCalibre.length > 0 ? (
-            <div
-              className="overflow-y-auto rounded-2xl border border-slate-200"
-              style={{ maxHeight: calibreViewportHeight }}
-              onScroll={(event) => {
-                setCalibreScrollTop(event.currentTarget.scrollTop);
-              }}
-            >
-              <div className="divide-y divide-slate-200">
-                {virtualWindow.topSpacerPx > 0 ? (
-                  <div style={{ height: virtualWindow.topSpacerPx }} />
-                ) : null}
-                {virtualWindow.items.map((book) => (
-                  <div key={book.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                    <Stack spacing={0.25} className="min-w-0">
-                      <Typography variant="subtitle2" noWrap>
-                        {book.title}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" noWrap>
-                        {book.authors || "Unknown author"} · {book.extension.toUpperCase()}
-                        {book.year ? ` · ${book.year}` : ""}
-                      </Typography>
-                    </Stack>
-                    <Button
-                      size="small"
-                      variant="contained"
-                      onClick={() => void onOpenCalibreBook(book.id)}
-                      disabled={busy}
-                      data-testid="starter-calibre-open-button"
-                      data-book-id={book.id}
+              {hasRecents ? (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {recents.map((recent) => (
+                    <Card
+                      key={recent.source_path}
+                      variant="outlined"
+                      className="rounded-2xl border-slate-200 shadow-none"
+                      data-testid="starter-recent-card"
+                      data-recent-path={recent.source_path}
                     >
-                      Open
-                    </Button>
+                      <CardContent className="pb-3">
+                        <Stack spacing={0.75}>
+                          <Typography variant="subtitle1" fontWeight={700} noWrap>
+                            {recent.display_title}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" className="truncate">
+                            {recent.source_path}
+                          </Typography>
+                        </Stack>
+                      </CardContent>
+                      <CardActions className="px-4 pb-4 pt-0">
+                        <Button
+                          size="small"
+                          variant="contained"
+                          onClick={() => void onOpenPath(recent.source_path)}
+                          disabled={busy}
+                          data-testid="starter-recent-open-button"
+                          data-recent-path={recent.source_path}
+                        >
+                          Open
+                        </Button>
+                        <Button
+                          size="small"
+                          color="error"
+                          variant="outlined"
+                          startIcon={<DeleteOutlineIcon />}
+                          onClick={() => void onDeleteRecent(recent.source_path)}
+                          disabled={busy}
+                          data-testid="starter-recent-delete-button"
+                          data-recent-path={recent.source_path}
+                        >
+                          Delete
+                        </Button>
+                      </CardActions>
+                    </Card>
+                  ))}
+                </div>
+              ) : null}
+            </Stack>
+
+            <Stack spacing={2.5}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between">
+                <Typography variant="h6" component="h2" fontWeight={700}>
+                  Calibre Library
+                </Typography>
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => setShowCalibre((current) => !current)}
+                    disabled={busy}
+                    data-testid="starter-calibre-toggle-button"
+                  >
+                    {showCalibre ? "Hide" : "Show"}
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => void onLoadCalibre(false)}
+                    disabled={busy || loadingCalibre}
+                    data-testid="starter-calibre-load-button"
+                  >
+                    Load
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="text"
+                    startIcon={<RefreshIcon />}
+                    onClick={() => void onLoadCalibre(true)}
+                    disabled={busy || loadingCalibre}
+                    data-testid="starter-calibre-refresh-button"
+                  >
+                    Refresh
+                  </Button>
+                </Stack>
+              </Stack>
+
+              {showCalibre ? (
+                <Stack spacing={1}>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
+                    <TextField
+                      size="small"
+                      fullWidth
+                      label="Search calibre (title/author/format)"
+                      value={calibreSearch}
+                      inputProps={{ "data-testid": "starter-calibre-search-input" }}
+                      onChange={(event) => setCalibreSearch(event.target.value)}
+                      disabled={busy || loadingCalibre}
+                    />
+                    <FormControl size="small" className="md:min-w-56">
+                      <InputLabel id="calibre-sort-label">Sort</InputLabel>
+                      <Select
+                        labelId="calibre-sort-label"
+                        label="Sort"
+                        value={calibreSort}
+                        onChange={(event) => setCalibreSort(event.target.value as CalibreSort)}
+                        disabled={busy || loadingCalibre}
+                      >
+                        <MenuItem value="title_asc">Title (A-Z)</MenuItem>
+                        <MenuItem value="title_desc">Title (Z-A)</MenuItem>
+                        <MenuItem value="author_asc">Author (A-Z)</MenuItem>
+                        <MenuItem value="author_desc">Author (Z-A)</MenuItem>
+                        <MenuItem value="year_desc">Year (Newest)</MenuItem>
+                        <MenuItem value="year_asc">Year (Oldest)</MenuItem>
+                        <MenuItem value="id_asc">Book ID (Ascending)</MenuItem>
+                        <MenuItem value="id_desc">Book ID (Descending)</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Stack>
+
+                  {!loadingCalibre && filteredCalibre.length > 0 ? (
+                    <Typography variant="caption" color="text.secondary">
+                      Showing {filteredCalibre.length.toLocaleString()} calibre entries
+                    </Typography>
+                  ) : null}
+                </Stack>
+              ) : null}
+
+              {loadingCalibre ? (
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <CircularProgress size={18} />
+                  <Typography variant="body2" color="text.secondary">
+                    Loading calibre books...
+                  </Typography>
+                </Stack>
+              ) : null}
+
+              {!loadingCalibre && filteredCalibre.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No calibre books loaded yet.
+                </Typography>
+              ) : null}
+
+              {showCalibre && filteredCalibre.length > 0 ? (
+                <div
+                  className="overflow-y-auto rounded-2xl border border-slate-200"
+                  style={{ maxHeight: calibreViewportHeight }}
+                  onScroll={(event) => {
+                    setCalibreScrollTop(event.currentTarget.scrollTop);
+                  }}
+                >
+                  <div className="divide-y divide-slate-200">
+                    {virtualWindow.topSpacerPx > 0 ? (
+                      <div style={{ height: virtualWindow.topSpacerPx }} />
+                    ) : null}
+                    {virtualWindow.items.map((book) => (
+                      <div key={book.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                        <Stack spacing={0.25} className="min-w-0">
+                          <Typography variant="subtitle2" noWrap>
+                            {book.title}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" noWrap>
+                            {book.authors || "Unknown author"} · {book.extension.toUpperCase()}
+                            {book.year ? ` · ${book.year}` : ""}
+                          </Typography>
+                        </Stack>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          onClick={() => void onOpenCalibreBook(book.id)}
+                          disabled={busy}
+                          data-testid="starter-calibre-open-button"
+                          data-book-id={book.id}
+                        >
+                          Open
+                        </Button>
+                      </div>
+                    ))}
+                    {virtualWindow.bottomSpacerPx > 0 ? (
+                      <div style={{ height: virtualWindow.bottomSpacerPx }} />
+                    ) : null}
                   </div>
-                ))}
-                {virtualWindow.bottomSpacerPx > 0 ? (
-                  <div style={{ height: virtualWindow.bottomSpacerPx }} />
-                ) : null}
-              </div>
-            </div>
-          ) : null}
+                </div>
+              ) : null}
+            </Stack>
+          </div>
         </Stack>
       </CardContent>
     </Card>
