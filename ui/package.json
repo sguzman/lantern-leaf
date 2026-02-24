@@ -12,6 +12,7 @@
     "test": "vitest run --config vitest.config.ts",
     "test:e2e": "playwright test",
     "test:e2e:tauri": "node --test e2e-tauri/*.test.mjs",
+    "test:e2e:tauri:soak": "node scripts/runTauriSoak.mjs",
     "audit:bundle": "node scripts/auditBundleSize.mjs"
   },
   "dependencies": {

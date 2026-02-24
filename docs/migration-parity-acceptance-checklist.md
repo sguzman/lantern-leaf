@@ -2,7 +2,7 @@
 
 Use this checklist for explicit pass/fail gating before cutover.
 
-Last automated verification run: `2026-02-24` (local + Tauri runtime smoke).
+Last automated verification run: `2026-02-24` (local + Tauri runtime smoke + 3-iteration Tauri soak).
 
 ## Starter Flows
 
@@ -50,6 +50,7 @@ Last automated verification run: `2026-02-24` (local + Tauri runtime smoke).
 - [x] `pnpm --dir ui run test`
 - [x] `pnpm --dir ui run test:e2e`
 - [x] `pnpm --dir ui run test:e2e:tauri`
+- [x] `pnpm --dir ui run test:e2e:tauri:soak -- --iterations 3`
 - [x] `pnpm --dir ui run build`
 - [x] `pnpm --dir ui run audit:bundle`
 - [x] `pnpm run types:check`

@@ -5,6 +5,7 @@ This project now has a dedicated Tauri-native smoke E2E path in addition to brow
 ## Command
 
 - `pnpm --dir ui run test:e2e:tauri`
+- `pnpm --dir ui run test:e2e:tauri:soak -- --iterations 3`
 
 ## What It Verifies
 
@@ -26,6 +27,14 @@ This project now has a dedicated Tauri-native smoke E2E path in addition to brow
 - Verifies paused-state invariants are preserved across next-page and next-sentence controls.
 - Verifies topbar and TTS control rows stay single-line (no vertical expansion) under a narrower window width.
 - Verifies TTS toggle label transitions in the reader.
+- In soak mode, repeats the full runtime smoke for `N` iterations and writes a report to `tmp/tauri-soak-report.json`.
+
+## Soak Report
+
+- Default report path: `tmp/tauri-soak-report.json`
+- Override report path: `TAURI_SOAK_REPORT=/path/to/report.json`
+- Override iteration count: `TAURI_SOAK_ITERATIONS=5`
+- Report fields include: pass/fail counts, per-iteration wall duration, extracted smoke-test duration, and aggregate metrics (`avg/min/max/p95`).
 
 ## Local Prerequisites
 
@@ -41,4 +50,7 @@ This project now has a dedicated Tauri-native smoke E2E path in addition to brow
 
 ## CI
 
-The `gui-migration` workflow includes a `tauri-e2e` job that runs this smoke path under `xvfb`.
+The `gui-migration` workflow includes:
+
+- `tauri-e2e`: always-on runtime smoke under `xvfb`.
+- `tauri-e2e-soak`: manual `workflow_dispatch` job for repeated runtime soak runs, with `tmp/tauri-soak-report.json` uploaded as an artifact.

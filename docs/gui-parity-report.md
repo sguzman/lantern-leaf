@@ -45,7 +45,17 @@ This report compares core workflows between the legacy iced UI path and the Taur
 
 ## Current Gaps
 
-- No blocking parity gaps remain in automated checks; remaining cutover work is final soak coverage and iced-path decommission sequencing.
+- No blocking parity gaps remain in automated checks; remaining cutover work is iced-path decommission sequencing.
+
+## Soak Snapshot
+
+- Local soak run (`2026-02-24`) via `pnpm --dir ui run test:e2e:tauri:soak -- --iterations 3`:
+  - Passes: `3/3`
+  - Avg smoke duration: `50101.590 ms`
+  - Min smoke duration: `49390.887 ms`
+  - Max smoke duration: `50578.461 ms`
+  - p95 smoke duration: `50578.461 ms`
+- Latest machine-readable report: `tmp/tauri-soak-report.json`
 
 ## Validation Snapshot
 
@@ -56,6 +66,7 @@ Latest migration verification run includes:
 - `pnpm --dir ui run test`
 - `pnpm --dir ui run test:e2e`
 - `pnpm --dir ui run test:e2e:tauri`
+- `pnpm --dir ui run test:e2e:tauri:soak -- --iterations 3`
 - `pnpm --dir ui run build`
 - `pnpm --dir ui run audit:bundle`
 - `pnpm run types:check`

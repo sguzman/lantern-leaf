@@ -17,7 +17,7 @@
 - [x] Use Material UI for component primitives and interactions.
 - [x] Use Tailwind for layout and spacing utilities.
 - [x] Use a single UI state store (Zustand) that calls typed backend commands.
-- [ ] Preserve all existing behavior before introducing UX changes.
+- [x] Preserve all existing behavior before introducing UX changes.
 
 **Roadmap**
 
@@ -160,7 +160,7 @@
 **Phase 14: Cutover And Decommission**
 
 - [x] P14-01 Run dual-track period where iced build remains available for fallback. (Both root iced path and Tauri path are continuously validated in CI.)
-- [ ] P14-02 Complete parity signoff checklist with explicit pass on all must-have behaviors. (In progress: runtime smoke now enforces EPUB/PDF/clipboard/calibre open success plus terminal lifecycle checks and full reader/TTS control coverage; remaining work is final soak duration and signoff bookkeeping.)
+- [x] P14-02 Complete parity signoff checklist with explicit pass on all must-have behaviors. (Completed with full checklist pass plus 3-iteration Tauri runtime soak and machine-readable soak report output.)
 - [x] P14-03 Switch default desktop target to Tauri app. (Root `pnpm dev`/`pnpm build` now target Tauri; legacy iced path remains explicit as `pnpm desktop:legacy` until decommission.)
 - [ ] P14-04 Remove iced UI modules only after parity and soak tests pass.
 - [ ] P14-05 Keep core interfaces stable for future GUI changes.
@@ -169,7 +169,7 @@
 
 - [ ] R-01 Large text rendering performance in WebView with per-sentence spans.
 - [ ] R-02 Highlight/scroll mismatch from mixed Rust vs DOM coordinate systems. (Mitigated with DOM-anchored reader logic plus Tauri-runner highlight-visibility checks under settings changes.)
-- [ ] R-03 Long-running TTS/PDF tasks outliving session context. (Mitigated with request-id stale-event guards, Tauri-runner smoke including starter/reader transitions, and paused-state runtime checks; keep open until broader soak.)
+- [ ] R-03 Long-running TTS/PDF tasks outliving session context. (Mitigated with request-id stale-event guards, Tauri-runner smoke including starter/reader transitions and paused-state runtime checks, plus repeatable Tauri soak automation; keep open until longer-duration soak history is established.)
 - [x] R-04 Type drift between Rust DTOs and TS interfaces.
 - [x] R-05 Styling conflicts between MUI and Tailwind resets/utilities.
 - [ ] R-06 Tauri permission/capability restrictions breaking filesystem/subprocess workflows. (Mitigated in part by root-aware config path resolution for pandoc/quack-check/calibre when running under `src-tauri` manifest context, plus cache-root override support to eliminate runtime cwd-dependent cache misses.)
