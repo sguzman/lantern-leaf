@@ -13,6 +13,9 @@ This project now has a dedicated Tauri-native smoke E2E path in addition to brow
 - Starts a WebDriver session with browser name `wry`.
 - Opens a real local text source.
 - Verifies reader open/close flow.
+- Verifies text-only/pretty toggle behavior.
+- Verifies settings/stats/TTS panel exclusivity.
+- Verifies sentence navigation updates TTS sentence position.
 - Verifies TTS toggle label transitions in the reader.
 
 ## Local Prerequisites

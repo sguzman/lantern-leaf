@@ -431,6 +431,7 @@ export function ReaderShell({
               startIcon={<ChevronLeftIcon />}
               onClick={() => void onPrevPage()}
               disabled={busy || reader.current_page === 0}
+              data-testid="reader-prev-page-button"
               sx={{ flexShrink: 0 }}
             >
               Prev Page
@@ -440,6 +441,7 @@ export function ReaderShell({
               endIcon={<ChevronRightIcon />}
               onClick={() => void onNextPage()}
               disabled={busy || reader.current_page + 1 >= reader.total_pages}
+              data-testid="reader-next-page-button"
               sx={{ flexShrink: 0 }}
             >
               Next Page
@@ -450,6 +452,7 @@ export function ReaderShell({
                   variant="outlined"
                   onClick={() => void onPrevSentence()}
                   disabled={busy}
+                  data-testid="reader-prev-sentence-button"
                   sx={{ flexShrink: 0 }}
                 >
                   Prev Sentence
@@ -458,6 +461,7 @@ export function ReaderShell({
                   variant="outlined"
                   onClick={() => void onNextSentence()}
                   disabled={busy}
+                  data-testid="reader-next-sentence-button"
                   sx={{ flexShrink: 0 }}
                 >
                   Next Sentence
@@ -485,6 +489,7 @@ export function ReaderShell({
                 variant={reader.text_only_mode ? "contained" : "outlined"}
                 onClick={() => void onToggleTextOnly()}
                 disabled={busy}
+                data-testid="reader-toggle-text-mode-button"
                 sx={{ flexShrink: 0 }}
               >
                 {reader.text_only_mode ? "Pretty Text" : "Text-only"}
@@ -496,6 +501,7 @@ export function ReaderShell({
                 startIcon={<TuneIcon />}
                 onClick={() => void onToggleSettingsPanel()}
                 disabled={busy}
+                data-testid="reader-toggle-settings-button"
                 sx={{ flexShrink: 0 }}
               >
                 Settings
@@ -506,6 +512,7 @@ export function ReaderShell({
                 variant={reader.panels.show_stats ? "contained" : "outlined"}
                 onClick={() => void onToggleStatsPanel()}
                 disabled={busy}
+                data-testid="reader-toggle-stats-button"
                 sx={{ flexShrink: 0 }}
               >
                 Show Stats
@@ -516,6 +523,7 @@ export function ReaderShell({
                 variant={reader.panels.show_tts ? "contained" : "outlined"}
                 onClick={() => void onToggleTtsPanel()}
                 disabled={busy}
+                data-testid="reader-toggle-tts-panel-button"
                 sx={{ flexShrink: 0 }}
               >
                 TTS Panel
@@ -574,6 +582,8 @@ export function ReaderShell({
                         type="button"
                         onClick={() => void onSentenceClick(idx)}
                         className="w-full rounded-lg border px-3 py-1.5 text-left transition-colors"
+                        data-testid={`reader-sentence-${idx}`}
+                        data-highlighted={highlighted ? "1" : "0"}
                         style={{
                           fontSize: `${readerTypography.fontSizePx}px`,
                           lineHeight: readerTypography.lineSpacing,
@@ -601,7 +611,7 @@ export function ReaderShell({
               <div className="w-full shrink-0 rounded-2xl border border-slate-200 p-3 lg:w-[360px]">
                 <Stack spacing={1.25}>
                   <Typography variant="subtitle1" fontWeight={700}>
-                    {panelTitle}
+                    <span data-testid="reader-panel-title">{panelTitle}</span>
                   </Typography>
                   <Divider />
 
@@ -725,10 +735,12 @@ export function ReaderShell({
                   {reader.panels.show_tts ? (
                     <Stack spacing={1.5}>
                       <Typography variant="caption" fontWeight={700}>
-                        State: {reader.tts.state} | Sentence:{" "}
-                        {reader.tts.current_sentence_idx !== null
-                          ? `${reader.tts.current_sentence_idx + 1}/${Math.max(1, reader.tts.sentence_count)}`
-                          : `0/${Math.max(1, reader.tts.sentence_count)}`}
+                        <span data-testid="reader-tts-state-summary">
+                          State: {reader.tts.state} | Sentence:{" "}
+                          {reader.tts.current_sentence_idx !== null
+                            ? `${reader.tts.current_sentence_idx + 1}/${Math.max(1, reader.tts.sentence_count)}`
+                            : `0/${Math.max(1, reader.tts.sentence_count)}`}
+                        </span>
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
                         Progress: {reader.tts.progress_pct.toFixed(3)}%
@@ -758,12 +770,22 @@ export function ReaderShell({
                           {playbackLabel}
                         </Button>
                         {ttsControlVisibility.showPlayButton ? (
-                          <Button variant="outlined" size="small" onClick={() => void onTtsPlay()}>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => void onTtsPlay()}
+                            data-testid="reader-tts-play-button"
+                          >
                             Play
                           </Button>
                         ) : null}
                         {ttsControlVisibility.showPauseButton ? (
-                          <Button variant="outlined" size="small" onClick={() => void onTtsPause()}>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => void onTtsPause()}
+                            data-testid="reader-tts-pause-button"
+                          >
                             Pause
                           </Button>
                         ) : null}
@@ -773,6 +795,7 @@ export function ReaderShell({
                             size="small"
                             onClick={() => void onTtsPlayFromPageStart()}
                             disabled={reader.tts.sentence_count === 0}
+                            data-testid="reader-tts-play-page-button"
                           >
                             Play Page
                           </Button>
@@ -783,6 +806,7 @@ export function ReaderShell({
                             size="small"
                             onClick={() => void onTtsPlayFromHighlight()}
                             disabled={!hasHighlightSentence}
+                            data-testid="reader-tts-play-highlight-button"
                           >
                             Play Highlight
                           </Button>
@@ -793,6 +817,7 @@ export function ReaderShell({
                             size="small"
                             onClick={() => void onTtsSeekPrev()}
                             disabled={!reader.tts.can_seek_prev}
+                            data-testid="reader-tts-prev-sentence-button"
                           >
                             Prev Sentence
                           </Button>
@@ -803,6 +828,7 @@ export function ReaderShell({
                             size="small"
                             onClick={() => void onTtsSeekNext()}
                             disabled={!reader.tts.can_seek_next}
+                            data-testid="reader-tts-next-sentence-button"
                           >
                             Next Sentence
                           </Button>
@@ -813,6 +839,7 @@ export function ReaderShell({
                             size="small"
                             onClick={() => void onTtsRepeatSentence()}
                             disabled={!hasHighlightSentence}
+                            data-testid="reader-tts-repeat-button"
                           >
                             Repeat
                           </Button>

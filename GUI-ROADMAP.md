@@ -159,7 +159,7 @@
 
 **Phase 14: Cutover And Decommission**
 
-- [ ] P14-01 Run dual-track period where iced build remains available for fallback.
+- [x] P14-01 Run dual-track period where iced build remains available for fallback. (Both root iced path and Tauri path are continuously validated in CI.)
 - [ ] P14-02 Complete parity signoff checklist with explicit pass on all must-have behaviors.
 - [ ] P14-03 Switch default desktop target to Tauri app.
 - [ ] P14-04 Remove iced UI modules only after parity and soak tests pass.

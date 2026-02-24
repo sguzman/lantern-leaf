@@ -90,6 +90,33 @@ async function waitForElement(driver, locator, timeoutMs = 20000) {
   throw new Error(`Timed out waiting for element ${locator.toString()} after ${timeoutMs}ms`);
 }
 
+async function waitForText(driver, locator, expectedText, timeoutMs = 10000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    try {
+      const value = (await driver.findElement(locator).getText()).trim();
+      if (value === expectedText) {
+        return value;
+      }
+    } catch {
+      // keep polling
+    }
+    await delay(200);
+  }
+  throw new Error(`Timed out waiting for ${locator.toString()} text "${expectedText}"`);
+}
+
+function parseSentencePosition(summaryText) {
+  const match = summaryText.match(/Sentence:\s*(\d+)\s*\/\s*(\d+)/);
+  if (!match) {
+    throw new Error(`Unable to parse sentence position from summary: ${summaryText}`);
+  }
+  return {
+    current: Number(match[1]),
+    total: Number(match[2])
+  };
+}
+
 test("tauri runner opens source and exercises core reader controls", async (t) => {
   const timeoutMs = 4 * 60 * 1000;
   if (typeof t.setTimeout === "function") {
@@ -107,7 +134,10 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
   const sourcePath = path.resolve(tmpDir, "tauri-e2e-source.txt");
   writeFileSync(
     sourcePath,
-    "This is a tauri e2e source file. It exists so the real runtime can open it.",
+    Array.from(
+      { length: 18 },
+      (_, idx) => `This is sentence number ${idx + 1} for tauri end-to-end coverage.`
+    ).join(" "),
     "utf8"
   );
 
@@ -157,11 +187,57 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
   );
   assert.ok(await closeSessionButton.isDisplayed(), "reader session should open");
 
-  const settingsButton = await waitForElement(
+  const textModeToggle = await waitForElement(
     driver,
-    By.xpath("//button[normalize-space()='Settings']")
+    By.css("[data-testid='reader-toggle-text-mode-button']")
   );
-  await settingsButton.click();
+  const textModeBefore = await textModeToggle.getText();
+  assert.equal(textModeBefore.toLowerCase(), "text-only");
+  await textModeToggle.click();
+  assert.equal((await textModeToggle.getText()).toLowerCase(), "pretty text");
+  await textModeToggle.click();
+  assert.equal((await textModeToggle.getText()).toLowerCase(), "text-only");
+
+  const statsToggle = await waitForElement(driver, By.css("[data-testid='reader-toggle-stats-button']"));
+  await statsToggle.click();
+  const panelTitleLocator = By.css("[data-testid='reader-panel-title']");
+  await waitForElement(driver, panelTitleLocator);
+  await waitForText(driver, panelTitleLocator, "Stats");
+
+  const settingsToggle = await waitForElement(
+    driver,
+    By.css("[data-testid='reader-toggle-settings-button']")
+  );
+  await settingsToggle.click();
+  await waitForText(driver, panelTitleLocator, "Settings");
+
+  const ttsPanelToggle = await waitForElement(
+    driver,
+    By.css("[data-testid='reader-toggle-tts-panel-button']")
+  );
+  await ttsPanelToggle.click();
+  try {
+    await waitForText(driver, panelTitleLocator, "TTS Options", 3000);
+  } catch {
+    // If settings and TTS are both toggled, hide settings then re-toggle TTS.
+    await settingsToggle.click();
+    await ttsPanelToggle.click();
+    await waitForText(driver, panelTitleLocator, "TTS Options", 6000);
+  }
+
+  const ttsSummary = await waitForElement(driver, By.css("[data-testid='reader-tts-state-summary']"));
+  const beforePosition = parseSentencePosition(await ttsSummary.getText());
+  const nextSentenceButton = await waitForElement(
+    driver,
+    By.css("[data-testid='reader-next-sentence-button']")
+  );
+  await nextSentenceButton.click();
+  const afterPosition = parseSentencePosition(await ttsSummary.getText());
+  assert.ok(
+    afterPosition.current > beforePosition.current,
+    `expected sentence position to move forward (before ${beforePosition.current}, after ${afterPosition.current})`
+  );
+  assert.ok(afterPosition.total >= beforePosition.total, "sentence total should remain stable");
 
   const ttsToggle = await waitForElement(driver, By.css("[data-testid='reader-tts-toggle-button']"));
   const beforeText = await ttsToggle.getText();
