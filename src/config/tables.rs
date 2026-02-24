@@ -15,6 +15,8 @@ pub(super) struct ConfigTables {
     #[serde(default)]
     logging: LoggingConfig,
     #[serde(default)]
+    storage: StorageConfig,
+    #[serde(default)]
     tts: TtsConfig,
     #[serde(default)]
     keybindings: KeybindingsConfig,
@@ -54,6 +56,7 @@ impl From<ConfigTables> for AppConfig {
             show_tts: tables.ui.show_tts,
             show_settings: tables.ui.show_settings,
             log_level: tables.logging.log_level,
+            cache_dir: tables.storage.cache_dir,
             tts_model_path: tables.tts.tts_model_path,
             tts_espeak_path: tables.tts.tts_espeak_path,
             tts_speed: tables.tts.tts_speed,
@@ -98,6 +101,9 @@ impl From<&AppConfig> for ConfigTables {
             },
             logging: LoggingConfig {
                 log_level: config.log_level,
+            },
+            storage: StorageConfig {
+                cache_dir: config.cache_dir.clone(),
             },
             tts: TtsConfig {
                 tts_model_path: config.tts_model_path.clone(),
@@ -239,6 +245,20 @@ impl Default for LoggingConfig {
     fn default() -> Self {
         LoggingConfig {
             log_level: defaults::default_log_level(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+struct StorageConfig {
+    #[serde(default = "defaults::default_cache_dir")]
+    cache_dir: String,
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        StorageConfig {
+            cache_dir: defaults::default_cache_dir(),
         }
     }
 }

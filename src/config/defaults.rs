@@ -76,6 +76,10 @@ pub(crate) fn default_log_level() -> crate::config::LogLevel {
     crate::config::LogLevel::Debug
 }
 
+pub(crate) fn default_cache_dir() -> String {
+    ".cache".to_string()
+}
+
 pub(crate) fn default_lines_per_page() -> usize {
     700
 }

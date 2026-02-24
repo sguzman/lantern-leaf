@@ -53,6 +53,8 @@ pub struct AppConfig {
     pub night_highlight: HighlightColor,
     #[serde(default = "crate::config::defaults::default_log_level")]
     pub log_level: LogLevel,
+    #[serde(default = "crate::config::defaults::default_cache_dir")]
+    pub cache_dir: String,
     #[serde(default = "crate::config::defaults::default_lines_per_page")]
     pub lines_per_page: usize,
     #[serde(default = "crate::config::defaults::default_pause_after_sentence")]
@@ -109,6 +111,7 @@ impl Default for AppConfig {
             day_highlight: crate::config::defaults::default_day_highlight(),
             night_highlight: crate::config::defaults::default_night_highlight(),
             log_level: crate::config::defaults::default_log_level(),
+            cache_dir: crate::config::defaults::default_cache_dir(),
             lines_per_page: crate::config::defaults::default_lines_per_page(),
             pause_after_sentence: crate::config::defaults::default_pause_after_sentence(),
             auto_scroll_tts: crate::config::defaults::default_auto_scroll_tts(),

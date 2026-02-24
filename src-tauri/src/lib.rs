@@ -260,6 +260,42 @@ fn bridge_error(code: &str, message: impl Into<String>) -> BridgeError {
     }
 }
 
+fn configure_cache_dir_from_config(config: &config::AppConfig, config_path: &Path) {
+    if std::env::var_os(cache::CACHE_DIR_ENV).is_some() {
+        return;
+    }
+
+    let configured = config.cache_dir.trim();
+    if configured.is_empty() {
+        return;
+    }
+
+    let candidate = PathBuf::from(configured);
+    let resolved = if candidate.is_absolute() {
+        candidate
+    } else {
+        config_path
+            .parent()
+            .map(|parent| parent.join(&candidate))
+            .unwrap_or(candidate)
+    };
+
+    if let Err(err) = fs::create_dir_all(&resolved) {
+        warn!(cache_dir = %resolved.display(), "Failed to create configured cache dir: {err}");
+        return;
+    }
+
+    // SAFETY: startup-time process env initialization before background worker threads are launched.
+    unsafe {
+        std::env::set_var(cache::CACHE_DIR_ENV, &resolved);
+    }
+
+    info!(
+        cache_dir = %resolved.display(),
+        "Configured cache root from config"
+    );
+}
+
 fn configure_cache_dir_from_workspace() {
     if std::env::var_os(cache::CACHE_DIR_ENV).is_some() {
         return;
@@ -1955,9 +1991,10 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     configure_linux_display_backend();
 
+    let config_path = app_config_path();
+    let startup_config = config::load_config(&config_path);
+    configure_cache_dir_from_config(&startup_config, &config_path);
     configure_cache_dir_from_workspace();
-
-    let startup_config = config::load_config(&app_config_path());
     let log_plugin = tauri_plugin_log::Builder::new()
         .level(log_level_to_filter(startup_config.log_level))
         .target(Target::new(TargetKind::Stdout))
