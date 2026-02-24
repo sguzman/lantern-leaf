@@ -42,7 +42,7 @@ log_level = "debug"
 cache_dir = ".cache"
 
 [tts]
-tts_model_path = "/usr/share/piper-voices/en/en_US/ryan/high/en_US-ryan-high.onnx"
+tts_model_path = "/home/admin/Music/models/piper/en-US/female/en_US-amy-medium.onnx"
 tts_espeak_path = "/usr/share"
 tts_speed = 2.5
 tts_volume = 1.0

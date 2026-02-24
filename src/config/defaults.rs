@@ -23,7 +23,7 @@ pub(crate) fn default_window_height() -> f32 {
 }
 
 pub(crate) fn default_tts_model() -> String {
-    "/usr/share/piper-voices/en/en_US/ryan/high/en_US-ryan-high.onnx".to_string()
+    "/home/admin/Music/models/piper/en-US/female/en_US-amy-medium.onnx".to_string()
 }
 
 pub(crate) fn default_tts_speed() -> f32 {
