@@ -723,7 +723,7 @@ fn pandoc_filter_path() -> Result<PathBuf> {
         return Ok(relative);
     }
 
-    let rooted = Path::new(env!("CARGO_MANIFEST_DIR")).join(PANDOC_FILTER_REL_PATH);
+    let rooted = project_root().join(PANDOC_FILTER_REL_PATH);
     if rooted.exists() {
         return Ok(rooted);
     }
@@ -765,7 +765,17 @@ fn quack_check_config_path() -> Result<PathBuf> {
 }
 
 fn project_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if manifest_dir.join("conf").exists() {
+        return manifest_dir;
+    }
+    if let Some(parent) = manifest_dir.parent() {
+        let parent = parent.to_path_buf();
+        if parent.join("conf").exists() {
+            return parent;
+        }
+    }
+    manifest_dir
 }
 
 fn quack_check_text_filename(config_path: &Path) -> Result<String> {

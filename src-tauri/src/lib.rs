@@ -1982,6 +1982,45 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_for_shutdown_persists_active_reader_housekeeping() {
+        let source = unique_temp_file("cleanup_housekeeping_source", "txt");
+        fs::write(
+            &source,
+            "Housekeeping sentence one. Housekeeping sentence two. Housekeeping sentence three.",
+        )
+        .expect("write source fixture");
+
+        let base_config = config::AppConfig::default();
+        let normalizer = normalizer::TextNormalizer::default();
+        let reader = session::load_session_for_source(source.clone(), &base_config, &normalizer)
+            .expect("load reader session");
+
+        let mut state = BackendState::new();
+        state.mode = UiMode::Reader;
+        state.active_source_path = Some(source.clone());
+        state.reader = Some(reader);
+
+        let cancelled = cleanup_for_shutdown(&mut state);
+
+        assert_eq!(cancelled, None);
+        assert!(matches!(state.mode, UiMode::Starter));
+        assert!(state.active_source_path.is_none());
+        assert!(state.reader.is_none());
+        assert!(!state.open_in_flight);
+
+        let bookmark = cache::load_bookmark(&source).expect("bookmark should be persisted");
+        assert_eq!(bookmark.page, 0);
+        let cached_config =
+            cache::load_epub_config(&source).expect("reader config should be persisted");
+        assert_eq!(cached_config.font_size, base_config.font_size);
+        assert_eq!(cached_config.lines_per_page, base_config.lines_per_page);
+
+        let cache_path = cache::hash_dir(&source);
+        let _ = fs::remove_file(&source);
+        let _ = fs::remove_dir_all(cache_path);
+    }
+
+    #[test]
     fn begin_open_request_rejects_duplicates_and_tracks_path() {
         let mut state = BackendState::new();
         let first_source = PathBuf::from("/tmp/first.epub");

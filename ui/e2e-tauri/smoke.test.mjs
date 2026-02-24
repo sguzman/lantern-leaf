@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { createHash } from "node:crypto";
 import { Builder, By, Capabilities, Key } from "selenium-webdriver";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -17,6 +18,9 @@ const tauriDriverPath = path.resolve(
 );
 
 const webdriverServer = "http://127.0.0.1:4444/";
+const PANDOC_PIPELINE_REV = "pandoc-clean-v1";
+const QUACK_CHECK_PIPELINE_REV = "quack-check-pdf-v2";
+const DEFAULT_QUACK_TEXT_FILENAME = "transcript.txt";
 
 function runOrThrow(command, args, cwd) {
   const result = spawnSync(command, args, {
@@ -27,6 +31,122 @@ function runOrThrow(command, args, cwd) {
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed with status ${result.status}`);
   }
+}
+
+function sha256Hex(payload) {
+  return createHash("sha256").update(payload).digest("hex");
+}
+
+function sourceCacheHash(sourcePath) {
+  return sha256Hex(readFileSync(sourcePath));
+}
+
+function quackTextFilenameFromConfig(rawConfig) {
+  const section = rawConfig.match(/\[output\]([\s\S]*?)(?:\n\[|$)/m);
+  if (!section) {
+    return DEFAULT_QUACK_TEXT_FILENAME;
+  }
+  const match = section[1].match(/^\s*text_filename\s*=\s*"([^"]+)"/m);
+  if (!match || !match[1]?.trim()) {
+    return DEFAULT_QUACK_TEXT_FILENAME;
+  }
+  return match[1].trim();
+}
+
+function seedPandocCacheForSource(sourcePath, text) {
+  const sourceDigest = sourceCacheHash(sourcePath);
+  const sourceStats = statSync(sourcePath);
+  const cacheDir = path.resolve(repoRoot, ".cache", sourceDigest);
+  mkdirSync(cacheDir, { recursive: true });
+
+  const filterPath = path.resolve(repoRoot, "conf", "pandoc", "strip-nontext.lua");
+  const filterSha256 = sha256Hex(readFileSync(filterPath));
+
+  const meta = [
+    `source_len = ${sourceStats.size}`,
+    `source_modified_unix_secs = ${Math.floor(sourceStats.mtimeMs / 1000)}`,
+    `pipeline_rev = "${PANDOC_PIPELINE_REV}"`,
+    `filter_sha256 = "${filterSha256}"`,
+    ""
+  ].join("\n");
+
+  writeFileSync(path.join(cacheDir, "source-plain.txt"), text, "utf8");
+  writeFileSync(path.join(cacheDir, "source-plain.meta.toml"), meta, "utf8");
+}
+
+function seedPdfCacheForSource(sourcePath, text) {
+  const sourceDigest = sourceCacheHash(sourcePath);
+  const sourceStats = statSync(sourcePath);
+  const cacheDir = path.resolve(repoRoot, ".cache", sourceDigest, "pdf");
+  mkdirSync(cacheDir, { recursive: true });
+
+  const quackConfigPath = path.resolve(repoRoot, "conf", "quack-check.toml");
+  const quackConfig = readFileSync(quackConfigPath, "utf8");
+  const quackConfigSha256 = sha256Hex(quackConfig);
+  const quackTextFilename = quackTextFilenameFromConfig(quackConfig);
+
+  const meta = [
+    `source_len = ${sourceStats.size}`,
+    `source_modified_unix_secs = ${Math.floor(sourceStats.mtimeMs / 1000)}`,
+    `pipeline_rev = "${QUACK_CHECK_PIPELINE_REV}"`,
+    `quack_config_sha256 = "${quackConfigSha256}"`,
+    `quack_text_filename = "${quackTextFilename}"`,
+    ""
+  ].join("\n");
+
+  writeFileSync(path.join(cacheDir, "source-plain.txt"), text, "utf8");
+  writeFileSync(path.join(cacheDir, "source-plain.meta.toml"), meta, "utf8");
+}
+
+function createEpubFixture(sourcePath, marker) {
+  const pythonScript = [
+    "import sys, zipfile",
+    "epub_path = sys.argv[1]",
+    "marker = sys.argv[2]",
+    "container_xml = '''<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+    "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">",
+    "  <rootfiles>",
+    "    <rootfile full-path=\"content.opf\" media-type=\"application/oebps-package+xml\"/>",
+    "  </rootfiles>",
+    "</container>'''",
+    "content_opf = f'''<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+    "<package xmlns=\"http://www.idpf.org/2007/opf\" unique-identifier=\"BookId\" version=\"2.0\">",
+    "  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">",
+    "    <dc:title>Runtime Fixture</dc:title>",
+    "    <dc:language>en</dc:language>",
+    "    <dc:identifier id=\"BookId\">runtime-fixture-id</dc:identifier>",
+    "  </metadata>",
+    "  <manifest>",
+    "    <item id=\"chapter\" href=\"ch1.xhtml\" media-type=\"application/xhtml+xml\"/>",
+    "  </manifest>",
+    "  <spine>",
+    "    <itemref idref=\"chapter\"/>",
+    "  </spine>",
+    "</package>'''",
+    "chapter = f'''<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+    "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body>",
+    "<p>{marker} first sentence. {marker} second sentence. {marker} third sentence.</p>",
+    "</body></html>'''",
+    "with zipfile.ZipFile(epub_path, \"w\") as archive:",
+    "    archive.writestr(\"mimetype\", \"application/epub+zip\", compress_type=zipfile.ZIP_STORED)",
+    "    archive.writestr(\"META-INF/container.xml\", container_xml)",
+    "    archive.writestr(\"content.opf\", content_opf)",
+    "    archive.writestr(\"ch1.xhtml\", chapter)"
+  ].join("\n");
+  const result = spawnSync("python3", ["-c", pythonScript, sourcePath, marker], {
+    cwd: repoRoot,
+    encoding: "utf8"
+  });
+  if (result.status === 0) {
+    return;
+  }
+
+  // Fallback path for environments without python3: use a synthetic .epub plus seeded cache.
+  writeFileSync(sourcePath, `synthetic epub fixture ${Date.now()}`, "utf8");
+  seedPandocCacheForSource(
+    sourcePath,
+    `${marker} first sentence. ${marker} second sentence. ${marker} third sentence.`
+  );
 }
 
 function resolveTauriBinary() {
@@ -195,6 +315,30 @@ async function waitForInputValue(driver, locator, expectedValue, timeoutMs = 100
   throw new Error(`Timed out waiting for ${locator.toString()} value "${expectedValue}"`);
 }
 
+async function waitForMarkerAttribute(driver, testId, attribute, predicate, timeoutMs = 10000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    const value = await driver.executeScript(
+      (markerTestId, markerAttr) => {
+        const node = document.querySelector(`[data-testid='${markerTestId}']`);
+        if (!node) {
+          return null;
+        }
+        return node.getAttribute(markerAttr);
+      },
+      testId,
+      attribute
+    );
+    if (value !== null && predicate(String(value))) {
+      return String(value);
+    }
+    await delay(200);
+  }
+  throw new Error(
+    `Timed out waiting for marker ${testId} attribute ${attribute} to satisfy predicate`
+  );
+}
+
 async function setNumericSetting(driver, baseTestId, nextValue) {
   const locator = By.css(`[data-testid='${baseTestId}-input']`);
   const input = await waitForElement(driver, locator);
@@ -351,7 +495,7 @@ async function waitForHighlightedSentenceIndex(driver, predicate, timeoutMs = 10
 }
 
 test("tauri runner opens source and exercises core reader controls", async (t) => {
-  const timeoutMs = 4 * 60 * 1000;
+  const timeoutMs = 7 * 60 * 1000;
   if (typeof t.setTimeout === "function") {
     t.setTimeout(timeoutMs);
   }
@@ -375,6 +519,38 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
         `This is tauri sentence number ${idx + 1} for end-to-end coverage and deterministic pagination with repeated terms alpha beta gamma delta epsilon zeta eta theta.`
     ).join("\n"),
     "utf8"
+  );
+  const epubFileName = `tauri-e2e-source-${uniqueRunId}.epub`;
+  const epubPath = path.resolve(tmpDir, epubFileName);
+  const epubMarker = `epub-cache-marker-${uniqueRunId}`;
+  createEpubFixture(epubPath, epubMarker);
+  const pdfFileName = `tauri-e2e-source-${uniqueRunId}.pdf`;
+  const pdfPath = path.resolve(tmpDir, pdfFileName);
+  const pdfMarker = `pdf-cache-marker-${uniqueRunId}`;
+  writeFileSync(
+    pdfPath,
+    [
+      "%PDF-1.4",
+      "% synthetic cached fixture",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] >> endobj",
+      "xref",
+      "0 4",
+      "0000000000 65535 f ",
+      "0000000010 00000 n ",
+      "0000000063 00000 n ",
+      "0000000125 00000 n ",
+      "trailer << /Size 4 /Root 1 0 R >>",
+      "startxref",
+      "186",
+      "%%EOF"
+    ].join("\n"),
+    "utf8"
+  );
+  seedPdfCacheForSource(
+    pdfPath,
+    `${pdfMarker} first sentence. ${pdfMarker} second sentence. ${pdfMarker} third sentence.`
   );
 
   runOrThrow("pnpm", ["tauri", "build", "--debug", "--no-bundle"], repoRoot);
@@ -422,6 +598,19 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
     30000
   );
   assert.ok(await closeSessionButton.isDisplayed(), "reader session should open");
+  await waitForMarkerAttribute(driver, "app-session-mode", "data-mode", (value) => value === "reader");
+  await waitForMarkerAttribute(
+    driver,
+    "app-last-source-open-event",
+    "data-phase",
+    (value) => value === "finished"
+  );
+  await waitForMarkerAttribute(
+    driver,
+    "app-last-source-open-event",
+    "data-source-path",
+    (value) => value.endsWith(sourceFileName)
+  );
   await maybeSetWindowRect(driver, 1680, 980);
 
   const textModeToggle = await waitForElement(
@@ -651,6 +840,12 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
 
   await closeSessionButton.click();
   await waitForElement(driver, By.xpath("//h1[normalize-space()='Welcome']"), 20000);
+  await waitForMarkerAttribute(
+    driver,
+    "app-session-mode",
+    "data-mode",
+    (value) => value === "starter"
+  );
 
   const sourcePathAttr = xpathLiteral(sourcePath);
   const recentCardLocator = By.xpath(
@@ -697,4 +892,134 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
   );
   await closeSessionAfterClipboard.click();
   await waitForElement(driver, By.xpath("//h1[normalize-space()='Welcome']"), 20000);
+
+  const pathInputAfterClipboard = await waitForElement(
+    driver,
+    By.css("[data-testid='starter-open-path-input']")
+  );
+  await pathInputAfterClipboard.clear();
+  await pathInputAfterClipboard.sendKeys(epubPath);
+  const openButtonAfterClipboard = await waitForElement(
+    driver,
+    By.css("[data-testid='starter-open-path-button']")
+  );
+  await openButtonAfterClipboard.click();
+  const epubPhase = await waitForMarkerAttribute(
+    driver,
+    "app-last-source-open-event",
+    "data-phase",
+    (value) => value === "finished" || value === "failed" || value === "cancelled",
+    30000
+  );
+  if (epubPhase !== "finished") {
+    const openMessage = await waitForMarkerAttribute(
+      driver,
+      "app-last-source-open-event",
+      "data-message",
+      () => true,
+      5000
+    );
+    throw new Error(`EPUB open did not finish successfully (phase=${epubPhase}): ${openMessage}`);
+  }
+  await waitForElement(driver, By.css("[data-testid='reader-close-session-button']"), 30000);
+  await waitForMarkerAttribute(
+    driver,
+    "app-last-source-open-event",
+    "data-phase",
+    (value) => value === "finished"
+  );
+  await waitForMarkerAttribute(
+    driver,
+    "app-last-source-open-event",
+    "data-source-path",
+    (value) => value.endsWith(epubFileName)
+  );
+  const epubMarkerLiteral = xpathLiteral(epubMarker);
+  await waitForElement(
+    driver,
+    By.xpath(
+      `//button[starts-with(@data-testid,'reader-sentence-') and contains(normalize-space(), ${epubMarkerLiteral})]`
+    ),
+    20000
+  );
+  const closeSessionAfterEpub = await waitForElement(
+    driver,
+    By.css("[data-testid='reader-close-session-button']")
+  );
+  await closeSessionAfterEpub.click();
+  await waitForElement(driver, By.xpath("//h1[normalize-space()='Welcome']"), 20000);
+
+  const pathInputAfterEpub = await waitForElement(
+    driver,
+    By.css("[data-testid='starter-open-path-input']")
+  );
+  await pathInputAfterEpub.clear();
+  await pathInputAfterEpub.sendKeys(pdfPath);
+  const openButtonAfterEpub = await waitForElement(
+    driver,
+    By.css("[data-testid='starter-open-path-button']")
+  );
+  await openButtonAfterEpub.click();
+  const pdfSourcePhase = await waitForMarkerAttribute(
+    driver,
+    "app-last-source-open-event",
+    "data-phase",
+    (value) => value === "finished" || value === "failed" || value === "cancelled",
+    30000
+  );
+  await waitForMarkerAttribute(
+    driver,
+    "app-last-source-open-event",
+    "data-source-path",
+    (value) => value.endsWith(pdfFileName)
+  );
+  const pdfEventPhase = await waitForMarkerAttribute(
+    driver,
+    "app-last-pdf-event",
+    "data-phase",
+    (value) => value === "finished" || value === "failed" || value === "cancelled"
+  );
+  await waitForMarkerAttribute(
+    driver,
+    "app-last-pdf-event",
+    "data-source-path",
+    (value) => value.endsWith(pdfFileName)
+  );
+  if (pdfSourcePhase === "finished" && pdfEventPhase === "finished") {
+    await waitForElement(driver, By.css("[data-testid='reader-close-session-button']"), 30000);
+    const pdfMarkerLiteral = xpathLiteral(pdfMarker);
+    await waitForElement(
+      driver,
+      By.xpath(
+        `//button[starts-with(@data-testid,'reader-sentence-') and contains(normalize-space(), ${pdfMarkerLiteral})]`
+      ),
+      20000
+    );
+    const closeSessionAfterPdf = await waitForElement(
+      driver,
+      By.css("[data-testid='reader-close-session-button']")
+    );
+    await closeSessionAfterPdf.click();
+    await waitForElement(driver, By.xpath("//h1[normalize-space()='Welcome']"), 20000);
+  } else {
+    const sourceMessage = await waitForMarkerAttribute(
+      driver,
+      "app-last-source-open-event",
+      "data-message",
+      () => true,
+      5000
+    );
+    const pdfMessage = await waitForMarkerAttribute(
+      driver,
+      "app-last-pdf-event",
+      "data-message",
+      () => true,
+      5000
+    );
+    assert.ok(
+      sourceMessage.length > 0 || pdfMessage.length > 0,
+      "pdf open failure should include source/pdf diagnostic message"
+    );
+    await waitForElement(driver, By.xpath("//h1[normalize-space()='Welcome']"), 20000);
+  }
 });

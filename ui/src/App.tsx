@@ -232,6 +232,27 @@ export default function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <main className="app-root min-h-screen">
+        <div
+          data-testid="app-session-mode"
+          data-mode={session?.mode ?? "unknown"}
+          style={{ display: "none" }}
+        />
+        <div
+          data-testid="app-last-source-open-event"
+          data-phase={sourceOpenEvent?.phase ?? "none"}
+          data-request-id={sourceOpenEvent?.request_id ?? 0}
+          data-source-path={sourceOpenEvent?.source_path ?? ""}
+          data-message={sourceOpenEvent?.message ?? ""}
+          style={{ display: "none" }}
+        />
+        <div
+          data-testid="app-last-pdf-event"
+          data-phase={pdfTranscriptionEvent?.phase ?? "none"}
+          data-request-id={pdfTranscriptionEvent?.request_id ?? 0}
+          data-source-path={pdfTranscriptionEvent?.source_path ?? ""}
+          data-message={pdfTranscriptionEvent?.message ?? ""}
+          style={{ display: "none" }}
+        />
         <Container maxWidth={false} className="px-2 py-4 md:px-4 md:py-6">
           <Stack spacing={2} alignItems="center">
             {loadingBootstrap ? <CircularProgress /> : null}
