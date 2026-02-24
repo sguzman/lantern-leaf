@@ -1,3 +1,4 @@
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -584,6 +585,21 @@ fn resolve_source_path(path: &str) -> Result<PathBuf, BridgeError> {
     })
 }
 
+fn thumbnail_path_to_data_url(path: &Path) -> Option<String> {
+    let bytes = fs::read(path).ok()?;
+    let encoded = BASE64_STANDARD.encode(bytes);
+    let mime = match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+    {
+        Some(ext) if ext == "png" => "image/png",
+        Some(ext) if ext == "webp" => "image/webp",
+        _ => "image/jpeg",
+    };
+    Some(format!("data:{};base64,{}", mime, encoded))
+}
+
 fn map_calibre_book(book: calibre::CalibreBook) -> CalibreBookDto {
     CalibreBookDto {
         id: book.id,
@@ -595,7 +611,8 @@ fn map_calibre_book(book: calibre::CalibreBook) -> CalibreBookDto {
         source_path: book.path.map(|path| path.to_string_lossy().to_string()),
         cover_thumbnail: book
             .cover_thumbnail
-            .map(|path| path.to_string_lossy().to_string()),
+            .as_deref()
+            .and_then(thumbnail_path_to_data_url),
     }
 }
 
@@ -1571,7 +1588,8 @@ fn recent_list(limit: Option<usize>) -> Vec<RecentBook> {
             display_title: recent.display_title,
             thumbnail_path: recent
                 .thumbnail_path
-                .map(|thumb| thumb.to_string_lossy().to_string()),
+                .as_deref()
+                .and_then(thumbnail_path_to_data_url),
             last_opened_unix_secs: recent.last_opened_unix_secs,
         })
         .collect()
