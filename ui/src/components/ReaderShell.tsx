@@ -451,48 +451,49 @@ const ReaderQuickActions = memo(function ReaderQuickActions({
         }}
       >
         <Stack direction="column" spacing={1} alignItems="flex-end">
-          <Stack
-            spacing={1}
-            alignItems="flex-end"
-            sx={{
-              opacity: open ? 1 : 0,
-              transform: open ? "translateY(0)" : "translateY(4px)",
-              pointerEvents: open ? "auto" : "none",
-              transition: "opacity 120ms ease-out, transform 120ms ease-out"
-            }}
-          >
-            {actions.map((action) => (
-              <Stack key={action.key} direction="row" spacing={1} alignItems="center">
-                <Paper
-                  elevation={3}
-                  sx={{
-                    px: 1.15,
-                    py: 0.45,
-                    bgcolor: "#ffffff",
-                    color: "#0f172a",
-                    border: "1px solid #cbd5e1",
-                    borderRadius: 1.25
-                  }}
-                >
-                  <Typography variant="caption" fontWeight={700}>
-                    {action.label}
-                  </Typography>
-                </Paper>
-                <Fab
-                  size="small"
-                  color={action.active ? "primary" : "default"}
-                  onClick={() => {
-                    setOpen(false);
-                    void action.onClick();
-                  }}
-                  disabled={busy}
-                  data-testid={`reader-speed-dial-${action.key}`}
-                >
-                  {action.icon}
-                </Fab>
-              </Stack>
-            ))}
-          </Stack>
+          {open ? (
+            <Stack
+              spacing={1}
+              alignItems="flex-end"
+              sx={{
+                opacity: 1,
+                transform: "translateY(0)",
+                transition: "opacity 120ms ease-out, transform 120ms ease-out"
+              }}
+            >
+              {actions.map((action) => (
+                <Stack key={action.key} direction="row" spacing={1} alignItems="center">
+                  <Paper
+                    elevation={3}
+                    sx={{
+                      px: 1.15,
+                      py: 0.45,
+                      bgcolor: "#ffffff",
+                      color: "#0f172a",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: 1.25
+                    }}
+                  >
+                    <Typography variant="caption" fontWeight={700}>
+                      {action.label}
+                    </Typography>
+                  </Paper>
+                  <Fab
+                    size="small"
+                    color={action.active ? "primary" : "default"}
+                    onClick={() => {
+                      setOpen(false);
+                      void action.onClick();
+                    }}
+                    disabled={busy}
+                    data-testid={`reader-speed-dial-${action.key}`}
+                  >
+                    {action.icon}
+                  </Fab>
+                </Stack>
+              ))}
+            </Stack>
+          ) : null}
 
           <Fab
             size="small"
