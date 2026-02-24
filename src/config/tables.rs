@@ -44,6 +44,7 @@ impl From<ConfigTables> for AppConfig {
             pause_after_sentence: tables.reading_behavior.pause_after_sentence,
             auto_scroll_tts: tables.reading_behavior.auto_scroll_tts,
             center_spoken_sentence: tables.reading_behavior.center_spoken_sentence,
+            tts_pause_resume_behavior: tables.reading_behavior.tts_pause_resume_behavior,
             key_toggle_play_pause: tables.keybindings.toggle_play_pause,
             key_safe_quit: tables.keybindings.safe_quit,
             key_next_sentence: tables.keybindings.next_sentence,
@@ -94,6 +95,7 @@ impl From<&AppConfig> for ConfigTables {
                 pause_after_sentence: config.pause_after_sentence,
                 auto_scroll_tts: config.auto_scroll_tts,
                 center_spoken_sentence: config.center_spoken_sentence,
+                tts_pause_resume_behavior: config.tts_pause_resume_behavior,
             },
             ui: UiConfig {
                 show_tts: config.show_tts,
@@ -206,6 +208,8 @@ struct ReadingBehaviorConfig {
     auto_scroll_tts: bool,
     #[serde(default = "defaults::default_center_spoken_sentence")]
     center_spoken_sentence: bool,
+    #[serde(default = "defaults::default_tts_pause_resume_behavior")]
+    tts_pause_resume_behavior: super::models::TtsPauseResumeBehavior,
 }
 
 impl Default for ReadingBehaviorConfig {
@@ -214,6 +218,7 @@ impl Default for ReadingBehaviorConfig {
             pause_after_sentence: defaults::default_pause_after_sentence(),
             auto_scroll_tts: defaults::default_auto_scroll_tts(),
             center_spoken_sentence: defaults::default_center_spoken_sentence(),
+            tts_pause_resume_behavior: defaults::default_tts_pause_resume_behavior(),
         }
     }
 }

@@ -30,6 +30,7 @@ height = 768.0
 pause_after_sentence = 0.06
 auto_scroll_tts = true
 center_spoken_sentence = true
+tts_pause_resume_behavior = "resume_from_pause_point"
 
 [ui]
 show_tts = true

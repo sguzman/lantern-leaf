@@ -96,6 +96,10 @@ pub(crate) fn default_center_spoken_sentence() -> bool {
     true
 }
 
+pub(crate) fn default_tts_pause_resume_behavior() -> crate::config::TtsPauseResumeBehavior {
+    crate::config::TtsPauseResumeBehavior::ResumeFromPausePoint
+}
+
 pub(crate) fn default_key_toggle_play_pause() -> String {
     "space".to_string()
 }

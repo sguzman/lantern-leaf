@@ -10,4 +10,6 @@ mod models;
 mod tables;
 
 pub use io::{load_config, parse_config, serialize_config};
-pub use models::{AppConfig, FontFamily, FontWeight, HighlightColor, LogLevel, ThemeMode};
+pub use models::{
+    AppConfig, FontFamily, FontWeight, HighlightColor, LogLevel, ThemeMode, TtsPauseResumeBehavior,
+};

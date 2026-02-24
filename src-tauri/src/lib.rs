@@ -2,7 +2,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_log::{Target, TargetKind, log::LevelFilter};
@@ -180,6 +181,13 @@ struct BridgeError {
 struct TtsRequestRuntime {
     request_id: u64,
     cancel_token: cancellation::CancellationToken,
+    pause_requested: Arc<AtomicBool>,
+}
+
+impl TtsRequestRuntime {
+    fn set_paused(&self, paused: bool) {
+        self.pause_requested.store(paused, Ordering::SeqCst);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -973,6 +981,7 @@ fn run_tts_runtime_loop(
     app: tauri::AppHandle,
     runtime_request_id: u64,
     cancel_token: cancellation::CancellationToken,
+    pause_requested: Arc<AtomicBool>,
 ) {
     let mut engine: Option<tts::TtsEngine> = None;
     loop {
@@ -1065,13 +1074,37 @@ fn run_tts_runtime_loop(
         let sentence_durations = playback.sentence_durations().to_vec();
         let mut continue_playback = true;
         for duration in sentence_durations {
-            let sentence_deadline = Instant::now() + duration.saturating_add(plan.pause_after);
-            while Instant::now() < sentence_deadline {
+            let mut remaining = duration.saturating_add(plan.pause_after);
+            let mut last_tick = Instant::now();
+            loop {
                 if cancel_token.is_cancelled() {
                     playback.stop();
                     clear_tts_request_if_current(&app, runtime_request_id);
                     return;
                 }
+
+                if pause_requested.load(Ordering::SeqCst) {
+                    if !playback.is_paused() {
+                        playback.pause();
+                    }
+                    last_tick = Instant::now();
+                    std::thread::sleep(TTS_PROGRESS_POLL_INTERVAL);
+                    continue;
+                }
+
+                if playback.is_paused() {
+                    playback.play();
+                    last_tick = Instant::now();
+                }
+
+                let now = Instant::now();
+                let elapsed = now.saturating_duration_since(last_tick);
+                last_tick = now;
+
+                if elapsed >= remaining {
+                    break;
+                }
+                remaining = remaining.saturating_sub(elapsed);
                 std::thread::sleep(TTS_PROGRESS_POLL_INTERVAL);
             }
 
@@ -1114,14 +1147,16 @@ fn sync_tts_runtime_after_reader_change(
         cancel_tts_request(&mut guard);
         let request_id = allocate_request_id(&mut guard);
         let cancel_token = cancellation::CancellationToken::new();
+        let pause_requested = Arc::new(AtomicBool::new(false));
         guard.tts_request = Some(TtsRequestRuntime {
             request_id,
             cancel_token: cancel_token.clone(),
+            pause_requested: pause_requested.clone(),
         });
-        Some((request_id, cancel_token, plan))
+        Some((request_id, cancel_token, pause_requested, plan))
     };
 
-    if let Some((request_id, cancel_token, plan)) = maybe_runtime {
+    if let Some((request_id, cancel_token, pause_requested, plan)) = maybe_runtime {
         info!(
             request_id,
             page = plan.page + 1,
@@ -1131,7 +1166,7 @@ fn sync_tts_runtime_after_reader_change(
         );
         let app_handle = app.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            run_tts_runtime_loop(app_handle, request_id, cancel_token);
+            run_tts_runtime_loop(app_handle, request_id, cancel_token, pause_requested);
         });
     }
 }
@@ -1150,12 +1185,12 @@ fn should_sync_tts_after_reader_command(command: &session::SessionCommand) -> bo
     }
 }
 
-fn apply_reader_command(
+fn apply_reader_command_with_sync(
     app: &tauri::AppHandle,
     state: &State<'_, Mutex<BackendState>>,
     command: session::SessionCommand,
+    should_sync_tts: bool,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    let should_sync_tts = should_sync_tts_after_reader_command(&command);
     let action = command.action();
     let (snapshot, request_id) = {
         let mut guard = state
@@ -1177,6 +1212,15 @@ fn apply_reader_command(
         sync_tts_runtime_after_reader_change(app, state);
     }
     Ok(snapshot)
+}
+
+fn apply_reader_command(
+    app: &tauri::AppHandle,
+    state: &State<'_, Mutex<BackendState>>,
+    command: session::SessionCommand,
+) -> Result<session::ReaderSnapshot, BridgeError> {
+    let should_sync_tts = should_sync_tts_after_reader_command(&command);
+    apply_reader_command_with_sync(app, state, command, should_sync_tts)
 }
 
 fn apply_panel_toggle<F>(
@@ -1746,7 +1790,40 @@ fn reader_tts_play(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
-    apply_reader_command(&app, &state, session::SessionCommand::TtsPlay)
+    let mut should_sync_tts = true;
+    {
+        let mut guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        let normalizer = guard.normalizer.clone();
+        let panels = guard.panels;
+        let behavior = guard
+            .reader
+            .as_ref()
+            .map(|reader| reader.config.tts_pause_resume_behavior)
+            .unwrap_or_default();
+
+        let paused = guard
+            .reader
+            .as_mut()
+            .map(|reader| {
+                reader.snapshot(panels, &normalizer).tts.state == session::TtsPlaybackState::Paused
+            })
+            .unwrap_or(false);
+
+        if behavior == config::TtsPauseResumeBehavior::ResumeFromPausePoint && paused {
+            if let Some(runtime) = guard.tts_request.as_ref() {
+                runtime.set_paused(false);
+                should_sync_tts = false;
+            }
+        }
+    }
+    apply_reader_command_with_sync(
+        &app,
+        &state,
+        session::SessionCommand::TtsPlay,
+        should_sync_tts,
+    )
 }
 
 #[tauri::command]
@@ -1758,9 +1835,18 @@ fn reader_tts_pause(
         let mut guard = state
             .lock()
             .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-        cancel_tts_request(&mut guard);
+        let behavior = guard
+            .reader
+            .as_ref()
+            .map(|reader| reader.config.tts_pause_resume_behavior)
+            .unwrap_or_default();
+        if behavior == config::TtsPauseResumeBehavior::RestartSentence {
+            cancel_tts_request(&mut guard);
+        } else if let Some(runtime) = guard.tts_request.as_ref() {
+            runtime.set_paused(true);
+        }
     }
-    apply_reader_command(&app, &state, session::SessionCommand::TtsPause)
+    apply_reader_command_with_sync(&app, &state, session::SessionCommand::TtsPause, false)
 }
 
 #[tauri::command]
@@ -1768,24 +1854,51 @@ fn reader_tts_toggle_play_pause(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
+    let mut should_sync_tts = true;
     {
         let mut guard = state
             .lock()
             .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
         let normalizer = guard.normalizer.clone();
         let panels = guard.panels;
-        let should_cancel = guard
+        let behavior = guard
+            .reader
+            .as_ref()
+            .map(|reader| reader.config.tts_pause_resume_behavior)
+            .unwrap_or_default();
+
+        let tts_state = guard
             .reader
             .as_mut()
-            .map(|reader| {
-                reader.snapshot(panels, &normalizer).tts.state == session::TtsPlaybackState::Playing
-            })
-            .unwrap_or(false);
-        if should_cancel {
-            cancel_tts_request(&mut guard);
+            .map(|reader| reader.snapshot(panels, &normalizer).tts.state)
+            .unwrap_or(session::TtsPlaybackState::Idle);
+
+        match tts_state {
+            session::TtsPlaybackState::Playing => {
+                if behavior == config::TtsPauseResumeBehavior::RestartSentence {
+                    cancel_tts_request(&mut guard);
+                } else if let Some(runtime) = guard.tts_request.as_ref() {
+                    runtime.set_paused(true);
+                }
+                should_sync_tts = false;
+            }
+            session::TtsPlaybackState::Paused => {
+                if behavior == config::TtsPauseResumeBehavior::ResumeFromPausePoint {
+                    if let Some(runtime) = guard.tts_request.as_ref() {
+                        runtime.set_paused(false);
+                        should_sync_tts = false;
+                    }
+                }
+            }
+            session::TtsPlaybackState::Idle => {}
         }
     }
-    apply_reader_command(&app, &state, session::SessionCommand::TtsTogglePlayPause)
+    apply_reader_command_with_sync(
+        &app,
+        &state,
+        session::SessionCommand::TtsTogglePlayPause,
+        should_sync_tts,
+    )
 }
 
 #[tauri::command]
@@ -2787,6 +2900,7 @@ mod tests {
         state.tts_request = Some(TtsRequestRuntime {
             request_id: 99,
             cancel_token: tts_token.clone(),
+            pause_requested: Arc::new(AtomicBool::new(false)),
         });
 
         let _ = cleanup_for_shutdown(&mut state);

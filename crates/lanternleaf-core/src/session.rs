@@ -1103,6 +1103,7 @@ pub fn load_session_for_source_with_cancel(
         overrides.tts_espeak_path = base_config.tts_espeak_path.clone();
         overrides.tts_threads = base_config.tts_threads;
         overrides.tts_progress_log_interval_secs = base_config.tts_progress_log_interval_secs;
+        overrides.tts_pause_resume_behavior = base_config.tts_pause_resume_behavior;
         overrides.key_toggle_play_pause = base_config.key_toggle_play_pause.clone();
         overrides.key_safe_quit = base_config.key_safe_quit.clone();
         overrides.key_next_sentence = base_config.key_next_sentence.clone();
