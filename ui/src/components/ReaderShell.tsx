@@ -11,11 +11,11 @@ import TextFieldsIcon from "@mui/icons-material/TextFields";
 import TuneIcon from "@mui/icons-material/Tune";
 import QueryStatsIcon from "@mui/icons-material/QueryStats";
 import {
-  Backdrop,
   Box,
   Button,
   Card,
   CardContent,
+  ClickAwayListener,
   Divider,
   Fab,
   FormControl,
@@ -441,60 +441,58 @@ const ReaderQuickActions = memo(function ReaderQuickActions({
   const close = useCallback(() => setOpen(false), []);
 
   return (
-    <>
-      <Backdrop
-        open={open}
-        onClick={close}
-        transitionDuration={0}
-        sx={{
-          zIndex: (theme) => theme.zIndex.modal,
-          bgcolor: "rgba(15, 23, 42, 0.44)"
-        }}
-      />
-
+    <ClickAwayListener onClickAway={close}>
       <Box
         sx={{
           position: "fixed",
           top: 16,
           right: 16,
-          zIndex: (theme) => theme.zIndex.modal + 1,
-          pointerEvents: "none"
+          zIndex: (theme) => theme.zIndex.modal + 1
         }}
       >
-        <Stack direction="column" spacing={1} alignItems="flex-end" sx={{ pointerEvents: "auto" }}>
-          {open
-            ? actions.map((action) => (
-                <Stack key={action.key} direction="row" spacing={1} alignItems="center">
-                  <Paper
-                    elevation={3}
-                    sx={{
-                      px: 1.15,
-                      py: 0.45,
-                      bgcolor: "#ffffff",
-                      color: "#0f172a",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: 1.25
-                    }}
-                  >
-                    <Typography variant="caption" fontWeight={700}>
-                      {action.label}
-                    </Typography>
-                  </Paper>
-                  <Fab
-                    size="small"
-                    color={action.active ? "primary" : "default"}
-                    onClick={() => {
-                      setOpen(false);
-                      void action.onClick();
-                    }}
-                    disabled={busy}
-                    data-testid={`reader-speed-dial-${action.key}`}
-                  >
-                    {action.icon}
-                  </Fab>
-                </Stack>
-              ))
-            : null}
+        <Stack direction="column" spacing={1} alignItems="flex-end">
+          <Stack
+            spacing={1}
+            alignItems="flex-end"
+            sx={{
+              opacity: open ? 1 : 0,
+              transform: open ? "translateY(0)" : "translateY(4px)",
+              pointerEvents: open ? "auto" : "none",
+              transition: "opacity 120ms ease-out, transform 120ms ease-out"
+            }}
+          >
+            {actions.map((action) => (
+              <Stack key={action.key} direction="row" spacing={1} alignItems="center">
+                <Paper
+                  elevation={3}
+                  sx={{
+                    px: 1.15,
+                    py: 0.45,
+                    bgcolor: "#ffffff",
+                    color: "#0f172a",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: 1.25
+                  }}
+                >
+                  <Typography variant="caption" fontWeight={700}>
+                    {action.label}
+                  </Typography>
+                </Paper>
+                <Fab
+                  size="small"
+                  color={action.active ? "primary" : "default"}
+                  onClick={() => {
+                    setOpen(false);
+                    void action.onClick();
+                  }}
+                  disabled={busy}
+                  data-testid={`reader-speed-dial-${action.key}`}
+                >
+                  {action.icon}
+                </Fab>
+              </Stack>
+            ))}
+          </Stack>
 
           <Fab
             size="small"
@@ -509,11 +507,11 @@ const ReaderQuickActions = memo(function ReaderQuickActions({
           </Fab>
         </Stack>
       </Box>
-    </>
+    </ClickAwayListener>
   );
 });
 
-export function ReaderShell({
+export const ReaderShell = memo(function ReaderShell({
   reader,
   busy,
   onCloseSession,
@@ -1419,4 +1417,4 @@ export function ReaderShell({
       </CardContent>
     </Card>
   );
-}
+});

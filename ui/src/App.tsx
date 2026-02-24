@@ -16,6 +16,7 @@ import { StarterShell } from "./components/StarterShell";
 import { useAppStore } from "./store/appStore";
 import { highlightBorder, mapFontFamily, mapFontWeight, toCssRgba } from "./theme/mapping";
 import type { ThemeMode } from "./types";
+import { useShallow } from "zustand/react/shallow";
 
 function normalizeKey(key: string): string {
   if (key === " ") {
@@ -93,7 +94,62 @@ export default function App() {
     toggleSettingsPanel,
     toggleStatsPanel,
     toggleTtsPanel
-  } = useAppStore();
+  } = useAppStore(
+    useShallow((state) => ({
+      bootstrap: state.bootstrap,
+      loadingBootstrap: state.loadingBootstrap,
+      loadingRecents: state.loadingRecents,
+      loadingCalibre: state.loadingCalibre,
+      busy: state.busy,
+      error: state.error,
+      clearError: state.clearError,
+      toast: state.toast,
+      dismissToast: state.dismissToast,
+      sourceOpenEvent: state.sourceOpenEvent,
+      calibreLoadEvent: state.calibreLoadEvent,
+      ttsStateEvent: state.ttsStateEvent,
+      pdfTranscriptionEvent: state.pdfTranscriptionEvent,
+      runtimeLogLevel: state.runtimeLogLevel,
+      appSafeQuit: state.appSafeQuit,
+      bootstrapState: state.bootstrapState,
+      session: state.session,
+      reader: state.reader,
+      recents: state.recents,
+      calibreBooks: state.calibreBooks,
+      openSourcePath: state.openSourcePath,
+      openClipboardText: state.openClipboardText,
+      deleteRecent: state.deleteRecent,
+      refreshRecents: state.refreshRecents,
+      setRuntimeLogLevel: state.setRuntimeLogLevel,
+      toggleTheme: state.toggleTheme,
+      loadCalibreBooks: state.loadCalibreBooks,
+      openCalibreBook: state.openCalibreBook,
+      closeReaderSession: state.closeReaderSession,
+      readerNextPage: state.readerNextPage,
+      readerPrevPage: state.readerPrevPage,
+      readerSetPage: state.readerSetPage,
+      readerSentenceClick: state.readerSentenceClick,
+      readerNextSentence: state.readerNextSentence,
+      readerPrevSentence: state.readerPrevSentence,
+      readerTtsPlay: state.readerTtsPlay,
+      readerTtsPause: state.readerTtsPause,
+      readerTtsTogglePlayPause: state.readerTtsTogglePlayPause,
+      readerTtsPlayFromPageStart: state.readerTtsPlayFromPageStart,
+      readerTtsPlayFromHighlight: state.readerTtsPlayFromHighlight,
+      readerTtsSeekNext: state.readerTtsSeekNext,
+      readerTtsSeekPrev: state.readerTtsSeekPrev,
+      readerTtsRepeatSentence: state.readerTtsRepeatSentence,
+      readerTtsPrecomputePage: state.readerTtsPrecomputePage,
+      readerToggleTextOnly: state.readerToggleTextOnly,
+      readerSearchSetQuery: state.readerSearchSetQuery,
+      readerSearchNext: state.readerSearchNext,
+      readerSearchPrev: state.readerSearchPrev,
+      readerApplySettings: state.readerApplySettings,
+      toggleSettingsPanel: state.toggleSettingsPanel,
+      toggleStatsPanel: state.toggleStatsPanel,
+      toggleTtsPanel: state.toggleTtsPanel
+    }))
+  );
 
   const activeThemeMode: ThemeMode = reader?.settings.theme ?? bootstrapState?.config.theme ?? "day";
   const activeFontFamily = mapFontFamily(
