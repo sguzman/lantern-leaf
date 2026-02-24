@@ -87,6 +87,20 @@ interface NumericSettingControlProps {
   onCommit: (value: number) => Promise<void>;
 }
 
+interface ReaderQuickActionsProps {
+  busy: boolean;
+  isNightTheme: boolean;
+  isTextOnly: boolean;
+  showSettings: boolean;
+  showStats: boolean;
+  showTts: boolean;
+  onToggleTheme: () => Promise<void>;
+  onToggleTextOnly: () => Promise<void>;
+  onToggleSettingsPanel: () => Promise<void>;
+  onToggleStatsPanel: () => Promise<void>;
+  onToggleTtsPanel: () => Promise<void>;
+}
+
 const FONT_FAMILY_OPTIONS: Array<{ value: FontFamily; label: string }> = [
   { value: "lexend", label: "Lexend" },
   { value: "sans", label: "Sans" },
@@ -356,6 +370,144 @@ function NumericSettingControl({
   );
 }
 
+function ReaderQuickActions({
+  busy,
+  isNightTheme,
+  isTextOnly,
+  showSettings,
+  showStats,
+  showTts,
+  onToggleTheme,
+  onToggleTextOnly,
+  onToggleSettingsPanel,
+  onToggleStatsPanel,
+  onToggleTtsPanel
+}: ReaderQuickActionsProps) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Box
+      sx={{
+        position: "absolute",
+        top: 12,
+        right: 12,
+        zIndex: (theme) => theme.zIndex.fab
+      }}
+    >
+      <Backdrop
+        open={open}
+        onClick={() => setOpen(false)}
+        sx={{
+          zIndex: (theme) => theme.zIndex.fab - 1,
+          bgcolor: "rgba(15, 23, 42, 0.48)"
+        }}
+      />
+      <SpeedDial
+        ariaLabel="Reader quick actions"
+        icon={<SpeedDialIcon />}
+        direction="down"
+        open={open}
+        onClose={(_, reason) => {
+          if (reason !== "toggle") {
+            setOpen(false);
+          }
+        }}
+        onOpen={() => {}}
+        FabProps={{
+          size: "small",
+          color: "primary",
+          onClick: (event) => {
+            event.stopPropagation();
+            setOpen((current) => !current);
+          }
+        }}
+        data-testid="reader-quick-actions-speed-dial"
+      >
+        <SpeedDialAction
+          icon={isNightTheme ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />}
+          slotProps={{
+            tooltip: {
+              open: true,
+              title: isNightTheme ? "Switch to Day" : "Switch to Night",
+              placement: "left"
+            }
+          }}
+          onClick={() => {
+            setOpen(false);
+            void onToggleTheme();
+          }}
+          data-testid="reader-speed-dial-theme"
+          FabProps={{ disabled: busy }}
+        />
+        <SpeedDialAction
+          icon={<TextFieldsIcon />}
+          slotProps={{
+            tooltip: {
+              open: true,
+              title: isTextOnly ? "Pretty Text" : "Text-only",
+              placement: "left"
+            }
+          }}
+          onClick={() => {
+            setOpen(false);
+            void onToggleTextOnly();
+          }}
+          data-testid="reader-speed-dial-text-only"
+          FabProps={{ disabled: busy }}
+        />
+        <SpeedDialAction
+          icon={<TuneIcon />}
+          slotProps={{
+            tooltip: {
+              open: true,
+              title: showSettings ? "Hide Settings" : "Settings",
+              placement: "left"
+            }
+          }}
+          onClick={() => {
+            setOpen(false);
+            void onToggleSettingsPanel();
+          }}
+          data-testid="reader-speed-dial-settings"
+          FabProps={{ disabled: busy }}
+        />
+        <SpeedDialAction
+          icon={<QueryStatsIcon />}
+          slotProps={{
+            tooltip: {
+              open: true,
+              title: showStats ? "Hide Stats" : "Stats",
+              placement: "left"
+            }
+          }}
+          onClick={() => {
+            setOpen(false);
+            void onToggleStatsPanel();
+          }}
+          data-testid="reader-speed-dial-stats"
+          FabProps={{ disabled: busy }}
+        />
+        <SpeedDialAction
+          icon={<GraphicEqIcon />}
+          slotProps={{
+            tooltip: {
+              open: true,
+              title: showTts ? "Hide TTS Controls" : "TTS Controls",
+              placement: "left"
+            }
+          }}
+          onClick={() => {
+            setOpen(false);
+            void onToggleTtsPanel();
+          }}
+          data-testid="reader-speed-dial-tts-controls"
+          FabProps={{ disabled: busy }}
+        />
+      </SpeedDial>
+    </Box>
+  );
+}
+
 export function ReaderShell({
   reader,
   busy,
@@ -393,7 +545,6 @@ export function ReaderShell({
   const ttsControlRowRef = useRef<HTMLDivElement | null>(null);
   const [topBarWidth, setTopBarWidth] = useState(0);
   const [ttsControlRowWidth, setTtsControlRowWidth] = useState(0);
-  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
 
   useEffect(() => {
     const node = topBarRef.current;
@@ -566,8 +717,6 @@ export function ReaderShell({
 
   const playbackLabel = reader.tts.state === "playing" ? "Pause" : "Play";
   const hasHighlightSentence = reader.highlighted_sentence_idx !== null;
-  const themeToggleLabel =
-    reader.settings.theme === "night" ? "Switch to Day" : "Switch to Night";
   const textModeLabel = reader.text_only_mode ? "Pretty Text" : "Text-only";
 
   return (
@@ -672,74 +821,19 @@ export function ReaderShell({
             />
           </Stack>
 
-          <Box sx={{ position: "absolute", top: 12, right: 12, zIndex: (theme) => theme.zIndex.fab }}>
-            <Backdrop
-              open={quickActionsOpen}
-              onClick={() => setQuickActionsOpen(false)}
-              sx={{ zIndex: (theme) => theme.zIndex.fab - 1, bgcolor: "rgba(15, 23, 42, 0.48)" }}
-            />
-            <SpeedDial
-              ariaLabel="Reader quick actions"
-              icon={<SpeedDialIcon />}
-              direction="down"
-              open={quickActionsOpen}
-              onOpen={() => setQuickActionsOpen(true)}
-              onClose={() => setQuickActionsOpen(false)}
-              FabProps={{ size: "small", color: "primary" }}
-              data-testid="reader-quick-actions-speed-dial"
-            >
-              <SpeedDialAction
-                icon={reader.settings.theme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />}
-                tooltipTitle={themeToggleLabel}
-                tooltipOpen
-                onClick={() => {
-                  setQuickActionsOpen(false);
-                  void onToggleTheme();
-                }}
-                data-testid="reader-speed-dial-theme"
-              />
-              <SpeedDialAction
-                icon={<TextFieldsIcon />}
-                tooltipTitle={textModeLabel}
-                tooltipOpen
-                onClick={() => {
-                  setQuickActionsOpen(false);
-                  void onToggleTextOnly();
-                }}
-                data-testid="reader-speed-dial-text-only"
-              />
-              <SpeedDialAction
-                icon={<TuneIcon />}
-                tooltipTitle={reader.panels.show_settings ? "Hide Settings" : "Settings"}
-                tooltipOpen
-                onClick={() => {
-                  setQuickActionsOpen(false);
-                  void onToggleSettingsPanel();
-                }}
-                data-testid="reader-speed-dial-settings"
-              />
-              <SpeedDialAction
-                icon={<QueryStatsIcon />}
-                tooltipTitle={reader.panels.show_stats ? "Hide Stats" : "Stats"}
-                tooltipOpen
-                onClick={() => {
-                  setQuickActionsOpen(false);
-                  void onToggleStatsPanel();
-                }}
-                data-testid="reader-speed-dial-stats"
-              />
-              <SpeedDialAction
-                icon={<GraphicEqIcon />}
-                tooltipTitle={reader.panels.show_tts ? "Hide TTS Controls" : "TTS Controls"}
-                tooltipOpen
-                onClick={() => {
-                  setQuickActionsOpen(false);
-                  void onToggleTtsPanel();
-                }}
-                data-testid="reader-speed-dial-tts-controls"
-              />
-            </SpeedDial>
-          </Box>
+          <ReaderQuickActions
+            busy={busy}
+            isNightTheme={reader.settings.theme === "night"}
+            isTextOnly={reader.text_only_mode}
+            showSettings={reader.panels.show_settings}
+            showStats={reader.panels.show_stats}
+            showTts={reader.panels.show_tts}
+            onToggleTheme={onToggleTheme}
+            onToggleTextOnly={onToggleTextOnly}
+            onToggleSettingsPanel={onToggleSettingsPanel}
+            onToggleStatsPanel={onToggleStatsPanel}
+            onToggleTtsPanel={onToggleTtsPanel}
+          />
 
           <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
             <SearchIcon fontSize="small" />
