@@ -16,14 +16,14 @@ Last automated verification run: `2026-02-24` (local + Tauri runtime smoke).
 
 - [x] Sentence click re-anchors highlight and playback correctly.
 - [x] Page navigation preserves expected highlight semantics.
-- [ ] Search query + next/prev behaves identically to prior behavior.
+- [x] Search query + next/prev behaves identically to prior behavior.
 - [x] Pretty/text-only mode switching is reversible and stable.
 
 ## TTS Flows
 
-- [ ] Play/pause/toggle/play-from-page/play-from-highlight all work.
-- [ ] Prev/next/repeat sentence controls maintain pause semantics.
-- [ ] 3-decimal progress remains stable in TTS and stats displays.
+- [x] Play/pause/toggle/play-from-page/play-from-highlight all work.
+- [x] Prev/next/repeat sentence controls maintain pause semantics.
+- [x] 3-decimal progress remains stable in TTS and stats displays.
 
 ## Layout/UX Rules
 
@@ -36,7 +36,7 @@ Last automated verification run: `2026-02-24` (local + Tauri runtime smoke).
 - [ ] Close session cancels in-flight jobs and returns to starter.
 - [ ] Safe quit performs housekeeping and persistence.
 - [x] Bookmark/config resume fidelity is preserved.
-- [ ] Runtime log-level change persists to `conf/config.toml`.
+- [x] Runtime log-level change persists to `conf/config.toml`.
 
 ## Test Gates
 

@@ -542,6 +542,7 @@ export function ReaderShell({
               fullWidth
               label="Search (regex supported)"
               value={searchInput}
+              data-testid="reader-search-input"
               inputProps={{ "data-reader-search-input": "1" }}
               onChange={(event) => setSearchInput(event.target.value)}
               onKeyDown={(event) => {
@@ -550,13 +551,25 @@ export function ReaderShell({
                 }
               }}
             />
-            <Button variant="outlined" onClick={() => void onSearchQuery(searchInput)}>
+            <Button
+              variant="outlined"
+              onClick={() => void onSearchQuery(searchInput)}
+              data-testid="reader-search-apply-button"
+            >
               Apply
             </Button>
-            <Button variant="outlined" onClick={() => void onSearchPrev()}>
+            <Button
+              variant="outlined"
+              onClick={() => void onSearchPrev()}
+              data-testid="reader-search-prev-button"
+            >
               Prev
             </Button>
-            <Button variant="outlined" onClick={() => void onSearchNext()}>
+            <Button
+              variant="outlined"
+              onClick={() => void onSearchNext()}
+              data-testid="reader-search-next-button"
+            >
               Next
             </Button>
           </Stack>
@@ -752,7 +765,9 @@ export function ReaderShell({
                         </span>
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        Progress: {reader.tts.progress_pct.toFixed(3)}%
+                        <span data-testid="reader-tts-progress-label">
+                          Progress: {reader.tts.progress_pct.toFixed(3)}%
+                        </span>
                       </Typography>
                       {ttsStateEvent ? (
                         <Typography variant="caption" color="text.secondary">

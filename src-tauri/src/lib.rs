@@ -208,7 +208,8 @@ struct BackendState {
 
 impl BackendState {
     fn new() -> Self {
-        let base_config = config::load_config(Path::new("conf/config.toml"));
+        let config_path = app_config_path();
+        let base_config = config::load_config(&config_path);
         let panels = session::PanelState {
             show_settings: base_config.show_settings,
             show_stats: false,
@@ -248,6 +249,27 @@ fn bridge_error(code: &str, message: impl Into<String>) -> BridgeError {
         code: code.to_string(),
         message: message.into(),
     }
+}
+
+fn app_config_path() -> PathBuf {
+    std::env::var_os("EBUP_VIEWER_CONFIG_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("conf/config.toml"))
+}
+
+fn persist_base_config(config: &config::AppConfig, path: &Path) -> Result<(), BridgeError> {
+    let serialized = config::serialize_config(config).map_err(|err| {
+        bridge_error(
+            "config_serialize_failed",
+            format!("Failed to serialize config for update: {err}"),
+        )
+    })?;
+    fs::write(path, serialized).map_err(|err| {
+        bridge_error(
+            "io_error",
+            format!("Failed to persist config to {}: {err}", path.display()),
+        )
+    })
 }
 
 fn parse_log_level_label(label: &str) -> Option<config::LogLevel> {
@@ -1327,18 +1349,8 @@ fn logging_set_level(
             .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
         let request_id = allocate_request_id(&mut guard);
         guard.base_config.log_level = parsed;
-        let serialized = config::serialize_config(&guard.base_config).map_err(|err| {
-            bridge_error(
-                "config_serialize_failed",
-                format!("Failed to serialize config for log level update: {err}"),
-            )
-        })?;
-        fs::write("conf/config.toml", serialized).map_err(|err| {
-            bridge_error(
-                "io_error",
-                format!("Failed to persist log level to conf/config.toml: {err}"),
-            )
-        })?;
+        let config_path = app_config_path();
+        persist_base_config(&guard.base_config, &config_path)?;
         request_id
     };
 
@@ -1549,7 +1561,7 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     configure_linux_display_backend();
 
-    let startup_config = config::load_config(Path::new("conf/config.toml"));
+    let startup_config = config::load_config(&app_config_path());
     let log_plugin = tauri_plugin_log::Builder::new()
         .level(log_level_to_filter(startup_config.log_level))
         .target(Target::new(TargetKind::Stdout))
@@ -1891,6 +1903,45 @@ mod tests {
             Some(config::LogLevel::Error)
         );
         assert_eq!(parse_log_level_label("verbose"), None);
+    }
+
+    #[test]
+    fn app_config_path_uses_override_env_when_present() {
+        let key = "EBUP_VIEWER_CONFIG_PATH";
+        let previous = std::env::var_os(key);
+        let override_path = unique_temp_file("config_override_path", "toml");
+        // SAFETY: test-scoped env mutation; restored before test exits.
+        unsafe {
+            std::env::set_var(key, &override_path);
+        }
+        assert_eq!(app_config_path(), override_path);
+        match previous {
+            Some(value) => {
+                // SAFETY: test-scoped env mutation restore.
+                unsafe {
+                    std::env::set_var(key, value);
+                }
+            }
+            None => {
+                // SAFETY: test-scoped env mutation restore.
+                unsafe {
+                    std::env::remove_var(key);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn persist_base_config_writes_updated_log_level() {
+        let path = unique_temp_file("persist_base_config", "toml");
+        let mut cfg = config::AppConfig::default();
+        cfg.log_level = config::LogLevel::Warn;
+        persist_base_config(&cfg, &path).expect("persist config");
+
+        let loaded = config::load_config(&path);
+        assert_eq!(loaded.log_level, config::LogLevel::Warn);
+
+        let _ = fs::remove_file(path);
     }
 
     #[test]

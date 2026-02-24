@@ -20,6 +20,7 @@ This report compares core workflows between the legacy iced UI path and the Taur
 | Starter clipboard + recent-delete in real Tauri runtime | Supported | Supported | Runtime smoke flow covers clipboard-open and recent-delete actions in `ui/e2e-tauri/smoke.test.mjs` |
 | Calibre load/open | Supported | Supported | Commands `calibre_load_books`, `calibre_open_book`; virtualization helpers in `ui/src/components/calibreList.ts` and tests in `ui/tests/calibreList.test.ts` |
 | Reader page navigation/search | Supported | Supported | Reader commands in `src-tauri/src/lib.rs`; UI integration in `ui/src/components/ReaderShell.tsx` |
+| Reader search next/prev in real Tauri runtime | Supported | Supported | Runtime smoke exercises search apply/next/prev and highlighted sentence transitions in `ui/e2e-tauri/smoke.test.mjs` |
 | Sentence click to move highlight/TTS anchor | Supported | Supported | Mapping/state in `src-tauri/src/session.rs`; store behavior tests in `ui/tests/appStore.test.ts` |
 | Pause semantics across page/sentence navigation | Supported | Supported | Session tests in `src-tauri/src/session.rs` (`paused_state_*`, `sentence_click_keeps_paused_state`) |
 | Pause semantics in real Tauri runtime | Supported | Supported | Tauri-runner scenario asserts paused state is preserved across `Next Page` and `Next Sentence` in `ui/e2e-tauri/smoke.test.mjs` |
@@ -28,7 +29,9 @@ This report compares core workflows between the legacy iced UI path and the Taur
 | Responsive no-vertical-collapse top controls | Supported | Supported | Policy helpers in `ui/src/components/layoutPolicies.ts`; tests in `ui/tests/layoutPolicies.test.ts` |
 | Narrow-width topbar/TTS row no-vertical expansion in real runtime | Supported | Supported | Tauri-runner assertions against `reader-topbar` / `reader-tts-control-row` heights in `ui/e2e-tauri/smoke.test.mjs` |
 | TTS progress precision (3 decimals) | Supported | Supported | TTS display formatting in `ui/src/components/ReaderShell.tsx` |
+| Full TTS control surface in real runtime | Supported | Supported | Runtime smoke covers toggle/play/pause/play-from-page/play-from-highlight and seek/repeat pause semantics in `ui/e2e-tauri/smoke.test.mjs` |
 | Runtime log-level updates | Supported | Supported | Command `logging_set_level` and event `log-level` in `src-tauri/src/lib.rs`; starter controls in `ui/src/components/StarterShell.tsx` |
+| Runtime log-level persistence to config | Supported | Supported | Config persistence helper + override-path coverage in `src-tauri/src/lib.rs` tests (`persist_base_config_writes_updated_log_level`, `app_config_path_uses_override_env_when_present`) |
 | Bridge progress/state events for TTS and PDF transcription | Supported | Supported | Events `tts-state` / `pdf-transcription` in `src-tauri/src/lib.rs`; store subscriptions in `ui/src/store/appStore.ts` |
 | Stale async event rejection | Supported | Supported | Request-id monotonic guards for source/calibre/tts/pdf/log events in `ui/src/store/slices/jobsSlice.ts`; coverage in `ui/tests/appStore.test.ts` |
 | Bookmark/config cache compatibility | Supported | Supported | Cache roundtrip/legacy tests in `src/cache.rs` (`bookmark_roundtrip_*`, `load_bookmark_defaults_scroll_*`, `epub_config_roundtrip_*`) |

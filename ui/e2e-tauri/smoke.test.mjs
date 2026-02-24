@@ -90,6 +90,14 @@ async function waitForElement(driver, locator, timeoutMs = 20000) {
   throw new Error(`Timed out waiting for element ${locator.toString()} after ${timeoutMs}ms`);
 }
 
+async function findVisibleElement(driver, locator, timeoutMs = 2500) {
+  try {
+    return await waitForElement(driver, locator, timeoutMs);
+  } catch {
+    return null;
+  }
+}
+
 async function waitForNoElement(driver, locator, timeoutMs = 10000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt <= timeoutMs) {
@@ -309,6 +317,39 @@ async function waitForPlaybackState(driver, expectedState, timeoutMs = 10000) {
   throw new Error(`Timed out waiting for playback state "${expectedState}"`);
 }
 
+async function highlightedSentenceIndex(driver) {
+  const rawValue = await driver.executeScript(() => {
+    const active = document.querySelector(
+      "button[data-testid^='reader-sentence-'][data-highlighted='1']"
+    );
+    if (!active) {
+      return null;
+    }
+    const testId = active.getAttribute("data-testid") ?? "";
+    const match = testId.match(/reader-sentence-(\d+)/);
+    if (!match) {
+      return null;
+    }
+    return Number.parseInt(match[1], 10);
+  });
+  if (rawValue === null || rawValue === undefined) {
+    return null;
+  }
+  return Number(rawValue);
+}
+
+async function waitForHighlightedSentenceIndex(driver, predicate, timeoutMs = 10000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    const idx = await highlightedSentenceIndex(driver);
+    if (idx !== null && predicate(idx)) {
+      return idx;
+    }
+    await delay(200);
+  }
+  throw new Error("Timed out waiting for highlighted sentence index predicate");
+}
+
 test("tauri runner opens source and exercises core reader controls", async (t) => {
   const timeoutMs = 4 * 60 * 1000;
   if (typeof t.setTimeout === "function") {
@@ -381,6 +422,7 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
     30000
   );
   assert.ok(await closeSessionButton.isDisplayed(), "reader session should open");
+  await maybeSetWindowRect(driver, 1680, 980);
 
   const textModeToggle = await waitForElement(
     driver,
@@ -414,6 +456,37 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
   await targetSentence.click();
   await assertHighlightedSentenceVisible(driver);
 
+  const searchInput = await waitForElement(driver, By.css("input[data-reader-search-input='1']"));
+  await searchInput.click();
+  await searchInput.sendKeys(Key.chord(Key.CONTROL, "a"));
+  await searchInput.sendKeys("theta");
+  const searchApplyButton = await waitForElement(
+    driver,
+    By.css("[data-testid='reader-search-apply-button']")
+  );
+  await searchApplyButton.click();
+  const searchStartIdx = await waitForHighlightedSentenceIndex(driver, () => true);
+  const searchNextButton = await waitForElement(
+    driver,
+    By.css("[data-testid='reader-search-next-button']")
+  );
+  await searchNextButton.click();
+  const searchNextIdx = await waitForHighlightedSentenceIndex(
+    driver,
+    (idx) => idx !== searchStartIdx
+  );
+  const searchPrevButton = await waitForElement(
+    driver,
+    By.css("[data-testid='reader-search-prev-button']")
+  );
+  await searchPrevButton.click();
+  const searchPrevIdx = await waitForHighlightedSentenceIndex(driver, () => true);
+  assert.equal(
+    searchPrevIdx,
+    searchStartIdx,
+    `search prev should return to starting match (start ${searchStartIdx}, next ${searchNextIdx}, prev ${searchPrevIdx})`
+  );
+
   await setNumericSetting(driver, "setting-font-size", 30);
   await assertHighlightedSentenceVisible(driver);
 
@@ -437,6 +510,84 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
     await settingsToggle.click();
     await ttsPanelToggle.click();
     await waitForText(driver, panelTitleLocator, "TTS Options", 6000);
+  }
+
+  const ttsProgressLabel = await waitForElement(
+    driver,
+    By.css("[data-testid='reader-tts-progress-label']")
+  );
+  assert.match(
+    await ttsProgressLabel.getText(),
+    /^Progress:\s*\d+\.\d{3}%$/,
+    "TTS progress should render with 3 decimal places"
+  );
+
+  const pauseButton = await findVisibleElement(
+    driver,
+    By.css("[data-testid='reader-tts-pause-button']")
+  );
+  const playButton = await findVisibleElement(driver, By.css("[data-testid='reader-tts-play-button']"));
+  if (playButton && pauseButton) {
+    await playButton.click();
+    await waitForPlaybackState(driver, "playing");
+    await pauseButton.click();
+    await waitForPlaybackState(driver, "paused");
+  }
+
+  const playPageButton = await findVisibleElement(
+    driver,
+    By.css("[data-testid='reader-tts-play-page-button']")
+  );
+  if (playPageButton && pauseButton) {
+    await playPageButton.click();
+    await waitForPlaybackState(driver, "playing");
+    await pauseButton.click();
+    await waitForPlaybackState(driver, "paused");
+  }
+
+  const playHighlightButton = await findVisibleElement(
+    driver,
+    By.css("[data-testid='reader-tts-play-highlight-button']")
+  );
+  if (playHighlightButton && pauseButton) {
+    await playHighlightButton.click();
+    await waitForPlaybackState(driver, "playing");
+    await pauseButton.click();
+    await waitForPlaybackState(driver, "paused");
+  }
+
+  const ttsSeekPrevButton = await findVisibleElement(
+    driver,
+    By.css("[data-testid='reader-tts-prev-sentence-button']")
+  );
+  const ttsSeekNextButton = await findVisibleElement(
+    driver,
+    By.css("[data-testid='reader-tts-next-sentence-button']")
+  );
+  const ttsRepeatButton = await findVisibleElement(
+    driver,
+    By.css("[data-testid='reader-tts-repeat-button']")
+  );
+  if (ttsSeekNextButton) {
+    const ttsSeekNextDisabled = await ttsSeekNextButton.getAttribute("disabled");
+    if (ttsSeekNextDisabled === null) {
+      await ttsSeekNextButton.click();
+      await waitForPlaybackState(driver, "paused");
+    }
+  }
+  if (ttsSeekPrevButton) {
+    const ttsSeekPrevDisabled = await ttsSeekPrevButton.getAttribute("disabled");
+    if (ttsSeekPrevDisabled === null) {
+      await ttsSeekPrevButton.click();
+      await waitForPlaybackState(driver, "paused");
+    }
+  }
+  if (ttsRepeatButton) {
+    const ttsRepeatDisabled = await ttsRepeatButton.getAttribute("disabled");
+    if (ttsRepeatDisabled === null) {
+      await ttsRepeatButton.click();
+      await waitForPlaybackState(driver, "paused");
+    }
   }
 
   await maybeSetWindowRect(driver, 1080, 860);

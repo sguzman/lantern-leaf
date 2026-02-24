@@ -160,7 +160,7 @@
 **Phase 14: Cutover And Decommission**
 
 - [x] P14-01 Run dual-track period where iced build remains available for fallback. (Both root iced path and Tauri path are continuously validated in CI.)
-- [ ] P14-02 Complete parity signoff checklist with explicit pass on all must-have behaviors. (In progress: checklist execution is partially automated via runtime smoke + CI gate matrix.)
+- [ ] P14-02 Complete parity signoff checklist with explicit pass on all must-have behaviors. (In progress: expanded runtime smoke now covers search + full TTS control surface + clipboard/recent flows; remaining gaps are EPUB/PDF/calibre-heavy runtime scenarios and final soak.)
 - [x] P14-03 Switch default desktop target to Tauri app. (Root `pnpm dev`/`pnpm build` now target Tauri; legacy iced path remains explicit as `pnpm desktop:legacy` until decommission.)
 - [ ] P14-04 Remove iced UI modules only after parity and soak tests pass.
 - [ ] P14-05 Keep core interfaces stable for future GUI changes.
@@ -174,7 +174,7 @@
 - [x] R-05 Styling conflicts between MUI and Tailwind resets/utilities.
 - [ ] R-06 Tauri permission/capability restrictions breaking filesystem/subprocess workflows.
 - [x] R-07 Calibre table scale issues without virtualization.
-- [ ] R-08 Behavior drift in config/bookmark compatibility. (Mitigated with cache bookmark/config roundtrip tests; keep open until full parity signoff.)
+- [ ] R-08 Behavior drift in config/bookmark compatibility. (Mitigated with cache bookmark/config roundtrip tests plus config persistence helper tests in Tauri bridge; keep open until full parity signoff.)
 
 **Definition Of Done**
 
