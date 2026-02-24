@@ -838,7 +838,9 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock should be after epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("ebup_epub_loader_{name}_{nanos}.{extension}"))
+        std::env::temp_dir().join(format!(
+            "lanternleaf_epub_loader_{name}_{nanos}.{extension}"
+        ))
     }
 
     #[test]

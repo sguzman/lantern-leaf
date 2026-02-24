@@ -24,8 +24,8 @@ This report compares core workflows between the legacy iced UI path and the Taur
 | Calibre load terminal lifecycle visibility in real runtime | Supported | Supported | Runtime smoke asserts terminal `calibre-load` marker events and diagnostics in `ui/e2e-tauri/smoke.test.mjs` |
 | Reader page navigation/search | Supported | Supported | Reader commands in `src-tauri/src/lib.rs`; UI integration in `ui/src/components/ReaderShell.tsx` |
 | Reader search next/prev in real Tauri runtime | Supported | Supported | Runtime smoke exercises search apply/next/prev and highlighted sentence transitions in `ui/e2e-tauri/smoke.test.mjs` |
-| Sentence click to move highlight/TTS anchor | Supported | Supported | Mapping/state in `crates/ebup-core/src/session.rs`; store behavior tests in `ui/tests/appStore.test.ts` |
-| Pause semantics across page/sentence navigation | Supported | Supported | Session tests in `crates/ebup-core/src/session.rs` (`paused_state_*`, `sentence_click_keeps_paused_state`) |
+| Sentence click to move highlight/TTS anchor | Supported | Supported | Mapping/state in `crates/lanternleaf-core/src/session.rs`; store behavior tests in `ui/tests/appStore.test.ts` |
+| Pause semantics across page/sentence navigation | Supported | Supported | Session tests in `crates/lanternleaf-core/src/session.rs` (`paused_state_*`, `sentence_click_keeps_paused_state`) |
 | Pause semantics in real Tauri runtime | Supported | Supported | Tauri-runner scenario asserts paused state is preserved across `Next Page` and `Next Sentence` in `ui/e2e-tauri/smoke.test.mjs` |
 | Settings/stats/TTS panel exclusivity and text-mode toggle | Supported | Supported | Reader panel/text-mode controls in `ui/src/components/ReaderShell.tsx`; Tauri-runner coverage in `ui/e2e-tauri/smoke.test.mjs` |
 | Source-open cancellation on close/return | Supported | Supported | Cancellation plumbing in `src-tauri/src/lib.rs` (`active_open_request` / `active_open_source_path`) and event handling test in `ui/tests/appStore.test.ts` |

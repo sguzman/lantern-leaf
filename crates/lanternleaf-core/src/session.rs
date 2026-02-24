@@ -237,7 +237,7 @@ impl ReaderSession {
         cancel: Option<&CancellationToken>,
     ) -> Result<Self, String> {
         let loaded = epub_loader::load_book_content_with_cancel(&source_path, cancel)
-            .map_err(|err| err.to_string())?;
+            .map_err(|err| format!("{err:#}"))?;
         let source_name = source_path
             .file_name()
             .and_then(|name| name.to_str())

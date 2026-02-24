@@ -23,14 +23,15 @@ impl PythonEngine {
     pub fn new_with_cancel(cfg: &Config, cancel: Option<CancellationToken>) -> Result<Self> {
         let scripts_dir = PathBuf::from(&cfg.paths.scripts_dir);
         if cfg.security.pin_scripts_dir {
-            let cwd = std::env::current_dir().with_context(|| "current_dir")?;
             let canon = scripts_dir
                 .canonicalize()
                 .with_context(|| format!("canonicalize scripts_dir: {}", scripts_dir.display()))?;
-            if !canon.starts_with(&cwd) {
+            let root = workspace_root();
+            if !canon.starts_with(&root) {
                 return Err(anyhow!(
-                    "scripts_dir is outside cwd while pin_scripts_dir=true: {}",
-                    canon.display()
+                    "scripts_dir is outside workspace root while pin_scripts_dir=true: {} (root: {})",
+                    canon.display(),
+                    root.display()
                 ));
             }
         }
@@ -154,6 +155,16 @@ fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+fn workspace_root() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for ancestor in manifest_dir.ancestors() {
+        let candidate = ancestor.to_path_buf();
+        if candidate.join("conf").exists() {
+            return candidate;
+        }
+    }
+    manifest_dir
+}
 fn resolve_artifacts_dir(cfg: &Config) -> Option<PathBuf> {
     if !cfg.paths.docling_artifacts_dir.is_empty() {
         return Some(PathBuf::from(&cfg.paths.docling_artifacts_dir));

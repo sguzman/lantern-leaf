@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -38,7 +38,8 @@ impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         let raw = std::fs::read_to_string(path)
             .with_context(|| format!("reading config: {}", path.display()))?;
-        let cfg: Config = toml::from_str(&raw).with_context(|| "parsing TOML")?;
+        let mut cfg: Config = toml::from_str(&raw).with_context(|| "parsing TOML")?;
+        cfg.resolve_relative_paths(path);
         Ok(cfg)
     }
 
@@ -48,6 +49,38 @@ impl Config {
     }
 }
 
+impl Config {
+    fn resolve_relative_paths(&mut self, config_path: &Path) {
+        let base_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
+        self.paths.out_dir = absolutize_path_value(&self.paths.out_dir, base_dir);
+        self.paths.work_dir = absolutize_path_value(&self.paths.work_dir, base_dir);
+        self.paths.cache_dir = absolutize_path_value(&self.paths.cache_dir, base_dir);
+        self.paths.docling_artifacts_dir =
+            absolutize_path_value(&self.paths.docling_artifacts_dir, base_dir);
+        self.paths.scripts_dir = absolutize_path_value(&self.paths.scripts_dir, base_dir);
+    }
+}
+
+fn absolutize_path_value(raw: &str, base_dir: &Path) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let expanded = expand_tilde(trimmed);
+    if expanded.is_absolute() {
+        return expanded.to_string_lossy().to_string();
+    }
+    base_dir.join(expanded).to_string_lossy().to_string()
+}
+
+fn expand_tilde(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Ok(home) = std::env::var("HOME")
+    {
+        return PathBuf::from(home).join(rest);
+    }
+    PathBuf::from(path)
+}
 impl Default for Config {
     fn default() -> Self {
         Self {

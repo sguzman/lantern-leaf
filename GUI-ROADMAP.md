@@ -43,12 +43,12 @@
 
 **Phase 2: Rust Core Extraction (Headless Domain)**
 
-- [x] P2-01 Extract UI-agnostic modules into a dedicated core crate (config/cache/loader/normalizer/pagination/calibre/quack_check/tts orchestration). (`crates/ebup-core` now owns these modules and Tauri consumes the crate instead of `#[path]` imports.)
+- [x] P2-01 Extract UI-agnostic modules into a dedicated core crate (config/cache/loader/normalizer/pagination/calibre/quack_check/tts orchestration). (`crates/lanternleaf-core` now owns these modules and Tauri consumes the crate instead of `#[path]` imports.)
 - [x] P2-02 Remove `iced` types from domain layer (`RelativeOffset`, UI font/color concerns) and replace with neutral DTOs. (Extracted core modules are iced-free; UI-only iced types remain isolated to legacy iced codepath.)
 - [x] P2-03 Introduce session-centric core API (`SessionState`, `SessionCommand`, `SessionEvent`). (`lanternleaf_core::session` now exposes command/event dispatch used by Tauri reader commands.)
 - [x] P2-04 Isolate async jobs behind explicit handles and cancellation tokens (TTS prep, calibre load, PDF extraction). (Source-open, calibre load, quack-check PDF extraction, and TTS playback/prep now run behind explicit request IDs + cancellation tokens in `src-tauri/src/lib.rs`, `src/calibre.rs`, `src/epub_loader.rs`, and `src/quack_check/*`.)
 - [x] P2-05 Preserve deterministic state transitions currently implemented in reducer/effects. (Reader command handlers now dispatch through one deterministic core command path.)
-- [x] P2-06 Add unit tests for extracted command/state transitions before connecting frontend. (Core session command-dispatch tests added under `crates/ebup-core/src/session.rs`.)
+- [x] P2-06 Add unit tests for extracted command/state transitions before connecting frontend. (Core session command-dispatch tests added under `crates/lanternleaf-core/src/session.rs`.)
 
 **Phase 3: Backend Bridge (Tauri)**
 

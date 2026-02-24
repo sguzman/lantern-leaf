@@ -1046,7 +1046,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after epoch")
             .as_nanos();
-        let epub_path = std::env::temp_dir().join(format!("ebup-normalizer-{nonce}.epub"));
+        let epub_path = std::env::temp_dir().join(format!("lanternleaf-normalizer-{nonce}.epub"));
         let cache_root = normalized_dir(&epub_path);
         let _ = fs::remove_dir_all(&cache_root);
 
