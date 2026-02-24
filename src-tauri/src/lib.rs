@@ -1526,6 +1526,12 @@ fn configure_linux_display_backend() {
             std::env::set_var("GDK_BACKEND", desired_gdk_backend);
         }
     }
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        // SAFETY: startup-time process env initialization before Tauri runtime threads start.
+        unsafe {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
 
     info!(
         wayland_display = ?wayland_display,
@@ -1533,6 +1539,7 @@ fn configure_linux_display_backend() {
         x_display = ?x_display,
         gdk_backend = desired_gdk_backend,
         winit_backend = ?current_winit_backend,
+        webkit_disable_dmabuf_renderer = ?std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").ok(),
         "Configured Linux display backend defaults with safe fallback ordering"
     );
 }
