@@ -95,10 +95,15 @@ export default function App() {
   } = useAppStore();
 
   const activeThemeMode: ThemeMode = reader?.settings.theme ?? bootstrapState?.config.theme ?? "day";
-  const activeFontFamily = mapFontFamily(bootstrapState?.config.font_family);
-  const activeFontWeight = mapFontWeight(bootstrapState?.config.font_weight);
+  const activeFontFamily = mapFontFamily(
+    reader?.settings.font_family ?? bootstrapState?.config.font_family
+  );
+  const activeFontWeight = mapFontWeight(
+    reader?.settings.font_weight ?? bootstrapState?.config.font_weight
+  );
   const dayHighlight =
-    reader?.settings.day_highlight ?? bootstrapState?.config.day_highlight ?? { r: 0.2, g: 0.4, b: 0.7, a: 0.15 };
+    reader?.settings.day_highlight ??
+    bootstrapState?.config.day_highlight ?? { r: 0.2, g: 0.4, b: 0.7, a: 0.15 };
   const nightHighlight =
     reader?.settings.night_highlight ??
     bootstrapState?.config.night_highlight ??
@@ -229,10 +234,12 @@ export default function App() {
     toggleTtsPanel
   ]);
 
+  const readerMode = session?.mode === "reader" && Boolean(reader);
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <main className="app-root min-h-screen">
+      <main className="app-root h-screen overflow-hidden">
         <div
           data-testid="app-session-mode"
           data-mode={session?.mode ?? "unknown"}
@@ -262,8 +269,16 @@ export default function App() {
           data-message={calibreLoadEvent?.message ?? ""}
           style={{ display: "none" }}
         />
-        <Container maxWidth={false} className="px-2 py-4 md:px-4 md:py-6">
-          <Stack spacing={2} alignItems="center">
+
+        <Container
+          maxWidth={false}
+          className={readerMode ? "h-full overflow-hidden px-2 py-2 md:px-4 md:py-3" : "px-2 py-4 md:px-4 md:py-6"}
+        >
+          <Stack
+            spacing={2}
+            alignItems="center"
+            className={readerMode ? "h-full min-h-0" : undefined}
+          >
             {loadingBootstrap ? <CircularProgress /> : null}
 
             {error ? (
@@ -272,35 +287,38 @@ export default function App() {
               </Alert>
             ) : null}
 
-            {session && session.mode === "reader" && reader ? (
-              <ReaderShell
-                reader={reader}
-                busy={busy}
-                onCloseSession={closeReaderSession}
-                onPrevPage={readerPrevPage}
-                onNextPage={readerNextPage}
-                onPrevSentence={readerPrevSentence}
-                onNextSentence={readerNextSentence}
-                onSetPage={readerSetPage}
-                onSentenceClick={readerSentenceClick}
-                onToggleTextOnly={readerToggleTextOnly}
-                onSearchQuery={readerSearchSetQuery}
-                onSearchNext={readerSearchNext}
-                onSearchPrev={readerSearchPrev}
-                onToggleSettingsPanel={toggleSettingsPanel}
-                onToggleStatsPanel={toggleStatsPanel}
-                onToggleTtsPanel={toggleTtsPanel}
-                onTtsPlay={readerTtsPlay}
-                onTtsPause={readerTtsPause}
-                onTtsTogglePlayPause={readerTtsTogglePlayPause}
-                onTtsPlayFromPageStart={readerTtsPlayFromPageStart}
-                onTtsPlayFromHighlight={readerTtsPlayFromHighlight}
-                onTtsSeekNext={readerTtsSeekNext}
-                onTtsSeekPrev={readerTtsSeekPrev}
-                onTtsRepeatSentence={readerTtsRepeatSentence}
-                onApplySettings={readerApplySettings}
-                ttsStateEvent={ttsStateEvent}
-              />
+            {readerMode && reader ? (
+              <div className="w-full flex-1 min-h-0 flex justify-center">
+                <ReaderShell
+                  reader={reader}
+                  busy={busy}
+                  onCloseSession={closeReaderSession}
+                  onPrevPage={readerPrevPage}
+                  onNextPage={readerNextPage}
+                  onPrevSentence={readerPrevSentence}
+                  onNextSentence={readerNextSentence}
+                  onSetPage={readerSetPage}
+                  onSentenceClick={readerSentenceClick}
+                  onToggleTextOnly={readerToggleTextOnly}
+                  onSearchQuery={readerSearchSetQuery}
+                  onSearchNext={readerSearchNext}
+                  onSearchPrev={readerSearchPrev}
+                  onToggleTheme={toggleTheme}
+                  onToggleSettingsPanel={toggleSettingsPanel}
+                  onToggleStatsPanel={toggleStatsPanel}
+                  onToggleTtsPanel={toggleTtsPanel}
+                  onTtsPlay={readerTtsPlay}
+                  onTtsPause={readerTtsPause}
+                  onTtsTogglePlayPause={readerTtsTogglePlayPause}
+                  onTtsPlayFromPageStart={readerTtsPlayFromPageStart}
+                  onTtsPlayFromHighlight={readerTtsPlayFromHighlight}
+                  onTtsSeekNext={readerTtsSeekNext}
+                  onTtsSeekPrev={readerTtsSeekPrev}
+                  onTtsRepeatSentence={readerTtsRepeatSentence}
+                  onApplySettings={readerApplySettings}
+                  ttsStateEvent={ttsStateEvent}
+                />
+              </div>
             ) : (
               <StarterShell
                 bootstrap={bootstrapState}

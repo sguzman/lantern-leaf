@@ -1276,9 +1276,7 @@ allowed_extensions = ["epub", "pdf", "txt"]
 
         assert_eq!(
             calibre_cache_path(),
-            override_path
-                .join("lantern-leaf")
-                .join(CALIBRE_CACHE_FILE)
+            override_path.join("lantern-leaf").join(CALIBRE_CACHE_FILE)
         );
         assert_eq!(
             calibre_download_dir(),

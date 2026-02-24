@@ -3,6 +3,8 @@ export type {
   BootstrapConfig,
   BootstrapState,
   CalibreLoadEvent,
+  FontFamily,
+  FontWeight,
   HighlightColor,
   LogLevelEvent,
   OpenSourceResult,

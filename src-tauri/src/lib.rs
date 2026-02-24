@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_log::{Target, TargetKind, log::LevelFilter};
 use tracing::{info, warn};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 use ts_rs::TS;
 
 pub use lanternleaf_core::{
@@ -15,7 +17,10 @@ use lanternleaf_core::{cancellation, session};
 
 const MAX_RECENT_LIMIT: usize = 512;
 const DEFAULT_RECENT_LIMIT: usize = 64;
-const TTS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const TTS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_millis(8);
+const TTS_PREPARE_SENTENCE_WINDOW: usize = 8;
+
+static TRACING_LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -267,10 +272,8 @@ fn runtime_mode_label() -> String {
     let tauri_dev = std::env::var("TAURI_DEV")
         .ok()
         .map(|value| value.to_ascii_lowercase());
-    let forced_dev = matches!(
-        tauri_dev.as_deref(),
-        Some("1") | Some("true") | Some("yes")
-    ) || matches!(tauri_env.as_deref(), Some("dev") | Some("development"));
+    let forced_dev = matches!(tauri_dev.as_deref(), Some("1") | Some("true") | Some("yes"))
+        || matches!(tauri_env.as_deref(), Some("dev") | Some("development"));
 
     if cfg!(dev) || forced_dev {
         "dev".to_string()
@@ -442,6 +445,54 @@ fn log_level_to_filter(level: config::LogLevel) -> LevelFilter {
         config::LogLevel::Info => LevelFilter::Info,
         config::LogLevel::Warn => LevelFilter::Warn,
         config::LogLevel::Error => LevelFilter::Error,
+    }
+}
+
+fn init_tracing(config: &config::AppConfig) {
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(config.log_level.as_filter_str()));
+
+    if runtime_mode_label() == "dev" {
+        let logs_dir = dev_logs_dir();
+        if let Err(err) = fs::create_dir_all(&logs_dir) {
+            eprintln!(
+                "failed to create tracing logs dir {}: {err}",
+                logs_dir.display()
+            );
+        }
+
+        let file_appender = tracing_appender::rolling::never(&logs_dir, "lanternleaf-dev.log");
+        let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
+        let _ = TRACING_LOG_GUARD.set(guard);
+
+        let stderr_layer = tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr)
+            .with_target(true)
+            .with_file(true)
+            .with_line_number(true);
+        let file_layer = tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_writer(file_writer)
+            .with_target(true)
+            .with_file(true)
+            .with_line_number(true);
+
+        let _ = tracing_subscriber::registry()
+            .with(filter)
+            .with(stderr_layer)
+            .with(file_layer)
+            .try_init();
+    } else {
+        let _ = tracing_subscriber::registry()
+            .with(filter)
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(std::io::stderr)
+                    .with_target(true)
+                    .with_file(true)
+                    .with_line_number(true),
+            )
+            .try_init();
     }
 }
 
@@ -905,11 +956,13 @@ fn run_tts_runtime_loop(
             engine = Some(built_engine);
         }
 
+        let chunk_end = (plan.start_idx + TTS_PREPARE_SENTENCE_WINDOW).min(plan.sentences.len());
+        let chunk_sentences = plan.sentences[plan.start_idx..chunk_end].to_vec();
         let cache_root = cache::hash_dir(&plan.source_path).join("tts");
         let prepared = match engine.as_ref().unwrap().prepare_batch(
             cache_root,
-            plan.sentences.clone(),
-            plan.start_idx,
+            chunk_sentences,
+            0,
             plan.threads,
             plan.progress_log_interval,
         ) {
@@ -1635,6 +1688,12 @@ fn reader_tts_pause(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
+    {
+        let mut guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        cancel_tts_request(&mut guard);
+    }
     apply_reader_command(&app, &state, session::SessionCommand::TtsPause)
 }
 
@@ -1643,6 +1702,23 @@ fn reader_tts_toggle_play_pause(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
+    {
+        let mut guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        let normalizer = guard.normalizer.clone();
+        let panels = guard.panels;
+        let should_cancel = guard
+            .reader
+            .as_mut()
+            .map(|reader| {
+                reader.snapshot(panels, &normalizer).tts.state == session::TtsPlaybackState::Playing
+            })
+            .unwrap_or(false);
+        if should_cancel {
+            cancel_tts_request(&mut guard);
+        }
+    }
     apply_reader_command(&app, &state, session::SessionCommand::TtsTogglePlayPause)
 }
 
@@ -2070,6 +2146,7 @@ pub fn run() {
 
     let config_path = app_config_path();
     let startup_config = config::load_config(&config_path);
+    init_tracing(&startup_config);
     configure_cache_dir_from_config(&startup_config, &config_path);
     configure_cache_dir_from_workspace();
     let mut log_builder = tauri_plugin_log::Builder::new()
@@ -2081,7 +2158,7 @@ pub fn run() {
         let logs_dir = dev_logs_dir();
         log_builder = log_builder.target(Target::new(TargetKind::Folder {
             path: logs_dir.clone(),
-            file_name: Some("lanternleaf-dev".to_string()),
+            file_name: Some("lanternleaf-webview-dev".to_string()),
         }));
         info!(
             mode = %runtime_mode_label(),
@@ -2306,6 +2383,8 @@ mod tests {
                 selected_search_match: None,
                 settings: session::ReaderSettingsView {
                     theme: config::ThemeMode::Day,
+                    font_family: config::FontFamily::Lexend,
+                    font_weight: config::FontWeight::Bold,
                     day_highlight: config::HighlightColor {
                         r: 0.2,
                         g: 0.4,
@@ -2320,6 +2399,8 @@ mod tests {
                     },
                     font_size: 22,
                     line_spacing: 1.2,
+                    word_spacing: 0,
+                    letter_spacing: 0,
                     margin_horizontal: 100,
                     margin_vertical: 12,
                     lines_per_page: 700,

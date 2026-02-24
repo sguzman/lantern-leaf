@@ -12,19 +12,25 @@ describe("reader layout policies", () => {
     const wide = computeReaderTopBarVisibility(1600);
 
     expect(tight.showSentenceButtons).toBe(false);
+    expect(tight.showJumpButton).toBe(false);
     expect(tight.showTextModeButton).toBe(false);
+    expect(tight.showThemeButton).toBe(false);
     expect(tight.showSettingsButton).toBe(false);
     expect(tight.showStatsButton).toBe(false);
     expect(tight.showTtsButton).toBe(false);
 
     expect(medium.showSentenceButtons).toBe(true);
+    expect(medium.showJumpButton).toBe(true);
     expect(medium.showTextModeButton).toBe(true);
-    expect(medium.showSettingsButton).toBe(true);
+    expect(medium.showThemeButton).toBe(false);
+    expect(medium.showSettingsButton).toBe(false);
     expect(medium.showStatsButton).toBe(false);
     expect(medium.showTtsButton).toBe(false);
 
     expect(wide.showSentenceButtons).toBe(true);
+    expect(wide.showJumpButton).toBe(true);
     expect(wide.showTextModeButton).toBe(true);
+    expect(wide.showThemeButton).toBe(true);
     expect(wide.showSettingsButton).toBe(true);
     expect(wide.showStatsButton).toBe(true);
     expect(wide.showTtsButton).toBe(true);

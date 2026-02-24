@@ -30,10 +30,14 @@ pub enum TtsPlaybackState {
 #[ts(export)]
 pub struct ReaderSettingsView {
     pub theme: config::ThemeMode,
+    pub font_family: config::FontFamily,
+    pub font_weight: config::FontWeight,
     pub day_highlight: config::HighlightColor,
     pub night_highlight: config::HighlightColor,
     pub font_size: u32,
     pub line_spacing: f32,
+    pub word_spacing: u32,
+    pub letter_spacing: u32,
     pub margin_horizontal: u16,
     pub margin_vertical: u16,
     pub lines_per_page: usize,
@@ -59,9 +63,17 @@ pub struct ReaderTtsView {
 #[ts(export)]
 pub struct ReaderSettingsPatch {
     #[ts(optional)]
+    pub font_family: Option<config::FontFamily>,
+    #[ts(optional)]
+    pub font_weight: Option<config::FontWeight>,
+    #[ts(optional)]
     pub font_size: Option<u32>,
     #[ts(optional)]
     pub line_spacing: Option<f32>,
+    #[ts(optional)]
+    pub word_spacing: Option<u32>,
+    #[ts(optional)]
+    pub letter_spacing: Option<u32>,
     #[ts(optional)]
     pub margin_horizontal: Option<u16>,
     #[ts(optional)]
@@ -277,10 +289,14 @@ impl ReaderSession {
     pub fn settings_view(&self) -> ReaderSettingsView {
         ReaderSettingsView {
             theme: self.config.theme,
+            font_family: self.config.font_family,
+            font_weight: self.config.font_weight,
             day_highlight: self.config.day_highlight,
             night_highlight: self.config.night_highlight,
             font_size: self.config.font_size,
             line_spacing: self.config.line_spacing,
+            word_spacing: self.config.word_spacing,
+            letter_spacing: self.config.letter_spacing,
             margin_horizontal: self.config.margin_horizontal,
             margin_vertical: self.config.margin_vertical,
             lines_per_page: self.config.lines_per_page,
@@ -370,6 +386,12 @@ impl ReaderSession {
         let preserve = self.global_display_idx();
         let mut repaginate = false;
 
+        if let Some(font_family) = patch.font_family {
+            self.config.font_family = font_family;
+        }
+        if let Some(font_weight) = patch.font_weight {
+            self.config.font_weight = font_weight;
+        }
         if let Some(font_size) = patch.font_size {
             let clamped = font_size.clamp(pagination::MIN_FONT_SIZE, pagination::MAX_FONT_SIZE);
             if clamped != self.config.font_size {
@@ -395,6 +417,12 @@ impl ReaderSession {
         }
         if let Some(line_spacing) = patch.line_spacing {
             self.config.line_spacing = line_spacing.clamp(0.8, 3.0);
+        }
+        if let Some(word_spacing) = patch.word_spacing {
+            self.config.word_spacing = word_spacing.clamp(0, 24);
+        }
+        if let Some(letter_spacing) = patch.letter_spacing {
+            self.config.letter_spacing = letter_spacing.clamp(0, 24);
         }
         if let Some(pause) = patch.pause_after_sentence {
             let rounded = ((pause.clamp(0.0, 3.0) * 100.0).round()) / 100.0;
@@ -1203,8 +1231,12 @@ mod tests {
 
         session.apply_settings_patch(
             ReaderSettingsPatch {
+                font_family: None,
+                font_weight: None,
                 font_size: None,
                 line_spacing: None,
+                word_spacing: None,
+                letter_spacing: None,
                 margin_horizontal: None,
                 margin_vertical: None,
                 lines_per_page: None,
@@ -1268,8 +1300,12 @@ mod tests {
         let event = session.apply_command(
             SessionCommand::ApplySettings {
                 patch: ReaderSettingsPatch {
+                    font_family: None,
+                    font_weight: None,
                     font_size: None,
                     line_spacing: None,
+                    word_spacing: None,
+                    letter_spacing: None,
                     margin_horizontal: None,
                     margin_vertical: None,
                     lines_per_page: None,

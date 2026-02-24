@@ -8,12 +8,18 @@ const MIN_HORIZONTAL_MARGIN_PX = 0;
 const MAX_HORIZONTAL_MARGIN_PX = 600;
 const MIN_VERTICAL_MARGIN_PX = 0;
 const MAX_VERTICAL_MARGIN_PX = 240;
+const MIN_WORD_SPACING_PX = 0;
+const MAX_WORD_SPACING_PX = 24;
+const MIN_LETTER_SPACING_PX = 0;
+const MAX_LETTER_SPACING_PX = 24;
 
 export interface ReaderTypographyLayout {
   fontSizePx: number;
   lineSpacing: number;
   horizontalMarginPx: number;
   verticalMarginPx: number;
+  wordSpacingPx: number;
+  letterSpacingPx: number;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -36,6 +42,8 @@ export function computeReaderTypographyLayout(settings: ReaderSettingsView): Rea
       settings.margin_vertical,
       MIN_VERTICAL_MARGIN_PX,
       MAX_VERTICAL_MARGIN_PX
-    )
+    ),
+    wordSpacingPx: clamp(settings.word_spacing, MIN_WORD_SPACING_PX, MAX_WORD_SPACING_PX),
+    letterSpacingPx: clamp(settings.letter_spacing, MIN_LETTER_SPACING_PX, MAX_LETTER_SPACING_PX)
   };
 }

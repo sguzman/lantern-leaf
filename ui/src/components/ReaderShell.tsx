@@ -1,6 +1,9 @@
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
+import GpsFixedIcon from "@mui/icons-material/GpsFixed";
+import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 import SearchIcon from "@mui/icons-material/Search";
 import TuneIcon from "@mui/icons-material/Tune";
 import {
@@ -8,6 +11,10 @@ import {
   Card,
   CardContent,
   Divider,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
   Slider,
   Stack,
   Switch,
@@ -21,7 +28,13 @@ import {
   computeReaderTtsControlVisibility
 } from "./layoutPolicies";
 import { computeReaderTypographyLayout } from "./readerTypography";
-import type { ReaderSettingsPatch, ReaderSnapshot, TtsStateEvent } from "../types";
+import type {
+  FontFamily,
+  FontWeight,
+  ReaderSettingsPatch,
+  ReaderSnapshot,
+  TtsStateEvent
+} from "../types";
 
 interface ReaderShellProps {
   reader: ReaderSnapshot;
@@ -37,6 +50,7 @@ interface ReaderShellProps {
   onSearchQuery: (query: string) => Promise<void>;
   onSearchNext: () => Promise<void>;
   onSearchPrev: () => Promise<void>;
+  onToggleTheme: () => Promise<void>;
   onToggleSettingsPanel: () => Promise<void>;
   onToggleStatsPanel: () => Promise<void>;
   onToggleTtsPanel: () => Promise<void>;
@@ -63,6 +77,28 @@ interface NumericSettingControlProps {
   onCommit: (value: number) => Promise<void>;
 }
 
+const FONT_FAMILY_OPTIONS: Array<{ value: FontFamily; label: string }> = [
+  { value: "lexend", label: "Lexend" },
+  { value: "sans", label: "Sans" },
+  { value: "serif", label: "Serif" },
+  { value: "monospace", label: "Monospace" },
+  { value: "fira-code", label: "Fira Code" },
+  { value: "atkinson-hyperlegible", label: "Atkinson Hyperlegible" },
+  { value: "atkinson-hyperlegible-next", label: "Atkinson Hyperlegible Next" },
+  { value: "lexica-ultralegible", label: "Lexica Ultralegible" },
+  { value: "courier", label: "Courier" },
+  { value: "frank-gothic", label: "Frank Gothic" },
+  { value: "hermit", label: "Hermit" },
+  { value: "hasklug", label: "Hasklug" },
+  { value: "noto-sans", label: "Noto Sans" }
+];
+
+const FONT_WEIGHT_OPTIONS: Array<{ value: FontWeight; label: string }> = [
+  { value: "light", label: "Light" },
+  { value: "normal", label: "Normal" },
+  { value: "bold", label: "Bold" }
+];
+
 function formatSeconds(seconds: number): string {
   const rounded = Math.max(0, Math.round(seconds));
   const mins = Math.floor(rounded / 60);
@@ -76,6 +112,20 @@ function formatPercent(value: number): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function normalizeNumber(value: number, min: number, max: number, step: number, decimals: number): number {
+  const clamped = clamp(value, min, max);
+  if (step <= 0) {
+    return Number(clamped.toFixed(decimals));
+  }
+  const snapped = min + Math.round((clamped - min) / step) * step;
+  return Number(clamp(snapped, min, max).toFixed(decimals));
+}
+
+function almostEqual(a: number, b: number, decimals: number): boolean {
+  const threshold = Math.max(1e-8, Math.pow(10, -decimals) / 2);
+  return Math.abs(a - b) <= threshold;
 }
 
 function scrollSentenceIntoView(
@@ -123,11 +173,13 @@ function NumericSettingControl({
   onCommit
 }: NumericSettingControlProps) {
   const [inputValue, setInputValue] = useState(value.toFixed(decimals));
+  const [sliderValue, setSliderValue] = useState(value);
   const [invalid, setInvalid] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setInputValue(value.toFixed(decimals));
+    setSliderValue(value);
     setInvalid(false);
   }, [decimals, value]);
 
@@ -142,17 +194,28 @@ function NumericSettingControl({
     return parsed;
   };
 
-  const commit = async (raw: string): Promise<void> => {
+  const commitNumber = async (candidate: number): Promise<void> => {
+    const normalized = normalizeNumber(candidate, min, max, step, decimals);
+    if (almostEqual(normalized, value, decimals)) {
+      setInputValue(value.toFixed(decimals));
+      setSliderValue(value);
+      setInvalid(false);
+      return;
+    }
+    setInputValue(normalized.toFixed(decimals));
+    setSliderValue(normalized);
+    setInvalid(false);
+    await onCommit(normalized);
+  };
+
+  const commitRaw = async (raw: string): Promise<void> => {
     const parsed = parseValue(raw);
     if (parsed === null) {
       setInvalid(true);
       return;
     }
-    setInvalid(false);
-    await onCommit(parsed);
+    await commitNumber(parsed);
   };
-
-  const sliderValue = Math.min(max, Math.max(min, value));
 
   return (
     <Stack spacing={0.75}>
@@ -166,9 +229,18 @@ function NumericSettingControl({
           max={max}
           step={step}
           onChange={(_, nextValue) => {
-            if (typeof nextValue === "number") {
-              void onCommit(nextValue);
+            if (typeof nextValue !== "number") {
+              return;
             }
+            setSliderValue(nextValue);
+            setInputValue(nextValue.toFixed(decimals));
+            setInvalid(false);
+          }}
+          onChangeCommitted={(_, nextValue) => {
+            if (typeof nextValue !== "number") {
+              return;
+            }
+            void commitNumber(nextValue);
           }}
         />
         <TextField
@@ -177,18 +249,24 @@ function NumericSettingControl({
           value={inputValue}
           error={invalid}
           onChange={(event) => {
-            setInputValue(event.target.value);
-            setInvalid(parseValue(event.target.value) === null);
+            const raw = event.target.value;
+            setInputValue(raw);
+            const parsed = parseValue(raw);
+            setInvalid(parsed === null);
+            if (parsed !== null) {
+              setSliderValue(parsed);
+            }
           }}
-          onBlur={() => void commit(inputValue)}
+          onBlur={() => void commitRaw(inputValue)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
-              void commit(inputValue);
+              void commitRaw(inputValue);
             }
             if (event.key === "Escape") {
               event.preventDefault();
               setInputValue(value.toFixed(decimals));
+              setSliderValue(value);
               setInvalid(false);
             }
           }}
@@ -197,16 +275,16 @@ function NumericSettingControl({
               return;
             }
             event.preventDefault();
+            const base = parseValue(inputValue) ?? value;
             const delta = event.deltaY < 0 ? step : -step;
-            const next = Math.min(max, Math.max(min, value + delta));
-            void onCommit(next);
+            void commitNumber(base + delta);
           }}
           inputProps={{
             inputMode: "decimal",
             ...(testId ? { "data-testid": `${testId}-input` } : {})
           }}
           sx={{
-            width: 92,
+            width: 98,
             "& .MuiInputBase-input": {
               color: invalid ? "error.main" : undefined
             }
@@ -231,6 +309,7 @@ export function ReaderShell({
   onSearchQuery,
   onSearchNext,
   onSearchPrev,
+  onToggleTheme,
   onToggleSettingsPanel,
   onToggleStatsPanel,
   onToggleTtsPanel,
@@ -298,13 +377,15 @@ export function ReaderShell({
     setSearchInput(reader.search_query);
   }, [reader.search_query]);
 
+  const searchMatchSet = useMemo(() => new Set(reader.search_matches), [reader.search_matches]);
+
   const alignHighlightedSentence = useCallback(
-    (behavior: ScrollBehavior) => {
+    (behavior: ScrollBehavior, force = false) => {
       const idx = reader.highlighted_sentence_idx;
       if (idx === null || idx === undefined) {
         return;
       }
-      if (!reader.settings.auto_scroll_tts) {
+      if (!force && !reader.settings.auto_scroll_tts) {
         return;
       }
       const container = sentenceScrollRef.current;
@@ -326,6 +407,10 @@ export function ReaderShell({
     ]
   );
 
+  const jumpToHighlightedSentence = useCallback(() => {
+    alignHighlightedSentence("smooth", true);
+  }, [alignHighlightedSentence]);
+
   useEffect(() => {
     const idx = reader.highlighted_sentence_idx;
     if (idx === null || idx === undefined) {
@@ -335,12 +420,23 @@ export function ReaderShell({
       return;
     }
     const frame = requestAnimationFrame(() => {
-      alignHighlightedSentence("smooth");
+      requestAnimationFrame(() => {
+        alignHighlightedSentence("smooth");
+      });
     });
     return () => cancelAnimationFrame(frame);
   }, [
     alignHighlightedSentence,
-    reader.current_page
+    reader.current_page,
+    reader.highlighted_sentence_idx,
+    reader.settings.auto_scroll_tts,
+    reader.settings.center_spoken_sentence,
+    reader.settings.font_size,
+    reader.settings.line_spacing,
+    reader.settings.margin_horizontal,
+    reader.settings.margin_vertical,
+    reader.settings.word_spacing,
+    reader.settings.letter_spacing
   ]);
 
   useEffect(() => {
@@ -353,10 +449,13 @@ export function ReaderShell({
     }
 
     const realign = () => {
-      alignHighlightedSentence("auto");
+      requestAnimationFrame(() => {
+        alignHighlightedSentence("auto");
+      });
     };
+
     const resizeObserver = new ResizeObserver(() => {
-      requestAnimationFrame(realign);
+      realign();
     });
     resizeObserver.observe(container);
     window.addEventListener("resize", realign);
@@ -371,7 +470,10 @@ export function ReaderShell({
     reader.settings.auto_scroll_tts,
     reader.settings.font_size,
     reader.settings.line_spacing,
-    reader.settings.margin_horizontal
+    reader.settings.margin_horizontal,
+    reader.settings.margin_vertical,
+    reader.settings.word_spacing,
+    reader.settings.letter_spacing
   ]);
 
   const panelTitle = useMemo(() => {
@@ -399,13 +501,16 @@ export function ReaderShell({
     () => computeReaderTypographyLayout(reader.settings),
     [reader.settings]
   );
+
   const playbackLabel = reader.tts.state === "playing" ? "Pause" : "Play";
-  const hasHighlightSentence = reader.tts.current_sentence_idx !== null;
+  const hasHighlightSentence = reader.highlighted_sentence_idx !== null;
+  const themeToggleLabel =
+    reader.settings.theme === "night" ? "Switch to Day" : "Switch to Night";
 
   return (
-    <Card className="w-full max-w-[1700px] rounded-3xl border border-slate-200 shadow-sm">
-      <CardContent className="p-4 md:p-6">
-        <Stack spacing={2}>
+    <Card className="w-full max-w-[1700px] min-h-0 rounded-3xl border border-slate-200 shadow-sm lg:h-full">
+      <CardContent className="h-full p-4 md:p-6">
+        <Stack spacing={2} sx={{ height: "100%", minHeight: 0 }}>
           <Stack
             ref={topBarRef}
             direction="row"
@@ -416,7 +521,8 @@ export function ReaderShell({
               flexWrap: "nowrap",
               overflow: "hidden",
               whiteSpace: "nowrap",
-              minHeight: 44
+              minHeight: 44,
+              flexShrink: 0
             }}
           >
             <Button
@@ -472,6 +578,18 @@ export function ReaderShell({
                 </Button>
               </>
             ) : null}
+            {topBarVisibility.showJumpButton ? (
+              <Button
+                variant="outlined"
+                startIcon={<GpsFixedIcon />}
+                onClick={() => jumpToHighlightedSentence()}
+                disabled={!hasHighlightSentence}
+                data-testid="reader-jump-highlight-button"
+                sx={{ flexShrink: 0 }}
+              >
+                Jump to Highlight
+              </Button>
+            ) : null}
             <TextField
               size="small"
               value={pageInput}
@@ -485,7 +603,7 @@ export function ReaderShell({
                   }
                 }
               }}
-              sx={{ width: 90, flexShrink: 0 }}
+              sx={{ width: 92, flexShrink: 0 }}
               label="Page"
             />
             {topBarVisibility.showTextModeButton ? (
@@ -497,6 +615,20 @@ export function ReaderShell({
                 sx={{ flexShrink: 0 }}
               >
                 {reader.text_only_mode ? "Pretty Text" : "Text-only"}
+              </Button>
+            ) : null}
+            {topBarVisibility.showThemeButton ? (
+              <Button
+                variant="outlined"
+                startIcon={
+                  reader.settings.theme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />
+                }
+                onClick={() => void onToggleTheme()}
+                disabled={busy}
+                data-testid="reader-theme-toggle-button"
+                sx={{ flexShrink: 0 }}
+              >
+                {themeToggleLabel}
               </Button>
             ) : null}
             {topBarVisibility.showSettingsButton ? (
@@ -535,7 +667,7 @@ export function ReaderShell({
             ) : null}
           </Stack>
 
-          <Stack direction="row" spacing={1} alignItems="center">
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
             <SearchIcon fontSize="small" />
             <TextField
               size="small"
@@ -574,11 +706,11 @@ export function ReaderShell({
             </Button>
           </Stack>
 
-          <Stack direction={{ xs: "column", lg: "row" }} spacing={2}>
-            <div className="min-h-[62vh] flex-1 overflow-hidden rounded-2xl border border-slate-200">
+          <Stack direction={{ xs: "column", lg: "row" }} spacing={2} sx={{ flex: 1, minHeight: 0 }}>
+            <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200">
               <div
                 ref={sentenceScrollRef}
-                className="h-full overflow-y-auto"
+                className="h-full overflow-y-auto overscroll-contain"
                 data-testid="reader-sentence-scroll-container"
                 style={{
                   paddingLeft: `${readerTypography.horizontalMarginPx}px`,
@@ -590,7 +722,7 @@ export function ReaderShell({
                 <Stack spacing={0.75}>
                   {reader.sentences.map((sentence, idx) => {
                     const highlighted = reader.highlighted_sentence_idx === idx;
-                    const searchMatch = reader.search_matches.includes(idx);
+                    const searchMatch = searchMatchSet.has(idx);
                     return (
                       <button
                         key={`${reader.current_page}:${idx}`}
@@ -605,6 +737,8 @@ export function ReaderShell({
                         style={{
                           fontSize: `${readerTypography.fontSizePx}px`,
                           lineHeight: readerTypography.lineSpacing,
+                          wordSpacing: `${readerTypography.wordSpacingPx}px`,
+                          letterSpacing: `${readerTypography.letterSpacingPx}px`,
                           borderColor: highlighted
                             ? "var(--reader-highlight-border)"
                             : searchMatch
@@ -626,289 +760,368 @@ export function ReaderShell({
             </div>
 
             {panelTitle ? (
-              <div className="w-full shrink-0 rounded-2xl border border-slate-200 p-3 lg:w-[360px]">
-                <Stack spacing={1.25}>
-                  <Typography variant="subtitle1" fontWeight={700}>
+              <div className="w-full shrink-0 overflow-hidden rounded-2xl border border-slate-200 p-3 lg:w-[380px] lg:h-full">
+                <Stack spacing={1.25} sx={{ height: "100%", minHeight: 0 }}>
+                  <Typography variant="subtitle1" fontWeight={700} sx={{ flexShrink: 0 }}>
                     <span data-testid="reader-panel-title">{panelTitle}</span>
                   </Typography>
-                  <Divider />
+                  <Divider sx={{ flexShrink: 0 }} />
 
-                  {reader.panels.show_settings ? (
-                    <Stack spacing={1.5}>
-                      <NumericSettingControl
-                        label="Font Size"
-                        testId="setting-font-size"
-                        value={reader.settings.font_size}
-                        min={12}
-                        max={36}
-                        step={1}
-                        decimals={0}
-                        onCommit={async (next) => {
-                          await onApplySettings({ font_size: Math.round(next) });
-                        }}
-                      />
-                      <NumericSettingControl
-                        label="Lines Per Page"
-                        testId="setting-lines-per-page"
-                        value={reader.settings.lines_per_page}
-                        min={8}
-                        max={1000}
-                        step={1}
-                        decimals={0}
-                        onCommit={async (next) => {
-                          await onApplySettings({ lines_per_page: Math.round(next) });
-                        }}
-                      />
-                      <NumericSettingControl
-                        label="Horizontal Margin"
-                        testId="setting-horizontal-margin"
-                        value={reader.settings.margin_horizontal}
-                        min={0}
-                        max={600}
-                        step={1}
-                        decimals={0}
-                        onCommit={async (next) => {
-                          await onApplySettings({ margin_horizontal: Math.round(next) });
-                        }}
-                      />
-                      <NumericSettingControl
-                        label="Line Spacing"
-                        testId="setting-line-spacing"
-                        value={reader.settings.line_spacing}
-                        min={0.8}
-                        max={3}
-                        step={0.05}
-                        decimals={2}
-                        onCommit={async (next) => {
-                          await onApplySettings({ line_spacing: next });
-                        }}
-                      />
-                      <Stack direction="row" alignItems="center" justifyContent="space-between">
-                        <Typography variant="caption" fontWeight={700}>
-                          Auto Scroll
-                        </Typography>
-                        <Switch
-                          checked={reader.settings.auto_scroll_tts}
-                          onChange={(event) =>
-                            void onApplySettings({ auto_scroll_tts: event.target.checked })
-                          }
+                  <div style={{ overflowY: "auto", minHeight: 0, overscrollBehavior: "contain" }}>
+                    {reader.panels.show_settings ? (
+                      <Stack spacing={1.5}>
+                        <FormControl size="small">
+                          <InputLabel id="setting-font-family-label">Font Family</InputLabel>
+                          <Select
+                            labelId="setting-font-family-label"
+                            label="Font Family"
+                            value={reader.settings.font_family}
+                            onChange={(event) =>
+                              void onApplySettings({
+                                font_family: event.target.value as FontFamily
+                              })
+                            }
+                            data-testid="setting-font-family"
+                          >
+                            {FONT_FAMILY_OPTIONS.map((option) => (
+                              <MenuItem key={option.value} value={option.value}>
+                                {option.label}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+
+                        <FormControl size="small">
+                          <InputLabel id="setting-font-weight-label">Font Weight</InputLabel>
+                          <Select
+                            labelId="setting-font-weight-label"
+                            label="Font Weight"
+                            value={reader.settings.font_weight}
+                            onChange={(event) =>
+                              void onApplySettings({
+                                font_weight: event.target.value as FontWeight
+                              })
+                            }
+                            data-testid="setting-font-weight"
+                          >
+                            {FONT_WEIGHT_OPTIONS.map((option) => (
+                              <MenuItem key={option.value} value={option.value}>
+                                {option.label}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+
+                        <NumericSettingControl
+                          label="Font Size"
+                          testId="setting-font-size"
+                          value={reader.settings.font_size}
+                          min={12}
+                          max={36}
+                          step={1}
+                          decimals={0}
+                          onCommit={async (next) => {
+                            await onApplySettings({ font_size: Math.round(next) });
+                          }}
                         />
-                      </Stack>
-                      <Stack direction="row" alignItems="center" justifyContent="space-between">
-                        <Typography variant="caption" fontWeight={700}>
-                          Auto Center
-                        </Typography>
-                        <Switch
-                          checked={reader.settings.center_spoken_sentence}
-                          onChange={(event) =>
-                            void onApplySettings({
-                              center_spoken_sentence: event.target.checked
-                            })
-                          }
+                        <NumericSettingControl
+                          label="Lines Per Page"
+                          testId="setting-lines-per-page"
+                          value={reader.settings.lines_per_page}
+                          min={8}
+                          max={1000}
+                          step={1}
+                          decimals={0}
+                          onCommit={async (next) => {
+                            await onApplySettings({ lines_per_page: Math.round(next) });
+                          }}
                         />
+                        <NumericSettingControl
+                          label="Horizontal Margin"
+                          testId="setting-horizontal-margin"
+                          value={reader.settings.margin_horizontal}
+                          min={0}
+                          max={600}
+                          step={1}
+                          decimals={0}
+                          onCommit={async (next) => {
+                            await onApplySettings({ margin_horizontal: Math.round(next) });
+                          }}
+                        />
+                        <NumericSettingControl
+                          label="Vertical Margin"
+                          testId="setting-vertical-margin"
+                          value={reader.settings.margin_vertical}
+                          min={0}
+                          max={240}
+                          step={1}
+                          decimals={0}
+                          onCommit={async (next) => {
+                            await onApplySettings({ margin_vertical: Math.round(next) });
+                          }}
+                        />
+                        <NumericSettingControl
+                          label="Line Spacing"
+                          testId="setting-line-spacing"
+                          value={reader.settings.line_spacing}
+                          min={0.8}
+                          max={3}
+                          step={0.05}
+                          decimals={2}
+                          onCommit={async (next) => {
+                            await onApplySettings({ line_spacing: next });
+                          }}
+                        />
+                        <NumericSettingControl
+                          label="Word Spacing"
+                          testId="setting-word-spacing"
+                          value={reader.settings.word_spacing}
+                          min={0}
+                          max={24}
+                          step={1}
+                          decimals={0}
+                          onCommit={async (next) => {
+                            await onApplySettings({ word_spacing: Math.round(next) });
+                          }}
+                        />
+                        <NumericSettingControl
+                          label="Letter Spacing"
+                          testId="setting-letter-spacing"
+                          value={reader.settings.letter_spacing}
+                          min={0}
+                          max={24}
+                          step={1}
+                          decimals={0}
+                          onCommit={async (next) => {
+                            await onApplySettings({ letter_spacing: Math.round(next) });
+                          }}
+                        />
+
+                        <Stack direction="row" alignItems="center" justifyContent="space-between">
+                          <Typography variant="caption" fontWeight={700}>
+                            Auto Scroll
+                          </Typography>
+                          <Switch
+                            checked={reader.settings.auto_scroll_tts}
+                            onChange={(event) =>
+                              void onApplySettings({ auto_scroll_tts: event.target.checked })
+                            }
+                          />
+                        </Stack>
+                        <Stack direction="row" alignItems="center" justifyContent="space-between">
+                          <Typography variant="caption" fontWeight={700}>
+                            Auto Center
+                          </Typography>
+                          <Switch
+                            checked={reader.settings.center_spoken_sentence}
+                            onChange={(event) =>
+                              void onApplySettings({
+                                center_spoken_sentence: event.target.checked
+                              })
+                            }
+                          />
+                        </Stack>
                       </Stack>
-                    </Stack>
-                  ) : null}
+                    ) : null}
 
-                  {reader.panels.show_stats ? (
-                    <Stack spacing={0.8}>
-                      <Typography variant="body2">
-                        Page index: {reader.stats.page_index} / {reader.stats.total_pages}
-                      </Typography>
-                      <Typography variant="body2">
-                        TTS progress: {reader.stats.tts_progress_pct.toFixed(3)}%
-                      </Typography>
-                      <Typography variant="body2">
-                        Page time remaining: {formatSeconds(reader.stats.page_time_remaining_secs)}
-                      </Typography>
-                      <Typography variant="body2">
-                        Book time remaining: {formatSeconds(reader.stats.book_time_remaining_secs)}
-                      </Typography>
-                      <Divider />
-                      <Typography variant="body2">
-                        Words on page: {reader.stats.page_word_count}
-                      </Typography>
-                      <Typography variant="body2">
-                        Sentences on page: {reader.stats.page_sentence_count}
-                      </Typography>
-                      <Typography variant="body2">
-                        Percent at start of page: {formatPercent(reader.stats.page_start_percent)}
-                      </Typography>
-                      <Typography variant="body2">
-                        Percent at end of page: {formatPercent(reader.stats.page_end_percent)}
-                      </Typography>
-                      <Typography variant="body2">
-                        Words read to page start: {reader.stats.words_read_up_to_page_start}
-                      </Typography>
-                      <Typography variant="body2">
-                        Sentences read to page start: {reader.stats.sentences_read_up_to_page_start}
-                      </Typography>
-                      <Typography variant="body2">
-                        Words read to current position:{" "}
-                        {reader.stats.words_read_up_to_current_position}
-                      </Typography>
-                      <Typography variant="body2">
-                        Sentences read to current position:{" "}
-                        {reader.stats.sentences_read_up_to_current_position}
-                      </Typography>
-                    </Stack>
-                  ) : null}
+                    {reader.panels.show_stats ? (
+                      <Stack spacing={0.8}>
+                        <Typography variant="body2">
+                          Page index: {reader.stats.page_index} / {reader.stats.total_pages}
+                        </Typography>
+                        <Typography variant="body2">
+                          TTS progress: {reader.stats.tts_progress_pct.toFixed(3)}%
+                        </Typography>
+                        <Typography variant="body2">
+                          Page time remaining: {formatSeconds(reader.stats.page_time_remaining_secs)}
+                        </Typography>
+                        <Typography variant="body2">
+                          Book time remaining: {formatSeconds(reader.stats.book_time_remaining_secs)}
+                        </Typography>
+                        <Divider />
+                        <Typography variant="body2">
+                          Words on page: {reader.stats.page_word_count}
+                        </Typography>
+                        <Typography variant="body2">
+                          Sentences on page: {reader.stats.page_sentence_count}
+                        </Typography>
+                        <Typography variant="body2">
+                          Percent at start of page: {formatPercent(reader.stats.page_start_percent)}
+                        </Typography>
+                        <Typography variant="body2">
+                          Percent at end of page: {formatPercent(reader.stats.page_end_percent)}
+                        </Typography>
+                        <Typography variant="body2">
+                          Words read to page start: {reader.stats.words_read_up_to_page_start}
+                        </Typography>
+                        <Typography variant="body2">
+                          Sentences read to page start: {reader.stats.sentences_read_up_to_page_start}
+                        </Typography>
+                        <Typography variant="body2">
+                          Words read to current position: {reader.stats.words_read_up_to_current_position}
+                        </Typography>
+                        <Typography variant="body2">
+                          Sentences read to current position: {reader.stats.sentences_read_up_to_current_position}
+                        </Typography>
+                      </Stack>
+                    ) : null}
 
-                  {reader.panels.show_tts ? (
-                    <Stack spacing={1.5}>
-                      <Typography variant="caption" fontWeight={700}>
-                        <span data-testid="reader-tts-state-summary">
-                          State: {reader.tts.state} | Sentence:{" "}
-                          {reader.tts.current_sentence_idx !== null
-                            ? `${reader.tts.current_sentence_idx + 1}/${Math.max(1, reader.tts.sentence_count)}`
-                            : `0/${Math.max(1, reader.tts.sentence_count)}`}
-                        </span>
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        <span data-testid="reader-tts-progress-label">
-                          Progress: {reader.tts.progress_pct.toFixed(3)}%
-                        </span>
-                      </Typography>
-                      {ttsStateEvent ? (
+                    {reader.panels.show_tts ? (
+                      <Stack spacing={1.5}>
+                        <Typography variant="caption" fontWeight={700}>
+                          <span data-testid="reader-tts-state-summary">
+                            State: {reader.tts.state} | Sentence:{" "}
+                            {reader.tts.current_sentence_idx !== null
+                              ? `${reader.tts.current_sentence_idx + 1}/${Math.max(1, reader.tts.sentence_count)}`
+                              : `0/${Math.max(1, reader.tts.sentence_count)}`}
+                          </span>
+                        </Typography>
                         <Typography variant="caption" color="text.secondary">
-                          Last TTS event #{ttsStateEvent.request_id}: {ttsStateEvent.action}
+                          <span data-testid="reader-tts-progress-label">
+                            Progress: {reader.tts.progress_pct.toFixed(3)}%
+                          </span>
                         </Typography>
-                      ) : null}
-                      <Stack
-                        ref={ttsControlRowRef}
-                        direction="row"
-                        spacing={1}
-                        data-testid="reader-tts-control-row"
-                        sx={{
-                          flexWrap: "nowrap",
-                          overflow: "hidden",
-                          whiteSpace: "nowrap",
-                          minHeight: 36
-                        }}
-                      >
-                        <Button
-                          variant="contained"
-                          size="small"
-                          onClick={() => void onTtsTogglePlayPause()}
-                          data-testid="reader-tts-toggle-button"
+                        {ttsStateEvent ? (
+                          <Typography variant="caption" color="text.secondary">
+                            Last TTS event #{ttsStateEvent.request_id}: {ttsStateEvent.action}
+                          </Typography>
+                        ) : null}
+                        <Stack
+                          ref={ttsControlRowRef}
+                          direction="row"
+                          spacing={1}
+                          data-testid="reader-tts-control-row"
+                          sx={{
+                            flexWrap: "nowrap",
+                            overflow: "hidden",
+                            whiteSpace: "nowrap",
+                            minHeight: 36
+                          }}
                         >
-                          {playbackLabel}
-                        </Button>
-                        {ttsControlVisibility.showPlayButton ? (
                           <Button
-                            variant="outlined"
+                            variant="contained"
                             size="small"
-                            onClick={() => void onTtsPlay()}
-                            data-testid="reader-tts-play-button"
+                            onClick={() => void onTtsTogglePlayPause()}
+                            data-testid="reader-tts-toggle-button"
                           >
-                            Play
+                            {playbackLabel}
                           </Button>
-                        ) : null}
-                        {ttsControlVisibility.showPauseButton ? (
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            onClick={() => void onTtsPause()}
-                            data-testid="reader-tts-pause-button"
-                          >
-                            Pause
-                          </Button>
-                        ) : null}
-                        {ttsControlVisibility.showPlayPageButton ? (
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            onClick={() => void onTtsPlayFromPageStart()}
-                            disabled={reader.tts.sentence_count === 0}
-                            data-testid="reader-tts-play-page-button"
-                          >
-                            Play Page
-                          </Button>
-                        ) : null}
-                        {ttsControlVisibility.showPlayHighlightButton ? (
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            onClick={() => void onTtsPlayFromHighlight()}
-                            disabled={!hasHighlightSentence}
-                            data-testid="reader-tts-play-highlight-button"
-                          >
-                            Play Highlight
-                          </Button>
-                        ) : null}
-                        {ttsControlVisibility.showPrevSentenceButton ? (
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            onClick={() => void onTtsSeekPrev()}
-                            disabled={!reader.tts.can_seek_prev}
-                            data-testid="reader-tts-prev-sentence-button"
-                          >
-                            Prev Sentence
-                          </Button>
-                        ) : null}
-                        {ttsControlVisibility.showNextSentenceButton ? (
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            onClick={() => void onTtsSeekNext()}
-                            disabled={!reader.tts.can_seek_next}
-                            data-testid="reader-tts-next-sentence-button"
-                          >
-                            Next Sentence
-                          </Button>
-                        ) : null}
-                        {ttsControlVisibility.showRepeatButton ? (
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            onClick={() => void onTtsRepeatSentence()}
-                            disabled={!hasHighlightSentence}
-                            data-testid="reader-tts-repeat-button"
-                          >
-                            Repeat
-                          </Button>
-                        ) : null}
+                          {ttsControlVisibility.showPlayButton ? (
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => void onTtsPlay()}
+                              data-testid="reader-tts-play-button"
+                            >
+                              Play
+                            </Button>
+                          ) : null}
+                          {ttsControlVisibility.showPauseButton ? (
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => void onTtsPause()}
+                              data-testid="reader-tts-pause-button"
+                            >
+                              Pause
+                            </Button>
+                          ) : null}
+                          {ttsControlVisibility.showPlayPageButton ? (
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => void onTtsPlayFromPageStart()}
+                              disabled={reader.tts.sentence_count === 0}
+                              data-testid="reader-tts-play-page-button"
+                            >
+                              Play Page
+                            </Button>
+                          ) : null}
+                          {ttsControlVisibility.showPlayHighlightButton ? (
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => void onTtsPlayFromHighlight()}
+                              disabled={!hasHighlightSentence}
+                              data-testid="reader-tts-play-highlight-button"
+                            >
+                              Play Highlight
+                            </Button>
+                          ) : null}
+                          {ttsControlVisibility.showPrevSentenceButton ? (
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => void onTtsSeekPrev()}
+                              disabled={!reader.tts.can_seek_prev}
+                              data-testid="reader-tts-prev-sentence-button"
+                            >
+                              Prev Sentence
+                            </Button>
+                          ) : null}
+                          {ttsControlVisibility.showNextSentenceButton ? (
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => void onTtsSeekNext()}
+                              disabled={!reader.tts.can_seek_next}
+                              data-testid="reader-tts-next-sentence-button"
+                            >
+                              Next Sentence
+                            </Button>
+                          ) : null}
+                          {ttsControlVisibility.showRepeatButton ? (
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              onClick={() => void onTtsRepeatSentence()}
+                              disabled={!hasHighlightSentence}
+                              data-testid="reader-tts-repeat-button"
+                            >
+                              Repeat
+                            </Button>
+                          ) : null}
+                        </Stack>
+                        <Divider />
+                        <NumericSettingControl
+                          label="Playback Speed"
+                          testId="setting-tts-speed"
+                          value={reader.settings.tts_speed}
+                          min={0.25}
+                          max={4}
+                          step={0.05}
+                          decimals={2}
+                          onCommit={async (next) => {
+                            await onApplySettings({ tts_speed: next });
+                          }}
+                        />
+                        <NumericSettingControl
+                          label="Volume"
+                          testId="setting-tts-volume"
+                          value={reader.settings.tts_volume}
+                          min={0}
+                          max={2}
+                          step={0.05}
+                          decimals={2}
+                          onCommit={async (next) => {
+                            await onApplySettings({ tts_volume: next });
+                          }}
+                        />
+                        <NumericSettingControl
+                          label="Pause After Sentence"
+                          testId="setting-pause-after-sentence"
+                          value={reader.settings.pause_after_sentence}
+                          min={0}
+                          max={3}
+                          step={0.01}
+                          decimals={2}
+                          onCommit={async (next) => {
+                            await onApplySettings({ pause_after_sentence: next });
+                          }}
+                        />
                       </Stack>
-                      <Divider />
-                      <NumericSettingControl
-                        label="Playback Speed"
-                        testId="setting-tts-speed"
-                        value={reader.settings.tts_speed}
-                        min={0.25}
-                        max={4}
-                        step={0.05}
-                        decimals={2}
-                        onCommit={async (next) => {
-                          await onApplySettings({ tts_speed: next });
-                        }}
-                      />
-                      <NumericSettingControl
-                        label="Volume"
-                        testId="setting-tts-volume"
-                        value={reader.settings.tts_volume}
-                        min={0}
-                        max={2}
-                        step={0.05}
-                        decimals={2}
-                        onCommit={async (next) => {
-                          await onApplySettings({ tts_volume: next });
-                        }}
-                      />
-                      <NumericSettingControl
-                        label="Pause After Sentence"
-                        testId="setting-pause-after-sentence"
-                        value={reader.settings.pause_after_sentence}
-                        min={0}
-                        max={3}
-                        step={0.01}
-                        decimals={2}
-                        onCommit={async (next) => {
-                          await onApplySettings({ pause_after_sentence: next });
-                        }}
-                      />
-                    </Stack>
-                  ) : null}
+                    ) : null}
+                  </div>
                 </Stack>
               </div>
             ) : null}

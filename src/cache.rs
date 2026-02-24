@@ -320,7 +320,6 @@ pub fn delete_recent_source_and_cache(source_path: &Path) -> Result<(), String> 
     Ok(())
 }
 
-
 fn resolve_existing_recent_source_path(source_path: &Path) -> Option<PathBuf> {
     if source_path.as_os_str().is_empty() {
         return None;

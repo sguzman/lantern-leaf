@@ -1,5 +1,5 @@
 [appearance]
-theme = "night"
+theme = "day"
 font_family = "lexend"
 font_weight = "bold"
 font_size = 22
@@ -36,7 +36,7 @@ show_tts = true
 show_settings = true
 
 [logging]
-log_level = "info"
+log_level = "debug"
 
 [storage]
 cache_dir = ".cache"

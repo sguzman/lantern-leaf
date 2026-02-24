@@ -33,7 +33,17 @@ export function mapFontFamily(value: string | undefined): string {
       return "Atkinson Hyperlegible Next, Noto Sans, sans-serif";
     case "lexica-ultralegible":
       return "Lexica Ultralegible, Noto Sans, sans-serif";
+    case "courier":
+      return "Courier New, Courier, monospace";
+    case "frank-gothic":
+      return "Franklin Gothic Medium, Arial Narrow, sans-serif";
+    case "hermit":
+      return "Hermit, Fira Code, monospace";
+    case "hasklug":
+      return "Hasklug, Fira Code, monospace";
     case "noto-sans":
+      return "Noto Sans, Segoe UI, sans-serif";
+    case "sans":
       return "Noto Sans, Segoe UI, sans-serif";
     case "lexend":
     default:

@@ -1,6 +1,8 @@
 export interface ReaderTopBarVisibility {
   showSentenceButtons: boolean;
+  showJumpButton: boolean;
   showTextModeButton: boolean;
+  showThemeButton: boolean;
   showSettingsButton: boolean;
   showStatsButton: boolean;
   showTtsButton: boolean;
@@ -10,10 +12,12 @@ export function computeReaderTopBarVisibility(widthPx: number): ReaderTopBarVisi
   const width = Math.max(0, widthPx);
   return {
     showSentenceButtons: width >= 860,
-    showTextModeButton: width >= 980,
-    showSettingsButton: width >= 1090,
-    showStatsButton: width >= 1200,
-    showTtsButton: width >= 1310
+    showJumpButton: width >= 980,
+    showTextModeButton: width >= 1090,
+    showThemeButton: width >= 1200,
+    showSettingsButton: width >= 1310,
+    showStatsButton: width >= 1420,
+    showTtsButton: width >= 1530
   };
 }
 
