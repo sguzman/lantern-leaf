@@ -90,12 +90,10 @@ interface NumericSettingControlProps {
 
 interface ReaderQuickActionsProps {
   busy: boolean;
-  isNightTheme: boolean;
   isTextOnly: boolean;
   showSettings: boolean;
   showStats: boolean;
   showTts: boolean;
-  onToggleTheme: () => Promise<void>;
   onToggleTextOnly: () => Promise<void>;
   onToggleSettingsPanel: () => Promise<void>;
   onToggleStatsPanel: () => Promise<void>;
@@ -373,12 +371,10 @@ function NumericSettingControl({
 
 const ReaderQuickActions = memo(function ReaderQuickActions({
   busy,
-  isNightTheme,
   isTextOnly,
   showSettings,
   showStats,
   showTts,
-  onToggleTheme,
   onToggleTextOnly,
   onToggleSettingsPanel,
   onToggleStatsPanel,
@@ -388,13 +384,6 @@ const ReaderQuickActions = memo(function ReaderQuickActions({
 
   const actions = useMemo(
     () => [
-      {
-        key: "theme",
-        label: "Day/Night",
-        icon: isNightTheme ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />,
-        active: false,
-        onClick: onToggleTheme
-      },
       {
         key: "text",
         label: "Text-only",
@@ -425,12 +414,10 @@ const ReaderQuickActions = memo(function ReaderQuickActions({
       }
     ],
     [
-      isNightTheme,
       isTextOnly,
       onToggleSettingsPanel,
       onToggleStatsPanel,
       onToggleTextOnly,
-      onToggleTheme,
       onToggleTtsPanel,
       showSettings,
       showStats,
@@ -723,6 +710,9 @@ export const ReaderShell = memo(function ReaderShell({
   const playbackLabel = reader.tts.state === "playing" ? "Pause" : "Play";
   const hasHighlightSentence = reader.highlighted_sentence_idx !== null;
   const textModeLabel = reader.text_only_mode ? "Pretty Text" : "Text-only";
+  const themeLabel = reader.settings.theme === "night" ? "Day" : "Night";
+  const themeIcon =
+    reader.settings.theme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />;
 
   return (
     <Card className="w-full max-w-[1700px] min-h-0 rounded-3xl border border-slate-200 shadow-sm lg:h-full">
@@ -736,9 +726,11 @@ export const ReaderShell = memo(function ReaderShell({
             data-testid="reader-topbar"
             sx={{
               flexWrap: "nowrap",
-              overflow: "hidden",
+              overflowX: "hidden",
+              overflowY: "visible",
               whiteSpace: "nowrap",
-              minHeight: 44,
+              minHeight: 52,
+              paddingTop: 0.5,
               paddingRight: 0.5,
               flexShrink: 0
             }}
@@ -824,16 +816,24 @@ export const ReaderShell = memo(function ReaderShell({
               sx={{ width: 92, flexShrink: 0 }}
               label="Page"
             />
+            <Button
+              variant="outlined"
+              startIcon={themeIcon}
+              onClick={() => void onToggleTheme()}
+              disabled={busy}
+              data-testid="reader-topbar-theme-toggle-button"
+              sx={{ flexShrink: 0 }}
+            >
+              {themeLabel}
+            </Button>
           </Stack>
 
           <ReaderQuickActions
             busy={busy}
-            isNightTheme={reader.settings.theme === "night"}
             isTextOnly={reader.text_only_mode}
             showSettings={reader.panels.show_settings}
             showStats={reader.panels.show_stats}
             showTts={reader.panels.show_tts}
-            onToggleTheme={onToggleTheme}
             onToggleTextOnly={onToggleTextOnly}
             onToggleSettingsPanel={onToggleSettingsPanel}
             onToggleStatsPanel={onToggleStatsPanel}
@@ -945,6 +945,7 @@ export const ReaderShell = memo(function ReaderShell({
                       overflowY: "auto",
                       minHeight: 0,
                       overscrollBehavior: "contain",
+                      paddingTop: 6,
                       paddingRight: 8,
                       scrollbarGutter: "stable"
                     }}
