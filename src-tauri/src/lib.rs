@@ -260,10 +260,29 @@ fn bridge_error(code: &str, message: impl Into<String>) -> BridgeError {
     }
 }
 
+fn runtime_mode_label() -> String {
+    let tauri_env = std::env::var("TAURI_ENV")
+        .ok()
+        .map(|value| value.to_ascii_lowercase());
+    let tauri_dev = std::env::var("TAURI_DEV")
+        .ok()
+        .map(|value| value.to_ascii_lowercase());
+    let forced_dev = matches!(
+        tauri_dev.as_deref(),
+        Some("1") | Some("true") | Some("yes")
+    ) || matches!(tauri_env.as_deref(), Some("dev") | Some("development"));
+
+    if cfg!(dev) || forced_dev {
+        "dev".to_string()
+    } else {
+        "release".to_string()
+    }
+}
+
 fn bootstrap_state_from_backend(guard: &BackendState) -> BootstrapState {
     BootstrapState {
         app_name: "LanternLeaf".to_string(),
-        mode: "migration".to_string(),
+        mode: runtime_mode_label(),
         config: BootstrapConfig {
             theme: guard.base_config.theme,
             font_family: guard.base_config.font_family,
@@ -360,6 +379,14 @@ fn configure_cache_dir_from_workspace() {
         cache_dir = %cache_candidate.display(),
         "Configured cache root from workspace context"
     );
+}
+
+fn dev_logs_dir() -> PathBuf {
+    if let Some(root) = workspace_root_from_cwd() {
+        root.join("logs")
+    } else {
+        PathBuf::from("logs")
+    }
 }
 
 fn app_config_path() -> PathBuf {
@@ -2045,11 +2072,25 @@ pub fn run() {
     let startup_config = config::load_config(&config_path);
     configure_cache_dir_from_config(&startup_config, &config_path);
     configure_cache_dir_from_workspace();
-    let log_plugin = tauri_plugin_log::Builder::new()
+    let mut log_builder = tauri_plugin_log::Builder::new()
         .level(log_level_to_filter(startup_config.log_level))
         .target(Target::new(TargetKind::Stdout))
-        .target(Target::new(TargetKind::Webview))
-        .build();
+        .target(Target::new(TargetKind::Webview));
+
+    if runtime_mode_label() == "dev" {
+        let logs_dir = dev_logs_dir();
+        log_builder = log_builder.target(Target::new(TargetKind::Folder {
+            path: logs_dir.clone(),
+            file_name: Some("lanternleaf-dev".to_string()),
+        }));
+        info!(
+            mode = %runtime_mode_label(),
+            logs_dir = %logs_dir.display(),
+            "Enabled dev file logging target"
+        );
+    }
+
+    let log_plugin = log_builder.build();
 
     info!("Starting LanternLeaf tauri bridge");
     info!(
@@ -2135,7 +2176,7 @@ mod tests {
     fn bootstrap_state_roundtrips_json_contract() {
         let state = BootstrapState {
             app_name: "LanternLeaf".to_string(),
-            mode: "migration".to_string(),
+            mode: runtime_mode_label(),
             config: BootstrapConfig {
                 theme: config::ThemeMode::Day,
                 font_family: config::FontFamily::Lexend,
