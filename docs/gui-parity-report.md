@@ -17,10 +17,12 @@ This report compares core workflows between the legacy iced UI path and the Taur
 | Open local source path (`.epub/.pdf/.txt/.md`) | Supported | Supported | Bridge commands `source_open_path`, `source_open_clipboard_text` in `src-tauri/src/lib.rs`; adapter tests in `ui/tests/tauriApi.test.ts` |
 | Open clipboard text source | Supported | Supported | `source_open_clipboard_text` in `src-tauri/src/lib.rs`; starter UI action in `ui/src/components/StarterShell.tsx` |
 | Recent list + delete recent/cache | Supported | Supported | Commands `recent_list`, `recent_delete` in `src-tauri/src/lib.rs`; starter UI cards/actions in `ui/src/components/StarterShell.tsx` |
+| Starter clipboard + recent-delete in real Tauri runtime | Supported | Supported | Runtime smoke flow covers clipboard-open and recent-delete actions in `ui/e2e-tauri/smoke.test.mjs` |
 | Calibre load/open | Supported | Supported | Commands `calibre_load_books`, `calibre_open_book`; virtualization helpers in `ui/src/components/calibreList.ts` and tests in `ui/tests/calibreList.test.ts` |
 | Reader page navigation/search | Supported | Supported | Reader commands in `src-tauri/src/lib.rs`; UI integration in `ui/src/components/ReaderShell.tsx` |
 | Sentence click to move highlight/TTS anchor | Supported | Supported | Mapping/state in `src-tauri/src/session.rs`; store behavior tests in `ui/tests/appStore.test.ts` |
 | Pause semantics across page/sentence navigation | Supported | Supported | Session tests in `src-tauri/src/session.rs` (`paused_state_*`, `sentence_click_keeps_paused_state`) |
+| Pause semantics in real Tauri runtime | Supported | Supported | Tauri-runner scenario asserts paused state is preserved across `Next Page` and `Next Sentence` in `ui/e2e-tauri/smoke.test.mjs` |
 | Settings/stats/TTS panel exclusivity and text-mode toggle | Supported | Supported | Reader panel/text-mode controls in `ui/src/components/ReaderShell.tsx`; Tauri-runner coverage in `ui/e2e-tauri/smoke.test.mjs` |
 | Source-open cancellation on close/return | Supported | Supported | Cancellation plumbing in `src-tauri/src/lib.rs` (`active_open_request` / `active_open_source_path`) and event handling test in `ui/tests/appStore.test.ts` |
 | Responsive no-vertical-collapse top controls | Supported | Supported | Policy helpers in `ui/src/components/layoutPolicies.ts`; tests in `ui/tests/layoutPolicies.test.ts` |
@@ -35,7 +37,7 @@ This report compares core workflows between the legacy iced UI path and the Taur
 
 ## Current Gaps
 
-- Tauri-native runner currently covers a smoke path; broader scenario coverage still needs expansion.
+- Tauri-native runner coverage still needs PDF/calibre-heavy runtime scenarios (current runtime smoke now covers starter/reader/TTS core paths).
 
 ## Validation Snapshot
 

@@ -2,20 +2,22 @@
 
 Use this checklist for explicit pass/fail gating before cutover.
 
+Last automated verification run: `2026-02-24` (local + Tauri runtime smoke).
+
 ## Starter Flows
 
 - [ ] Open EPUB path succeeds and transitions to reader.
 - [ ] Open PDF path succeeds and emits PDF transcription events.
-- [ ] Open clipboard text succeeds and creates a reusable source.
-- [ ] Recent open/delete behavior is correct and cache-aware.
+- [x] Open clipboard text succeeds and creates a reusable source.
+- [x] Recent open/delete behavior is correct and cache-aware.
 - [ ] Calibre load/open works at scale without UI lockups.
 
 ## Reader Flows
 
-- [ ] Sentence click re-anchors highlight and playback correctly.
-- [ ] Page navigation preserves expected highlight semantics.
+- [x] Sentence click re-anchors highlight and playback correctly.
+- [x] Page navigation preserves expected highlight semantics.
 - [ ] Search query + next/prev behaves identically to prior behavior.
-- [ ] Pretty/text-only mode switching is reversible and stable.
+- [x] Pretty/text-only mode switching is reversible and stable.
 
 ## TTS Flows
 
@@ -25,25 +27,25 @@ Use this checklist for explicit pass/fail gating before cutover.
 
 ## Layout/UX Rules
 
-- [ ] Top/TTS control bars never render vertically/compressed text.
-- [ ] Auto-scroll/auto-center keeps highlight in view across resize and setting changes.
-- [ ] Settings/stats panel exclusivity is preserved.
+- [x] Top/TTS control bars never render vertically/compressed text.
+- [x] Auto-scroll/auto-center keeps highlight in view across resize and setting changes.
+- [x] Settings/stats panel exclusivity is preserved.
 
 ## Runtime/Persistence
 
 - [ ] Close session cancels in-flight jobs and returns to starter.
 - [ ] Safe quit performs housekeeping and persistence.
-- [ ] Bookmark/config resume fidelity is preserved.
+- [x] Bookmark/config resume fidelity is preserved.
 - [ ] Runtime log-level change persists to `conf/config.toml`.
 
 ## Test Gates
 
-- [ ] `cargo test`
-- [ ] `cargo test -p ebup-viewer-tauri --lib`
-- [ ] `cargo check --workspace`
-- [ ] `pnpm --dir ui run check`
-- [ ] `pnpm --dir ui run lint`
-- [ ] `pnpm --dir ui run test`
-- [ ] `pnpm --dir ui run test:e2e`
-- [ ] `pnpm --dir ui run test:e2e:tauri`
-- [ ] `pnpm --dir ui run build`
+- [x] `cargo test`
+- [x] `cargo test -p ebup-viewer-tauri --lib`
+- [x] `cargo check --workspace`
+- [x] `pnpm --dir ui run check`
+- [x] `pnpm --dir ui run lint`
+- [x] `pnpm --dir ui run test`
+- [x] `pnpm --dir ui run test:e2e`
+- [x] `pnpm --dir ui run test:e2e:tauri`
+- [x] `pnpm --dir ui run build`

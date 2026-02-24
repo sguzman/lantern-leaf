@@ -176,7 +176,8 @@ export function StarterShell({
             {summaryText}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            Runtime log level: {runtimeLogLevel}
+            Runtime log level:{" "}
+            <span data-testid="starter-runtime-log-level-value">{runtimeLogLevel}</span>
           </Typography>
           <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems="center">
             <FormControl size="small" className="md:min-w-44">
@@ -187,6 +188,7 @@ export function StarterShell({
                 value={logLevelValue}
                 onChange={(event) => setLogLevelValue(String(event.target.value))}
                 disabled={busy}
+                data-testid="starter-log-level-select"
               >
                 <MenuItem value="trace">trace</MenuItem>
                 <MenuItem value="debug">debug</MenuItem>
@@ -200,22 +202,27 @@ export function StarterShell({
               variant="outlined"
               onClick={() => void onSetRuntimeLogLevel(logLevelValue)}
               disabled={busy || runtimeLogLevel === logLevelValue}
+              data-testid="starter-log-level-apply-button"
             >
               Apply Log Level
             </Button>
           </Stack>
           {sourceOpenStatus ? (
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="text.secondary" data-testid="starter-open-status">
               {sourceOpenStatus}
             </Typography>
           ) : null}
           {calibreStatus ? (
-            <Typography variant="caption" color="text.secondary">
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              data-testid="starter-calibre-status"
+            >
               {calibreStatus}
             </Typography>
           ) : null}
           {pdfStatus ? (
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="text.secondary" data-testid="starter-pdf-status">
               {pdfStatus}
             </Typography>
           ) : null}
@@ -244,7 +251,12 @@ export function StarterShell({
             >
               Open
             </Button>
-            <Button variant="outlined" onClick={() => void handleClipboardOpen()} disabled={busy}>
+            <Button
+              variant="outlined"
+              onClick={() => void handleClipboardOpen()}
+              disabled={busy}
+              data-testid="starter-open-clipboard-button"
+            >
               Open Clipboard
             </Button>
           </Stack>
@@ -294,6 +306,8 @@ export function StarterShell({
                   key={recent.source_path}
                   variant="outlined"
                   className="rounded-2xl border-slate-200 shadow-none"
+                  data-testid="starter-recent-card"
+                  data-recent-path={recent.source_path}
                 >
                   <CardContent className="pb-3">
                     <Stack spacing={0.75}>
@@ -311,6 +325,8 @@ export function StarterShell({
                       variant="contained"
                       onClick={() => void onOpenPath(recent.source_path)}
                       disabled={busy}
+                      data-testid="starter-recent-open-button"
+                      data-recent-path={recent.source_path}
                     >
                       Open
                     </Button>
@@ -321,6 +337,8 @@ export function StarterShell({
                       startIcon={<DeleteOutlineIcon />}
                       onClick={() => void onDeleteRecent(recent.source_path)}
                       disabled={busy}
+                      data-testid="starter-recent-delete-button"
+                      data-recent-path={recent.source_path}
                     >
                       Delete
                     </Button>

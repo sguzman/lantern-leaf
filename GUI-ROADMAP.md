@@ -151,7 +151,7 @@
 - [x] P13-01 Keep and run Rust unit/integration tests for core logic at every phase.
 - [x] P13-02 Add bridge command tests for all critical command paths.
 - [x] P13-03 Add frontend unit tests for reducers/store actions and command adapters.
-- [x] P13-04 Add E2E scenarios (Playwright + Tauri runner) for core reading/TTS flows. (Playwright browser scenarios plus dedicated Tauri-runner smoke wiring added in CI.)
+- [x] P13-04 Add E2E scenarios (Playwright + Tauri runner) for core reading/TTS flows. (Playwright browser scenarios plus dedicated Tauri-runner smoke wiring added in CI, now including starter recent-delete + clipboard-open runtime coverage.)
 - [x] P13-05 Add explicit regression scenarios from your prior incidents (sentence click halt, highlight drift, duplicate PDF jobs, close-during-tts).
 - [x] P13-06 Add large calibre dataset performance scenario and verify non-blocking UX.
 - [x] P13-07 Add PDF edge corpus tests with degraded pages and fallback paths.
@@ -160,8 +160,8 @@
 **Phase 14: Cutover And Decommission**
 
 - [x] P14-01 Run dual-track period where iced build remains available for fallback. (Both root iced path and Tauri path are continuously validated in CI.)
-- [ ] P14-02 Complete parity signoff checklist with explicit pass on all must-have behaviors.
-- [ ] P14-03 Switch default desktop target to Tauri app.
+- [ ] P14-02 Complete parity signoff checklist with explicit pass on all must-have behaviors. (In progress: checklist execution is partially automated via runtime smoke + CI gate matrix.)
+- [x] P14-03 Switch default desktop target to Tauri app. (Root `pnpm dev`/`pnpm build` now target Tauri; legacy iced path remains explicit as `pnpm desktop:legacy` until decommission.)
 - [ ] P14-04 Remove iced UI modules only after parity and soak tests pass.
 - [ ] P14-05 Keep core interfaces stable for future GUI changes.
 
@@ -169,7 +169,7 @@
 
 - [ ] R-01 Large text rendering performance in WebView with per-sentence spans.
 - [ ] R-02 Highlight/scroll mismatch from mixed Rust vs DOM coordinate systems. (Mitigated with DOM-anchored reader logic plus Tauri-runner highlight-visibility checks under settings changes.)
-- [ ] R-03 Long-running TTS/PDF tasks outliving session context. (Mitigated with request-id stale-event guards and Tauri-runner smoke; keep open until broader soak.)
+- [ ] R-03 Long-running TTS/PDF tasks outliving session context. (Mitigated with request-id stale-event guards, Tauri-runner smoke including starter/reader transitions, and paused-state runtime checks; keep open until broader soak.)
 - [x] R-04 Type drift between Rust DTOs and TS interfaces.
 - [x] R-05 Styling conflicts between MUI and Tailwind resets/utilities.
 - [ ] R-06 Tauri permission/capability restrictions breaking filesystem/subprocess workflows.
