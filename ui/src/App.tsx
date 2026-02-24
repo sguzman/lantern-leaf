@@ -253,6 +253,14 @@ export default function App() {
           data-message={pdfTranscriptionEvent?.message ?? ""}
           style={{ display: "none" }}
         />
+        <div
+          data-testid="app-last-calibre-event"
+          data-phase={calibreLoadEvent?.phase ?? "none"}
+          data-request-id={calibreLoadEvent?.request_id ?? 0}
+          data-count={calibreLoadEvent?.count ?? -1}
+          data-message={calibreLoadEvent?.message ?? ""}
+          style={{ display: "none" }}
+        />
         <Container maxWidth={false} className="px-2 py-4 md:px-4 md:py-6">
           <Stack spacing={2} alignItems="center">
             {loadingBootstrap ? <CircularProgress /> : null}

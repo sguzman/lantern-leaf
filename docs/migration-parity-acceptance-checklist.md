@@ -12,6 +12,7 @@ Last automated verification run: `2026-02-24` (local + Tauri runtime smoke).
 - [x] Open clipboard text succeeds and creates a reusable source.
 - [x] Recent open/delete behavior is correct and cache-aware.
 - [ ] Calibre load/open works at scale without UI lockups.
+- [x] Calibre load emits terminal lifecycle (`finished`/`failed`) with diagnostics in runtime smoke.
 
 ## Reader Flows
 

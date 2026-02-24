@@ -130,7 +130,9 @@ struct CachedBookList {
 
 impl CalibreConfig {
     pub fn load_default() -> Self {
-        let path = PathBuf::from(DEFAULT_CALIBRE_CONFIG_PATH);
+        let Some(path) = resolve_config_path() else {
+            return Self::default();
+        };
         let Ok(contents) = fs::read_to_string(&path) else {
             return Self::default();
         };
@@ -204,6 +206,39 @@ impl CalibreConfig {
             out
         }
     }
+}
+
+fn resolve_config_path() -> Option<PathBuf> {
+    if let Some(value) = std::env::var_os("CALIBRE_CONFIG_PATH") {
+        let candidate = PathBuf::from(value);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        warn!(
+            path = %candidate.display(),
+            "CALIBRE_CONFIG_PATH is set but file does not exist; falling back to defaults/search paths"
+        );
+    }
+
+    let relative = PathBuf::from(DEFAULT_CALIBRE_CONFIG_PATH);
+    if relative.exists() {
+        return Some(relative);
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let rooted = manifest_dir.join(DEFAULT_CALIBRE_CONFIG_PATH);
+    if rooted.exists() {
+        return Some(rooted);
+    }
+
+    if let Some(parent) = manifest_dir.parent() {
+        let rooted_parent = parent.join(DEFAULT_CALIBRE_CONFIG_PATH);
+        if rooted_parent.exists() {
+            return Some(rooted_parent);
+        }
+    }
+
+    None
 }
 
 pub fn load_books(config: &CalibreConfig, force_refresh: bool) -> Result<Vec<CalibreBook>> {
@@ -1076,4 +1111,60 @@ fn now_unix_nanos() -> u128 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_file(name: &str, extension: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("ebup_viewer_calibre_{name}_{nanos}.{extension}"))
+    }
+
+    #[test]
+    fn load_default_reads_env_override_file() {
+        let key = "CALIBRE_CONFIG_PATH";
+        let previous = std::env::var_os(key);
+        let path = unique_temp_file("load_default", "toml");
+        fs::write(
+            &path,
+            r#"
+[calibre]
+enabled = true
+server_urls = ["http://0.0.0.0:1"]
+allowed_extensions = ["epub", "pdf", "txt"]
+"#,
+        )
+        .expect("write calibre override");
+
+        // SAFETY: test-scoped env mutation; restored before test exits.
+        unsafe {
+            std::env::set_var(key, &path);
+        }
+        let config = CalibreConfig::load_default();
+        assert!(config.enabled);
+        assert_eq!(config.server_urls, vec!["http://0.0.0.0:1".to_string()]);
+
+        match previous {
+            Some(value) => {
+                // SAFETY: test-scoped env mutation restore.
+                unsafe {
+                    std::env::set_var(key, value);
+                }
+            }
+            None => {
+                // SAFETY: test-scoped env mutation restore.
+                unsafe {
+                    std::env::remove_var(key);
+                }
+            }
+        }
+
+        let _ = fs::remove_file(path);
+    }
 }

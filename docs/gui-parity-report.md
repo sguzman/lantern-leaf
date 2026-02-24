@@ -21,6 +21,7 @@ This report compares core workflows between the legacy iced UI path and the Taur
 | Starter clipboard + recent-delete in real Tauri runtime | Supported | Supported | Runtime smoke flow covers clipboard-open and recent-delete actions in `ui/e2e-tauri/smoke.test.mjs` |
 | PDF transcription event lifecycle visibility in real runtime | Supported | Supported | Runtime smoke asserts terminal `pdf-transcription` + `source-open` marker events (including diagnostics on failure) in `ui/e2e-tauri/smoke.test.mjs` |
 | Calibre load/open | Supported | Supported | Commands `calibre_load_books`, `calibre_open_book`; virtualization helpers in `ui/src/components/calibreList.ts` and tests in `ui/tests/calibreList.test.ts` |
+| Calibre load terminal lifecycle visibility in real runtime | Supported | Supported | Runtime smoke asserts terminal `calibre-load` marker events and diagnostics in `ui/e2e-tauri/smoke.test.mjs` |
 | Reader page navigation/search | Supported | Supported | Reader commands in `src-tauri/src/lib.rs`; UI integration in `ui/src/components/ReaderShell.tsx` |
 | Reader search next/prev in real Tauri runtime | Supported | Supported | Runtime smoke exercises search apply/next/prev and highlighted sentence transitions in `ui/e2e-tauri/smoke.test.mjs` |
 | Sentence click to move highlight/TTS anchor | Supported | Supported | Mapping/state in `src-tauri/src/session.rs`; store behavior tests in `ui/tests/appStore.test.ts` |
@@ -44,7 +45,7 @@ This report compares core workflows between the legacy iced UI path and the Taur
 ## Current Gaps
 
 - Full PDF success in runtime smoke is still environment-dependent on quack-check/docling dependencies; smoke currently gates terminal event diagnostics.
-- Tauri-native runner coverage still needs calibre-heavy runtime scenarios.
+- Full calibre-open success in runtime smoke is still environment-dependent on reachable calibre backends; smoke currently gates terminal event diagnostics.
 
 ## Validation Snapshot
 

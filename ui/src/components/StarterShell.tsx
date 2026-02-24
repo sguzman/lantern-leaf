@@ -360,6 +360,7 @@ export function StarterShell({
                 variant="outlined"
                 onClick={() => setShowCalibre((current) => !current)}
                 disabled={busy}
+                data-testid="starter-calibre-toggle-button"
               >
                 {showCalibre ? "Hide" : "Show"}
               </Button>
@@ -368,6 +369,7 @@ export function StarterShell({
                 variant="outlined"
                 onClick={() => void onLoadCalibre(false)}
                 disabled={busy || loadingCalibre}
+                data-testid="starter-calibre-load-button"
               >
                 Load
               </Button>
@@ -377,6 +379,7 @@ export function StarterShell({
                 startIcon={<RefreshIcon />}
                 onClick={() => void onLoadCalibre(true)}
                 disabled={busy || loadingCalibre}
+                data-testid="starter-calibre-refresh-button"
               >
                 Refresh
               </Button>
@@ -391,6 +394,7 @@ export function StarterShell({
                   fullWidth
                   label="Search calibre (title/author/format)"
                   value={calibreSearch}
+                  inputProps={{ "data-testid": "starter-calibre-search-input" }}
                   onChange={(event) => setCalibreSearch(event.target.value)}
                   disabled={busy || loadingCalibre}
                 />
@@ -466,6 +470,8 @@ export function StarterShell({
                       variant="contained"
                       onClick={() => void onOpenCalibreBook(book.id)}
                       disabled={busy}
+                      data-testid="starter-calibre-open-button"
+                      data-book-id={book.id}
                     >
                       Open
                     </Button>

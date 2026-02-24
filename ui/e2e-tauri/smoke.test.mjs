@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 import path from "node:path";
@@ -21,6 +21,7 @@ const webdriverServer = "http://127.0.0.1:4444/";
 const PANDOC_PIPELINE_REV = "pandoc-clean-v1";
 const QUACK_CHECK_PIPELINE_REV = "quack-check-pdf-v2";
 const DEFAULT_QUACK_TEXT_FILENAME = "transcript.txt";
+const CALIBRE_CACHE_REV = "calibre-cache-v1";
 
 function runOrThrow(command, args, cwd) {
   const result = spawnSync(command, args, {
@@ -147,6 +148,139 @@ function createEpubFixture(sourcePath, marker) {
     sourcePath,
     `${marker} first sentence. ${marker} second sentence. ${marker} third sentence.`
   );
+}
+
+function normalizeCalibreExt(raw) {
+  const normalized = String(raw ?? "").trim().replace(/^\./, "").toLowerCase();
+  if (normalized === "markdown") {
+    return "md";
+  }
+  return normalized;
+}
+
+function sanitizeCalibreExts(exts) {
+  const out = [];
+  for (const raw of exts ?? []) {
+    const normalized = normalizeCalibreExt(raw);
+    const mapped =
+      normalized === "epub" || normalized === "pdf" || normalized === "txt" || normalized === "md"
+        ? normalized
+        : null;
+    if (mapped && !out.includes(mapped)) {
+      out.push(mapped);
+    }
+  }
+  return out.length > 0 ? out : ["epub", "pdf", "md", "txt"];
+}
+
+function sanitizeCalibreServerUrls(urls) {
+  const out = [];
+  for (const raw of urls ?? []) {
+    const normalized = String(raw ?? "").trim().replace(/\/+$/, "");
+    if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
+      continue;
+    }
+    if (!out.includes(normalized)) {
+      out.push(normalized);
+    }
+  }
+  return out.length > 0 ? out : ["http://127.0.0.1:8080", "http://localhost:8080"];
+}
+
+function sanitizeCalibreLibraryUrl(raw) {
+  const normalized = String(raw ?? "").trim();
+  if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
+    return null;
+  }
+  return normalized;
+}
+
+function toTomlString(value) {
+  return JSON.stringify(String(value));
+}
+
+function buildCalibreCacheSignature(config) {
+  const hash = createHash("sha256");
+  hash.update(CALIBRE_CACHE_REV);
+  hash.update(String(config.calibredb_bin ?? "calibredb"));
+
+  const libraryUrl = sanitizeCalibreLibraryUrl(config.library_url);
+  if (libraryUrl) {
+    hash.update(libraryUrl);
+    hash.update(Buffer.from([0]));
+  }
+  for (const url of sanitizeCalibreServerUrls(config.server_urls)) {
+    hash.update(url);
+    hash.update(Buffer.from([0]));
+  }
+  if (config.state_path) {
+    hash.update(String(config.state_path));
+  }
+  if (config.library_path) {
+    hash.update(String(config.library_path));
+  }
+  hash.update(Buffer.from([config.allow_local_library_fallback ? 1 : 0]));
+  for (const ext of sanitizeCalibreExts(config.allowed_extensions)) {
+    hash.update(ext);
+    hash.update(Buffer.from([0]));
+  }
+  return hash.digest("hex");
+}
+
+function writeCalibreConfigFixture(configPath, config) {
+  const lines = [
+    "[calibre]",
+    `enabled = ${config.enabled ? "true" : "false"}`,
+    `library_url = ${toTomlString(config.library_url ?? "")}`,
+    `state_path = ${toTomlString(config.state_path ?? "")}`,
+    `calibredb_bin = ${toTomlString(config.calibredb_bin ?? "calibredb")}`,
+    `server_urls = [${(config.server_urls ?? []).map((value) => toTomlString(value)).join(", ")}]`,
+    `server_username = ${toTomlString(config.server_username ?? "")}`,
+    `server_password = ${toTomlString(config.server_password ?? "")}`,
+    `allow_local_library_fallback = ${config.allow_local_library_fallback ? "true" : "false"}`,
+    `allowed_extensions = [${(config.allowed_extensions ?? []).map((value) => toTomlString(value)).join(", ")}]`,
+    `columns = [${(config.columns ?? []).map((value) => toTomlString(value)).join(", ")}]`,
+    `list_cache_ttl_secs = ${Math.max(0, Math.trunc(config.list_cache_ttl_secs ?? 600))}`,
+    "",
+    "[calibre.content_server]",
+    `username = ${toTomlString(config.content_username ?? "")}`,
+    `password = ${toTomlString(config.content_password ?? "")}`,
+    ""
+  ];
+  writeFileSync(configPath, lines.join("\n"), "utf8");
+}
+
+function writeCalibreCacheFixture(cachePath, signature, books) {
+  const lines = [
+    `rev = ${toTomlString(CALIBRE_CACHE_REV)}`,
+    `generated_unix_secs = ${Math.floor(Date.now() / 1000)}`,
+    `signature = ${toTomlString(signature)}`,
+    ""
+  ];
+
+  for (const book of books) {
+    lines.push("[[books]]");
+    lines.push(`id = ${Math.max(0, Math.trunc(book.id))}`);
+    lines.push(`title = ${toTomlString(book.title)}`);
+    lines.push(`extension = ${toTomlString(book.extension)}`);
+    lines.push(`authors = ${toTomlString(book.authors)}`);
+    if (book.year !== null && book.year !== undefined) {
+      lines.push(`year = ${Math.trunc(book.year)}`);
+    }
+    if (book.file_size_bytes !== null && book.file_size_bytes !== undefined) {
+      lines.push(`file_size_bytes = ${Math.max(0, Math.trunc(book.file_size_bytes))}`);
+    }
+    if (book.path) {
+      lines.push(`path = ${toTomlString(book.path)}`);
+    }
+    if (book.cover_thumbnail) {
+      lines.push(`cover_thumbnail = ${toTomlString(book.cover_thumbnail)}`);
+    }
+    lines.push("");
+  }
+
+  mkdirSync(path.dirname(cachePath), { recursive: true });
+  writeFileSync(cachePath, lines.join("\n"), "utf8");
 }
 
 function resolveTauriBinary() {
@@ -552,6 +686,65 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
     pdfPath,
     `${pdfMarker} first sentence. ${pdfMarker} second sentence. ${pdfMarker} third sentence.`
   );
+  const calibreSourceFileName = `tauri-e2e-calibre-source-${uniqueRunId}.txt`;
+  const calibreSourcePath = path.resolve(tmpDir, calibreSourceFileName);
+  const calibreMarker = `calibre-runtime-marker-${uniqueRunId}`;
+  writeFileSync(
+    calibreSourcePath,
+    `${calibreMarker} first sentence. ${calibreMarker} second sentence. ${calibreMarker} third sentence.`,
+    "utf8"
+  );
+  const calibreConfigPath = path.resolve(tmpDir, `tauri-e2e-calibre-${uniqueRunId}.toml`);
+  const calibreConfigRepoPath = path.resolve(repoRoot, "conf", "calibre.toml");
+  const previousCalibreConfigFile = existsSync(calibreConfigRepoPath)
+    ? readFileSync(calibreConfigRepoPath, "utf8")
+    : null;
+  const calibreCachePath = path.resolve(repoRoot, ".cache", "calibre-books.toml");
+  const previousCalibreCache = existsSync(calibreCachePath)
+    ? readFileSync(calibreCachePath, "utf8")
+    : null;
+  const calibreTargetBookId = 910_001;
+  const calibreTargetTitle = `Runtime Calibre Target ${uniqueRunId}`;
+  const calibreConfig = {
+    enabled: true,
+    library_url: "",
+    state_path: "",
+    calibredb_bin: "calibredb",
+    server_urls: ["http://0.0.0.0:1"],
+    server_username: "",
+    server_password: "",
+    content_username: "",
+    content_password: "",
+    allow_local_library_fallback: false,
+    allowed_extensions: ["epub", "pdf", "md", "txt"],
+    columns: ["title", "extension", "author", "year", "size"],
+    list_cache_ttl_secs: 3600
+  };
+  writeCalibreConfigFixture(calibreConfigPath, calibreConfig);
+  writeFileSync(calibreConfigRepoPath, readFileSync(calibreConfigPath, "utf8"), "utf8");
+  const calibreSignature = buildCalibreCacheSignature(calibreConfig);
+  const calibreBooks = [];
+  for (let idx = 0; idx < 1_500; idx += 1) {
+    const id = idx + 1;
+    calibreBooks.push({
+      id,
+      title: `Runtime Calibre Book ${String(id).padStart(5, "0")}`,
+      extension: "txt",
+      authors: `Author ${String((id % 337) + 1).padStart(3, "0")}`,
+      year: 1900 + (id % 120),
+      file_size_bytes: 1024 + idx
+    });
+  }
+  calibreBooks.push({
+    id: calibreTargetBookId,
+    title: calibreTargetTitle,
+    extension: "txt",
+    authors: "Runtime Author",
+    year: 2024,
+    file_size_bytes: 4096,
+    path: calibreSourcePath
+  });
+  writeCalibreCacheFixture(calibreCachePath, calibreSignature, calibreBooks);
 
   runOrThrow("pnpm", ["tauri", "build", "--debug", "--no-bundle"], repoRoot);
   const application = resolveTauriBinary();
@@ -572,6 +765,19 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
       }
     } finally {
       tauriDriver.kill();
+      if (previousCalibreConfigFile === null) {
+        rmSync(calibreConfigRepoPath, { force: true });
+      } else {
+        writeFileSync(calibreConfigRepoPath, previousCalibreConfigFile, "utf8");
+      }
+      if (previousCalibreCache === null) {
+        rmSync(calibreCachePath, { force: true });
+      } else {
+        mkdirSync(path.dirname(calibreCachePath), { recursive: true });
+        writeFileSync(calibreCachePath, previousCalibreCache, "utf8");
+      }
+      rmSync(calibreConfigPath, { force: true });
+      rmSync(calibreSourcePath, { force: true });
     }
   });
 
@@ -1022,4 +1228,80 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
     );
     await waitForElement(driver, By.xpath("//h1[normalize-space()='Welcome']"), 20000);
   }
+
+  const calibreLoadButton = await waitForElement(
+    driver,
+    By.css("[data-testid='starter-calibre-load-button']")
+  );
+  await calibreLoadButton.click();
+  const calibrePhase = await waitForMarkerAttribute(
+    driver,
+    "app-last-calibre-event",
+    "data-phase",
+    (value) => value === "finished" || value === "failed",
+    30000
+  );
+  if (calibrePhase !== "finished") {
+    const calibreMessage = await waitForMarkerAttribute(
+      driver,
+      "app-last-calibre-event",
+      "data-message",
+      () => true,
+      5000
+    );
+    assert.ok(
+      calibreMessage.length > 0,
+      "calibre load failure should include a diagnostic message"
+    );
+    return;
+  }
+  const calibreCount = Number(
+    await waitForMarkerAttribute(driver, "app-last-calibre-event", "data-count", () => true, 5000)
+  );
+  assert.ok(
+    Number.isFinite(calibreCount) && calibreCount >= 1500,
+    `expected calibre load count >= 1500, got ${calibreCount}`
+  );
+
+  const calibreSearchInput = await waitForElement(
+    driver,
+    By.css("input[data-testid='starter-calibre-search-input']")
+  );
+  await calibreSearchInput.click();
+  await calibreSearchInput.sendKeys(Key.chord(Key.CONTROL, "a"));
+  await calibreSearchInput.sendKeys(`Target ${uniqueRunId}`);
+
+  const calibreOpenButton = await waitForElement(
+    driver,
+    By.css(`[data-testid='starter-calibre-open-button'][data-book-id='${calibreTargetBookId}']`),
+    20000
+  );
+  await calibreOpenButton.click();
+  await waitForElement(driver, By.css("[data-testid='reader-close-session-button']"), 30000);
+  await waitForMarkerAttribute(
+    driver,
+    "app-last-source-open-event",
+    "data-phase",
+    (value) => value === "finished"
+  );
+  await waitForMarkerAttribute(
+    driver,
+    "app-last-source-open-event",
+    "data-source-path",
+    (value) => value.endsWith(calibreSourceFileName)
+  );
+  const calibreMarkerLiteral = xpathLiteral(calibreMarker);
+  await waitForElement(
+    driver,
+    By.xpath(
+      `//button[starts-with(@data-testid,'reader-sentence-') and contains(normalize-space(), ${calibreMarkerLiteral})]`
+    ),
+    20000
+  );
+  const closeSessionAfterCalibre = await waitForElement(
+    driver,
+    By.css("[data-testid='reader-close-session-button']")
+  );
+  await closeSessionAfterCalibre.click();
+  await waitForElement(driver, By.xpath("//h1[normalize-space()='Welcome']"), 20000);
 });
