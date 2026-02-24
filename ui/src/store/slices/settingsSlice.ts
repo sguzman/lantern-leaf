@@ -9,6 +9,7 @@ export function createSettingsSliceActions({ set, get, backend }: SliceContext):
   | "toggleStatsPanel"
   | "toggleTtsPanel"
   | "setRuntimeLogLevel"
+  | "toggleTheme"
 > {
   return {
     readerApplySettings: async (patch) => {
@@ -90,6 +91,61 @@ export function createSettingsSliceActions({ set, get, backend }: SliceContext):
         set({ session: previousSession, reader: previousReader });
         set({ error: toBridgeError(error).message });
       }
+    },
+
+    toggleTheme: async () => {
+      await withBusy(set, get, "toggleTheme", async () => {
+        const previousBootstrap = get().bootstrapState;
+        const previousReader = get().reader;
+
+        if (previousBootstrap) {
+          const optimisticTheme =
+            previousBootstrap.config.theme === "night" ? "day" : "night";
+          set({
+            bootstrapState: {
+              ...previousBootstrap,
+              config: {
+                ...previousBootstrap.config,
+                theme: optimisticTheme
+              }
+            },
+            reader: previousReader
+              ? {
+                  ...previousReader,
+                  settings: {
+                    ...previousReader.settings,
+                    theme: optimisticTheme
+                  }
+                }
+              : previousReader
+          });
+        }
+
+        try {
+          const bootstrapState = await backend.sessionToggleTheme();
+          const reader = get().reader;
+          set({
+            bootstrapState,
+            reader: reader
+              ? {
+                  ...reader,
+                  settings: {
+                    ...reader.settings,
+                    theme: bootstrapState.config.theme
+                  }
+                }
+              : reader
+          });
+        } catch (error) {
+          const bridgeError = toBridgeError(error);
+          set({
+            bootstrapState: previousBootstrap,
+            reader: previousReader,
+            error: bridgeError.message
+          });
+          throw bridgeError;
+        }
+      });
     },
 
     setRuntimeLogLevel: async (level) => {

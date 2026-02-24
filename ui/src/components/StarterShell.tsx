@@ -1,6 +1,7 @@
+import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
-import MenuBookIcon from "@mui/icons-material/MenuBook";
+import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import {
   Button,
@@ -47,6 +48,7 @@ interface StarterShellProps {
   onLoadCalibre: (forceRefresh?: boolean) => Promise<void>;
   onOpenCalibreBook: (bookId: number) => Promise<void>;
   onSetRuntimeLogLevel: (level: string) => Promise<void>;
+  onToggleTheme: () => Promise<void>;
   sourceOpenEvent: SourceOpenEvent | null;
   calibreLoadEvent: CalibreLoadEvent | null;
   pdfTranscriptionEvent: PdfTranscriptionEvent | null;
@@ -67,6 +69,7 @@ export function StarterShell({
   onLoadCalibre,
   onOpenCalibreBook,
   onSetRuntimeLogLevel,
+  onToggleTheme,
   sourceOpenEvent,
   calibreLoadEvent,
   pdfTranscriptionEvent,
@@ -83,13 +86,9 @@ export function StarterShell({
   const calibreRowHeight = 58;
   const calibreViewportHeight = 384;
   const calibreOverscan = 10;
-
-  const summaryText = useMemo(() => {
-    if (!bootstrap) {
-      return "Loading bootstrap defaults...";
-    }
-    return `Defaults: font ${bootstrap.config.default_font_size}, lines/page ${bootstrap.config.default_lines_per_page}, TTS speed ${bootstrap.config.default_tts_speed.toFixed(2)}x, pause ${bootstrap.config.default_pause_after_sentence.toFixed(2)}s.`;
-  }, [bootstrap]);
+  const recentsViewportHeight = 384;
+  const currentTheme = bootstrap?.config.theme ?? "day";
+  const themeToggleLabel = currentTheme === "night" ? "Switch to Day" : "Switch to Night";
 
   const filteredCalibre = useMemo(() => {
     return filterAndSortCalibreBooks(calibreBooks, calibreSearch, calibreSort);
@@ -161,25 +160,11 @@ export function StarterShell({
     <Card className="w-full max-w-7xl rounded-3xl border border-slate-200 shadow-sm">
       <CardContent>
         <Stack spacing={2.5}>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <MenuBookIcon fontSize="small" />
-            <Typography variant="h5" component="h1" fontWeight={700}>
-              Welcome
+          <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+            <Typography variant="caption" color="text.secondary">
+              Runtime log level:{" "}
+              <span data-testid="starter-runtime-log-level-value">{runtimeLogLevel}</span>
             </Typography>
-          </Stack>
-
-          <Typography variant="body1" color="text.secondary">
-            React/Tauri migration shell is active. The bridge now supports real source loading,
-            reader snapshots, search/navigation, settings/stats, and calibre open flows.
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {summaryText}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            Runtime log level:{" "}
-            <span data-testid="starter-runtime-log-level-value">{runtimeLogLevel}</span>
-          </Typography>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems="center">
             <FormControl size="small" className="md:min-w-44">
               <InputLabel id="runtime-log-level-label">Log Level</InputLabel>
               <Select
@@ -259,6 +244,17 @@ export function StarterShell({
             >
               Open Clipboard
             </Button>
+            <Button
+              variant="outlined"
+              startIcon={
+                currentTheme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />
+              }
+              onClick={() => void onToggleTheme()}
+              disabled={busy}
+              data-testid="starter-theme-toggle-button"
+            >
+              {themeToggleLabel}
+            </Button>
           </Stack>
 
           {clipboardError ? (
@@ -269,7 +265,7 @@ export function StarterShell({
 
           <Divider />
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Stack spacing={2.5}>
               <Stack direction="row" alignItems="center" justifyContent="space-between">
                 <Typography variant="h6" component="h2" fontWeight={700}>
@@ -302,8 +298,9 @@ export function StarterShell({
               ) : null}
 
               {hasRecents ? (
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  {recents.map((recent) => (
+                <div className="overflow-y-auto pr-1" style={{ maxHeight: recentsViewportHeight }}>
+                  <div className="grid grid-cols-1 gap-3">
+                    {recents.map((recent) => (
                     <Card
                       key={recent.source_path}
                       variant="outlined"
@@ -346,7 +343,8 @@ export function StarterShell({
                         </Button>
                       </CardActions>
                     </Card>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               ) : null}
             </Stack>

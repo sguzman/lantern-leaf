@@ -269,7 +269,7 @@ pub fn load_books_with_cancel(
     let signature = cache_signature(config);
     if !force_refresh {
         ensure_not_cancelled(cancel, "before_cache_load")?;
-        if let Some(mut cached) = try_load_cache(config, &signature, false)? {
+        if let Some(mut cached) = try_load_cache(config, &signature, false, false)? {
             info!(book_count = cached.len(), "Using cached calibre catalog");
             let changed = hydrate_book_thumbnails(
                 config,
@@ -291,7 +291,37 @@ pub fn load_books_with_cancel(
         info!("Calibre cache missing/incompatible; fetching from source");
     }
 
-    let mut books = fetch_books(config, cancel)?;
+    let mut books = match fetch_books(config, cancel) {
+        Ok(books) => books,
+        Err(err) => {
+            ensure_not_cancelled(cancel, "after_fetch_books_failed")?;
+            if let Some(mut cached) = try_load_cache(config, &signature, false, true)? {
+                warn!(
+                    error = %err,
+                    book_count = cached.len(),
+                    "Failed to fetch calibre catalog; falling back to cached catalog"
+                );
+                let changed = hydrate_book_thumbnails(
+                    config,
+                    &mut cached,
+                    THUMB_PREFETCH_LIMIT,
+                    THUMB_PREFETCH_BUDGET,
+                    cancel,
+                );
+                if changed {
+                    let _ = write_cache(&signature, &cached);
+                }
+                info!(
+                    book_count = cached.len(),
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "Finished calibre catalog load from fallback cache"
+                );
+                return Ok(cached);
+            }
+            return Err(err);
+        }
+    };
+
     ensure_not_cancelled(cancel, "after_fetch_books")?;
     info!(
         book_count = books.len(),
@@ -1071,6 +1101,7 @@ fn try_load_cache(
     config: &CalibreConfig,
     signature: &str,
     check_ttl: bool,
+    allow_signature_mismatch: bool,
 ) -> Result<Option<Vec<CalibreBook>>> {
     let cache_path = calibre_cache_path();
     let contents = match fs::read_to_string(&cache_path) {
@@ -1081,7 +1112,10 @@ fn try_load_cache(
         Ok(parsed) => parsed,
         Err(_) => return Ok(None),
     };
-    if parsed.rev != CALIBRE_CACHE_REV || parsed.signature != signature {
+    if parsed.rev != CALIBRE_CACHE_REV {
+        return Ok(None);
+    }
+    if !allow_signature_mismatch && parsed.signature != signature {
         return Ok(None);
     }
 
@@ -1240,14 +1274,23 @@ allowed_extensions = ["epub", "pdf", "txt"]
             std::env::set_var(key, &override_path);
         }
 
-        assert_eq!(calibre_cache_path(), override_path.join(CALIBRE_CACHE_FILE));
+        assert_eq!(
+            calibre_cache_path(),
+            override_path
+                .join("lantern-leaf")
+                .join(CALIBRE_CACHE_FILE)
+        );
         assert_eq!(
             calibre_download_dir(),
-            override_path.join(CALIBRE_DOWNLOAD_SUBDIR)
+            override_path
+                .join("lantern-leaf")
+                .join(CALIBRE_DOWNLOAD_SUBDIR)
         );
         assert_eq!(
             calibre_thumb_dir(),
-            override_path.join(CALIBRE_THUMB_SUBDIR)
+            override_path
+                .join("lantern-leaf")
+                .join(CALIBRE_THUMB_SUBDIR)
         );
 
         match previous {

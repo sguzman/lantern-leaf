@@ -258,6 +258,15 @@ async function mockSessionGetBootstrap(): Promise<BootstrapState> {
   return structuredClone(mockState.bootstrap);
 }
 
+async function mockSessionToggleTheme(): Promise<BootstrapState> {
+  const nextTheme = mockState.bootstrap.config.theme === "night" ? "day" : "night";
+  mockState.bootstrap.config.theme = nextTheme;
+  if (mockState.reader) {
+    mockState.reader.settings.theme = nextTheme;
+  }
+  return structuredClone(mockState.bootstrap);
+}
+
 async function mockSessionGetState(): Promise<SessionState> {
   return structuredClone(mockState.session);
 }
@@ -547,6 +556,7 @@ async function mockLoggingSetLevel(level: string): Promise<string> {
 export interface BackendApi {
   appSafeQuit: () => Promise<void>;
   sessionGetBootstrap: () => Promise<BootstrapState>;
+  sessionToggleTheme: () => Promise<BootstrapState>;
   sessionGetState: () => Promise<SessionState>;
   sessionReturnToStarter: () => Promise<SessionState>;
   panelToggleSettings: () => Promise<SessionState>;
@@ -593,6 +603,7 @@ function createTauriBackendApi(): BackendApi {
   return {
     appSafeQuit: () => invokeCommand<void>("app_safe_quit"),
     sessionGetBootstrap: () => invokeCommand<BootstrapState>("session_get_bootstrap"),
+    sessionToggleTheme: () => invokeCommand<BootstrapState>("session_toggle_theme"),
     sessionGetState: () => invokeCommand<SessionState>("session_get_state"),
     sessionReturnToStarter: () => invokeCommand<SessionState>("session_return_to_starter"),
     panelToggleSettings: () => invokeCommand<SessionState>("panel_toggle_settings"),
@@ -659,6 +670,7 @@ function createMockBackendApi(): BackendApi {
   return {
     appSafeQuit: mockAppSafeQuit,
     sessionGetBootstrap: mockSessionGetBootstrap,
+    sessionToggleTheme: mockSessionToggleTheme,
     sessionGetState: mockSessionGetState,
     sessionReturnToStarter: mockSessionReturnToStarter,
     panelToggleSettings: mockPanelToggleSettings,

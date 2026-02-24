@@ -1,7 +1,7 @@
 //! Simple cache to remember the last opened page per EPUB file, along with
 //! finer-grained resume data (sentence + scroll position).
 //!
-//! Files are stored under `.cache/` using a hash of the source file contents
+//! Files are stored under `.cache/lantern-leaf/` using a hash of the source file contents
 //! as the directory name so path aliases do not fragment the cache. The format
 //! is a tiny TOML file with a `page` field plus optional `sentence_idx`,
 //! `sentence_text`, and `scroll_y` for resuming inside the page.
@@ -22,9 +22,11 @@ use std::time::UNIX_EPOCH;
 use tracing::{debug, warn};
 
 pub const CACHE_DIR: &str = ".cache";
+const CACHE_APP_SUBDIR: &str = "lantern-leaf";
 pub const CACHE_DIR_ENV: &str = "LANTERNLEAF_CACHE_DIR";
 const SOURCE_PATH_FILE: &str = "source-path.txt";
 static CONTENT_DIGEST_CACHE: OnceLock<Mutex<HashMap<PathBuf, SourceDigestEntry>>> = OnceLock::new();
+static CACHE_LAYOUT_INIT: OnceLock<()> = OnceLock::new();
 
 #[derive(Clone)]
 struct SourceDigestEntry {
@@ -53,10 +55,94 @@ pub struct RecentBook {
 }
 
 pub fn cache_root() -> PathBuf {
-    std::env::var_os(CACHE_DIR_ENV)
+    let configured_root = std::env::var_os(CACHE_DIR_ENV)
         .map(PathBuf::from)
         .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| PathBuf::from(CACHE_DIR))
+        .unwrap_or_else(|| PathBuf::from(CACHE_DIR));
+    let app_root = app_cache_root(&configured_root);
+    ensure_cache_layout(&configured_root, &app_root);
+    app_root
+}
+
+fn app_cache_root(configured_root: &Path) -> PathBuf {
+    if configured_root
+        .file_name()
+        .map(|name| name == std::ffi::OsStr::new(CACHE_APP_SUBDIR))
+        .unwrap_or(false)
+    {
+        configured_root.to_path_buf()
+    } else {
+        configured_root.join(CACHE_APP_SUBDIR)
+    }
+}
+
+fn ensure_cache_layout(configured_root: &Path, app_root: &Path) {
+    CACHE_LAYOUT_INIT.get_or_init(|| {
+        if let Err(err) = fs::create_dir_all(app_root) {
+            warn!(
+                path = %app_root.display(),
+                "Failed to create cache root directory: {err}"
+            );
+            return;
+        }
+        migrate_legacy_cache_layout(configured_root, app_root);
+    });
+}
+
+fn migrate_legacy_cache_layout(configured_root: &Path, app_root: &Path) {
+    if configured_root == app_root {
+        return;
+    }
+
+    let Ok(entries) = fs::read_dir(configured_root) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let file_name = entry.file_name();
+        if file_name == std::ffi::OsStr::new(CACHE_APP_SUBDIR) {
+            continue;
+        }
+        let Some(name_str) = file_name.to_str() else {
+            continue;
+        };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !should_migrate_legacy_cache_entry(name_str, file_type.is_dir()) {
+            continue;
+        }
+        let target = app_root.join(&file_name);
+        if target.exists() {
+            continue;
+        }
+        if let Err(err) = fs::rename(&path, &target) {
+            warn!(
+                from = %path.display(),
+                to = %target.display(),
+                "Failed to migrate cache entry: {err}"
+            );
+        }
+    }
+}
+
+fn should_migrate_legacy_cache_entry(name: &str, is_dir: bool) -> bool {
+    matches!(
+        name,
+        "calibre-books.toml"
+            | "calibre-downloads"
+            | "calibre-thumbs"
+            | "clipboard"
+            | "test-sources"
+            | "_cover_test.bin"
+            | "_thumb_test.bin"
+    ) || name.starts_with("quack-check-")
+        || (is_dir && is_sha256_dir_name(name))
+}
+
+fn is_sha256_dir_name(name: &str) -> bool {
+    name.len() == 64 && name.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn default_scroll() -> f32 {
@@ -252,9 +338,12 @@ fn resolve_existing_recent_source_path(source_path: &Path) -> Option<PathBuf> {
         .iter()
         .position(|segment| *segment == std::ffi::OsStr::new(CACHE_DIR))?;
 
-    let workspace_root = cache_root().parent()?.to_path_buf();
-    let mut candidate = workspace_root.join(CACHE_DIR);
+    let cache_root = cache_root();
+    let mut candidate = cache_root.clone();
     for segment in components.iter().skip(cache_idx + 1) {
+        if candidate == cache_root && *segment == std::ffi::OsStr::new(CACHE_APP_SUBDIR) {
+            continue;
+        }
         candidate.push(segment);
     }
 
@@ -490,7 +579,7 @@ mod tests {
         unsafe {
             std::env::set_var(key, &override_path);
         }
-        assert_eq!(cache_root(), override_path);
+        assert_eq!(cache_root(), override_path.join(CACHE_APP_SUBDIR));
 
         match previous {
             Some(value) => {

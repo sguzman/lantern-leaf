@@ -260,6 +260,34 @@ fn bridge_error(code: &str, message: impl Into<String>) -> BridgeError {
     }
 }
 
+fn bootstrap_state_from_backend(guard: &BackendState) -> BootstrapState {
+    BootstrapState {
+        app_name: "LanternLeaf".to_string(),
+        mode: "migration".to_string(),
+        config: BootstrapConfig {
+            theme: guard.base_config.theme,
+            font_family: guard.base_config.font_family,
+            font_weight: guard.base_config.font_weight,
+            day_highlight: guard.base_config.day_highlight,
+            night_highlight: guard.base_config.night_highlight,
+            log_level: guard.base_config.log_level.as_filter_str().to_string(),
+            default_font_size: guard.base_config.font_size,
+            default_lines_per_page: guard.base_config.lines_per_page,
+            default_tts_speed: guard.base_config.tts_speed,
+            default_pause_after_sentence: guard.base_config.pause_after_sentence,
+            key_toggle_play_pause: guard.base_config.key_toggle_play_pause.clone(),
+            key_next_sentence: guard.base_config.key_next_sentence.clone(),
+            key_prev_sentence: guard.base_config.key_prev_sentence.clone(),
+            key_repeat_sentence: guard.base_config.key_repeat_sentence.clone(),
+            key_toggle_search: guard.base_config.key_toggle_search.clone(),
+            key_safe_quit: guard.base_config.key_safe_quit.clone(),
+            key_toggle_settings: guard.base_config.key_toggle_settings.clone(),
+            key_toggle_stats: guard.base_config.key_toggle_stats.clone(),
+            key_toggle_tts: guard.base_config.key_toggle_tts.clone(),
+        },
+    }
+}
+
 fn workspace_root_from_cwd() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
     if cwd.file_name().and_then(|name| name.to_str()) == Some("src-tauri") {
@@ -1292,31 +1320,32 @@ fn session_get_bootstrap(
     let guard = state
         .lock()
         .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
-    Ok(BootstrapState {
-        app_name: "LanternLeaf".to_string(),
-        mode: "migration".to_string(),
-        config: BootstrapConfig {
-            theme: guard.base_config.theme,
-            font_family: guard.base_config.font_family,
-            font_weight: guard.base_config.font_weight,
-            day_highlight: guard.base_config.day_highlight,
-            night_highlight: guard.base_config.night_highlight,
-            log_level: guard.base_config.log_level.as_filter_str().to_string(),
-            default_font_size: guard.base_config.font_size,
-            default_lines_per_page: guard.base_config.lines_per_page,
-            default_tts_speed: guard.base_config.tts_speed,
-            default_pause_after_sentence: guard.base_config.pause_after_sentence,
-            key_toggle_play_pause: guard.base_config.key_toggle_play_pause.clone(),
-            key_next_sentence: guard.base_config.key_next_sentence.clone(),
-            key_prev_sentence: guard.base_config.key_prev_sentence.clone(),
-            key_repeat_sentence: guard.base_config.key_repeat_sentence.clone(),
-            key_toggle_search: guard.base_config.key_toggle_search.clone(),
-            key_safe_quit: guard.base_config.key_safe_quit.clone(),
-            key_toggle_settings: guard.base_config.key_toggle_settings.clone(),
-            key_toggle_stats: guard.base_config.key_toggle_stats.clone(),
-            key_toggle_tts: guard.base_config.key_toggle_tts.clone(),
-        },
-    })
+    Ok(bootstrap_state_from_backend(&guard))
+}
+
+#[tauri::command]
+fn session_toggle_theme(
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<BootstrapState, BridgeError> {
+    let (request_id, bootstrap_state) = {
+        let mut guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        let request_id = allocate_request_id(&mut guard);
+        guard.base_config.theme = match guard.base_config.theme {
+            config::ThemeMode::Day => config::ThemeMode::Night,
+            config::ThemeMode::Night => config::ThemeMode::Day,
+        };
+        let config_path = app_config_path();
+        persist_base_config(&guard.base_config, &config_path)?;
+        (request_id, bootstrap_state_from_backend(&guard))
+    };
+    info!(
+        request_id,
+        theme = %bootstrap_state.config.theme,
+        "Toggled starter theme"
+    );
+    Ok(bootstrap_state)
 }
 
 #[tauri::command]
@@ -1945,6 +1974,7 @@ macro_rules! bridge_command_idents {
     ($callback:ident) => {
         $callback!(
             session_get_bootstrap,
+            session_toggle_theme,
             session_get_state,
             session_return_to_starter,
             panel_toggle_settings,
@@ -2072,13 +2102,14 @@ mod tests {
 
     #[test]
     fn bridge_command_surface_remains_stable() {
-        assert_eq!(BRIDGE_COMMAND_NAMES.len(), 35);
+        assert_eq!(BRIDGE_COMMAND_NAMES.len(), 36);
         assert_eq!(BRIDGE_COMMAND_NAMES[0], "session_get_bootstrap");
         assert_eq!(
             BRIDGE_COMMAND_NAMES[BRIDGE_COMMAND_NAMES.len() - 1],
             "calibre_open_book"
         );
         assert!(BRIDGE_COMMAND_NAMES.contains(&"source_open_path"));
+        assert!(BRIDGE_COMMAND_NAMES.contains(&"session_toggle_theme"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"source_open_clipboard_text"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"reader_tts_play"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"reader_tts_repeat_sentence"));

@@ -66,6 +66,7 @@ export default function App() {
     deleteRecent,
     refreshRecents,
     setRuntimeLogLevel,
+    toggleTheme,
     loadCalibreBooks,
     openCalibreBook,
     closeReaderSession,
@@ -319,6 +320,7 @@ export default function App() {
                 pdfTranscriptionEvent={pdfTranscriptionEvent}
                 runtimeLogLevel={runtimeLogLevel}
                 onSetRuntimeLogLevel={setRuntimeLogLevel}
+                onToggleTheme={toggleTheme}
               />
             )}
           </Stack>

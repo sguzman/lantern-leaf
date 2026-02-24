@@ -107,6 +107,7 @@ export interface AppStore {
   loadCalibreBooks: (forceRefresh?: boolean) => Promise<void>;
   openCalibreBook: (bookId: number) => Promise<void>;
   setRuntimeLogLevel: (level: string) => Promise<void>;
+  toggleTheme: () => Promise<void>;
   clearError: () => void;
   dismissToast: () => void;
   clearTelemetry: () => void;
