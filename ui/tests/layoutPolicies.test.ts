@@ -21,7 +21,7 @@ describe("reader layout policies", () => {
 
     expect(medium.showSentenceButtons).toBe(true);
     expect(medium.showJumpButton).toBe(true);
-    expect(medium.showTextModeButton).toBe(true);
+    expect(medium.showTextModeButton).toBe(false);
     expect(medium.showThemeButton).toBe(false);
     expect(medium.showSettingsButton).toBe(false);
     expect(medium.showStatsButton).toBe(false);
@@ -33,7 +33,7 @@ describe("reader layout policies", () => {
     expect(wide.showThemeButton).toBe(true);
     expect(wide.showSettingsButton).toBe(true);
     expect(wide.showStatsButton).toBe(true);
-    expect(wide.showTtsButton).toBe(true);
+    expect(wide.showTtsButton).toBe(false);
   });
 
   it("keeps a minimal non-wrapping TTS control set at narrow widths", () => {

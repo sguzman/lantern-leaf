@@ -384,6 +384,31 @@ fn configure_cache_dir_from_workspace() {
     );
 }
 
+fn configure_calibre_config_path_from_workspace() {
+    if std::env::var_os("CALIBRE_CONFIG_PATH").is_some() {
+        return;
+    }
+
+    let Some(root) = workspace_root_from_cwd() else {
+        return;
+    };
+
+    let calibre_config_path = root.join("conf/calibre.toml");
+    if !calibre_config_path.exists() {
+        return;
+    }
+
+    // SAFETY: startup-time process env initialization before background worker threads are launched.
+    unsafe {
+        std::env::set_var("CALIBRE_CONFIG_PATH", &calibre_config_path);
+    }
+
+    info!(
+        path = %calibre_config_path.display(),
+        "Configured calibre config path from workspace context"
+    );
+}
+
 fn dev_logs_dir() -> PathBuf {
     if let Some(root) = workspace_root_from_cwd() {
         root.join("logs")
@@ -1094,11 +1119,26 @@ fn sync_tts_runtime_after_reader_change(
     }
 }
 
+fn should_sync_tts_after_reader_command(command: &session::SessionCommand) -> bool {
+    match command {
+        session::SessionCommand::GetSnapshot => false,
+        session::SessionCommand::ApplySettings { patch } => {
+            patch.font_size.is_some()
+                || patch.lines_per_page.is_some()
+                || patch.pause_after_sentence.is_some()
+                || patch.tts_speed.is_some()
+                || patch.tts_volume.is_some()
+        }
+        _ => true,
+    }
+}
+
 fn apply_reader_command(
     app: &tauri::AppHandle,
     state: &State<'_, Mutex<BackendState>>,
     command: session::SessionCommand,
 ) -> Result<session::ReaderSnapshot, BridgeError> {
+    let should_sync_tts = should_sync_tts_after_reader_command(&command);
     let action = command.action();
     let (snapshot, request_id) = {
         let mut guard = state
@@ -1116,7 +1156,9 @@ fn apply_reader_command(
     };
     emit_reader_state(app, request_id, action, &snapshot);
     emit_tts_state(app, request_id, action, &snapshot.tts);
-    sync_tts_runtime_after_reader_change(app, state);
+    if should_sync_tts {
+        sync_tts_runtime_after_reader_change(app, state);
+    }
     Ok(snapshot)
 }
 
@@ -2156,6 +2198,7 @@ pub fn run() {
     init_tracing(&startup_config, &log_timestamp);
     configure_cache_dir_from_config(&startup_config, &config_path);
     configure_cache_dir_from_workspace();
+    configure_calibre_config_path_from_workspace();
     let mut log_builder = tauri_plugin_log::Builder::new()
         .level(log_level_to_filter(startup_config.log_level))
         .target(Target::new(TargetKind::Stdout))

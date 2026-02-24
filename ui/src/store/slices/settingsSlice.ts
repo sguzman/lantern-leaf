@@ -13,25 +13,10 @@ export function createSettingsSliceActions({ set, get, backend }: SliceContext):
 > {
   return {
     readerApplySettings: async (patch) => {
-      const previous = get().reader;
-      if (previous) {
-        set({
-          reader: {
-            ...previous,
-            settings: {
-              ...previous.settings,
-              ...patch
-            }
-          }
-        });
-      }
       try {
         const reader = await backend.readerApplySettings(patch);
         set({ reader });
       } catch (error) {
-        if (previous) {
-          set({ reader: previous });
-        }
         set({ error: toBridgeError(error).message });
       }
     },

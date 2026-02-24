@@ -222,25 +222,33 @@ fn resolve_config_path() -> Option<PathBuf> {
         );
     }
 
-    let relative = PathBuf::from(DEFAULT_CALIBRE_CONFIG_PATH);
-    if relative.exists() {
-        return Some(relative);
-    }
+    let mut candidates = Vec::new();
+    candidates.push(PathBuf::from(DEFAULT_CALIBRE_CONFIG_PATH));
 
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let rooted = manifest_dir.join(DEFAULT_CALIBRE_CONFIG_PATH);
-    if rooted.exists() {
-        return Some(rooted);
-    }
-
-    if let Some(parent) = manifest_dir.parent() {
-        let rooted_parent = parent.join(DEFAULT_CALIBRE_CONFIG_PATH);
-        if rooted_parent.exists() {
-            return Some(rooted_parent);
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join(DEFAULT_CALIBRE_CONFIG_PATH));
+        if cwd
+            .file_name()
+            .map(|name| name == std::ffi::OsStr::new("src-tauri"))
+            .unwrap_or(false)
+        {
+            if let Some(parent) = cwd.parent() {
+                candidates.push(parent.join(DEFAULT_CALIBRE_CONFIG_PATH));
+            }
         }
     }
 
-    None
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    candidates.push(manifest_dir.join(DEFAULT_CALIBRE_CONFIG_PATH));
+
+    if let Some(parent) = manifest_dir.parent() {
+        candidates.push(parent.join(DEFAULT_CALIBRE_CONFIG_PATH));
+        if let Some(grand_parent) = parent.parent() {
+            candidates.push(grand_parent.join(DEFAULT_CALIBRE_CONFIG_PATH));
+        }
+    }
+
+    candidates.into_iter().find(|candidate| candidate.exists())
 }
 
 pub fn load_books(config: &CalibreConfig, force_refresh: bool) -> Result<Vec<CalibreBook>> {
@@ -254,6 +262,7 @@ pub fn load_books_with_cancel(
 ) -> Result<Vec<CalibreBook>> {
     ensure_not_cancelled(cancel, "calibre_load_start")?;
     if !config.enabled {
+        warn!("Calibre integration is disabled in config; returning empty catalogue");
         return Ok(Vec::new());
     }
 
@@ -1254,6 +1263,40 @@ allowed_extensions = ["epub", "pdf", "txt"]
         }
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_default_discovers_workspace_config_without_env_override() {
+        let key = "CALIBRE_CONFIG_PATH";
+        let previous = std::env::var_os(key);
+
+        // SAFETY: test-scoped env mutation; restored before test exits.
+        unsafe {
+            std::env::remove_var(key);
+        }
+
+        let resolved =
+            resolve_config_path().expect("workspace calibre config should be discoverable");
+        assert!(resolved.exists());
+        assert_eq!(
+            resolved.file_name().and_then(|name| name.to_str()),
+            Some("calibre.toml")
+        );
+
+        match previous {
+            Some(value) => {
+                // SAFETY: test-scoped env mutation restore.
+                unsafe {
+                    std::env::set_var(key, value);
+                }
+            }
+            None => {
+                // SAFETY: test-scoped env mutation restore.
+                unsafe {
+                    std::env::remove_var(key);
+                }
+            }
+        }
     }
 
     #[test]

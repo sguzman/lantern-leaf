@@ -266,7 +266,7 @@ function NumericSettingControl({
       <Typography variant="caption" fontWeight={700}>
         {label}
       </Typography>
-      <Stack direction="row" spacing={1.25} alignItems="center">
+      <Stack direction="row" spacing={1.25} alignItems="center" sx={{ overflow: "visible" }}>
         <Slider
           value={sliderValue}
           min={min}
@@ -285,6 +285,15 @@ function NumericSettingControl({
               return;
             }
             void commitNumber(nextValue);
+          }}
+          sx={{
+            flex: 1,
+            minWidth: 0,
+            px: 1,
+            overflow: "visible",
+            "& .MuiSlider-thumb": {
+              boxShadow: "none"
+            }
           }}
         />
         <TextField
@@ -566,6 +575,7 @@ export function ReaderShell({
               overflow: "hidden",
               whiteSpace: "nowrap",
               minHeight: 44,
+              paddingRight: 0.5,
               flexShrink: 0
             }}
           >
@@ -804,14 +814,22 @@ export function ReaderShell({
             </div>
 
             {panelTitle ? (
-              <div className="w-full shrink-0 overflow-hidden rounded-2xl border border-slate-200 p-3 lg:w-[380px] lg:h-full">
+              <div className="w-full min-h-0 shrink-0 rounded-2xl border border-slate-200 p-3 lg:h-full lg:w-[380px]">
                 <Stack spacing={1.25} sx={{ height: "100%", minHeight: 0 }}>
                   <Typography variant="subtitle1" fontWeight={700} sx={{ flexShrink: 0 }}>
                     <span data-testid="reader-panel-title">{panelTitle}</span>
                   </Typography>
                   <Divider sx={{ flexShrink: 0 }} />
 
-                  <div style={{ overflowY: "auto", minHeight: 0, overscrollBehavior: "contain" }}>
+                  <div
+                    style={{
+                      overflowY: "auto",
+                      minHeight: 0,
+                      overscrollBehavior: "contain",
+                      paddingRight: 8,
+                      scrollbarGutter: "stable"
+                    }}
+                  >
                     {reader.panels.show_settings ? (
                       <Stack spacing={1.5}>
                         <FormControl size="small">

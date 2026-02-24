@@ -468,8 +468,6 @@ impl ReaderSession {
 
         if repaginate {
             self.repaginate(normalizer, preserve);
-        } else {
-            self.update_search_matches(normalizer);
         }
     }
 

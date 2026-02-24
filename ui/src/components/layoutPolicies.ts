@@ -11,13 +11,13 @@ export interface ReaderTopBarVisibility {
 export function computeReaderTopBarVisibility(widthPx: number): ReaderTopBarVisibility {
   const width = Math.max(0, widthPx);
   return {
-    showSentenceButtons: width >= 860,
-    showJumpButton: width >= 980,
-    showTextModeButton: width >= 1090,
-    showThemeButton: width >= 1200,
-    showSettingsButton: width >= 1310,
-    showStatsButton: width >= 1420,
-    showTtsButton: width >= 1530
+    showSentenceButtons: width >= 900,
+    showJumpButton: width >= 1040,
+    showTextModeButton: width >= 1170,
+    showThemeButton: width >= 1310,
+    showSettingsButton: width >= 1450,
+    showStatsButton: width >= 1590,
+    showTtsButton: width >= 1730
   };
 }
 
