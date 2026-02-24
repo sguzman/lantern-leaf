@@ -277,13 +277,13 @@ impl ReaderSession {
             current_plan: None,
         };
 
-        let restore_global_idx = bookmark
-            .as_ref()
-            .and_then(|bookmark| session.global_idx_for_bookmark(bookmark));
-        if let Some(bookmark) = bookmark {
+        if let Some(bookmark) = bookmark.as_ref() {
             session.current_page = bookmark.page;
         }
-        session.repaginate(normalizer, restore_global_idx);
+        session.repaginate(normalizer, None);
+        if let Some(bookmark) = bookmark.as_ref() {
+            session.restore_bookmark_position(bookmark, normalizer);
+        }
         if session.highlighted_display_idx.is_none() {
             session.highlighted_display_idx = Some(0).filter(|_| session.current_display_len() > 0);
         }
@@ -740,6 +740,40 @@ impl ReaderSession {
             .min(self.page_sentence_counts.len().saturating_sub(1));
         let base: usize = self.page_sentence_counts.iter().take(page).sum();
         Some(base + sentence_idx)
+    }
+
+    fn restore_bookmark_position(
+        &mut self,
+        bookmark: &crate::cache::Bookmark,
+        normalizer: &normalizer::TextNormalizer,
+    ) {
+        if self.page_sentence_counts.is_empty() {
+            self.current_page = 0;
+            self.highlighted_display_idx = None;
+            self.highlighted_audio_idx = None;
+            return;
+        }
+
+        let clamped_page = bookmark
+            .page
+            .min(self.page_sentence_counts.len().saturating_sub(1));
+        self.current_page = clamped_page;
+
+        self.highlighted_display_idx = if let Some(global_idx) = self.global_idx_for_bookmark(bookmark)
+        {
+            let (page, idx) = self.page_idx_for_global_sentence(global_idx);
+            self.current_page = page;
+            Some(idx)
+        } else {
+            Some(0).filter(|_| self.current_display_len() > 0)
+        };
+
+        self.highlighted_audio_idx = None;
+        if self.text_only_mode {
+            self.highlighted_audio_idx = self
+                .highlighted_display_idx
+                .and_then(|idx| self.map_display_to_audio_idx(normalizer, idx));
+        }
     }
 
     fn page_idx_for_global_sentence(&self, global_idx: usize) -> (usize, usize) {
@@ -1357,6 +1391,23 @@ mod tests {
         session.tts_stop();
 
         assert_eq!(session.tts_state, TtsPlaybackState::Idle);
+    }
+
+    #[test]
+    fn restore_bookmark_position_preserves_page_and_sentence() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = build_test_session(&[&["A.", "B."], &["C.", "D.", "E."], &["F."]]);
+
+        let bookmark = crate::cache::Bookmark {
+            page: 1,
+            sentence_idx: Some(2),
+            sentence_text: None,
+            scroll_y: 0.0,
+        };
+        session.restore_bookmark_position(&bookmark, &normalizer);
+
+        assert_eq!(session.current_page, 1);
+        assert_eq!(session.highlighted_display_idx, Some(2));
     }
 
     #[test]
