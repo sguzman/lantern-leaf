@@ -28,9 +28,8 @@ import {
   Switch,
   TextField,
   Typography,
-  Zoom
 } from "@mui/material";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 
 import {
   computeReaderTopBarVisibility,
@@ -371,7 +370,7 @@ function NumericSettingControl({
   );
 }
 
-function ReaderQuickActions({
+const ReaderQuickActions = memo(function ReaderQuickActions({
   busy,
   isNightTheme,
   isTextOnly,
@@ -386,118 +385,133 @@ function ReaderQuickActions({
 }: ReaderQuickActionsProps) {
   const [open, setOpen] = useState(false);
 
-  const actions = [
-    {
-      key: "theme",
-      label: isNightTheme ? "Switch to Day" : "Switch to Night",
-      icon: isNightTheme ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />,
-      active: false,
-      onClick: onToggleTheme
-    },
-    {
-      key: "text",
-      label: isTextOnly ? "Pretty Text" : "Text-only",
-      icon: <TextFieldsIcon />,
-      active: isTextOnly,
-      onClick: onToggleTextOnly
-    },
-    {
-      key: "settings",
-      label: showSettings ? "Hide Settings" : "Settings",
-      icon: <TuneIcon />,
-      active: showSettings,
-      onClick: onToggleSettingsPanel
-    },
-    {
-      key: "stats",
-      label: showStats ? "Hide Stats" : "Stats",
-      icon: <QueryStatsIcon />,
-      active: showStats,
-      onClick: onToggleStatsPanel
-    },
-    {
-      key: "tts",
-      label: showTts ? "Hide TTS Controls" : "TTS Controls",
-      icon: <GraphicEqIcon />,
-      active: showTts,
-      onClick: onToggleTtsPanel
-    }
-  ] as const;
+  const actions = useMemo(
+    () => [
+      {
+        key: "theme",
+        label: "Day/Night",
+        icon: isNightTheme ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />,
+        active: false,
+        onClick: onToggleTheme
+      },
+      {
+        key: "text",
+        label: "Text-only",
+        icon: <TextFieldsIcon />,
+        active: isTextOnly,
+        onClick: onToggleTextOnly
+      },
+      {
+        key: "settings",
+        label: "Settings",
+        icon: <TuneIcon />,
+        active: showSettings,
+        onClick: onToggleSettingsPanel
+      },
+      {
+        key: "stats",
+        label: "Stats",
+        icon: <QueryStatsIcon />,
+        active: showStats,
+        onClick: onToggleStatsPanel
+      },
+      {
+        key: "tts",
+        label: "TTS Controls",
+        icon: <GraphicEqIcon />,
+        active: showTts,
+        onClick: onToggleTtsPanel
+      }
+    ],
+    [
+      isNightTheme,
+      isTextOnly,
+      onToggleSettingsPanel,
+      onToggleStatsPanel,
+      onToggleTextOnly,
+      onToggleTheme,
+      onToggleTtsPanel,
+      showSettings,
+      showStats,
+      showTts
+    ]
+  );
+
+  const close = useCallback(() => setOpen(false), []);
 
   return (
-    <Box
-      sx={{
-        position: "absolute",
-        top: 12,
-        right: 12,
-        zIndex: (theme) => theme.zIndex.fab
-      }}
-    >
+    <>
       <Backdrop
         open={open}
-        onClick={() => setOpen(false)}
+        onClick={close}
         transitionDuration={0}
         sx={{
-          zIndex: (theme) => theme.zIndex.fab - 1,
+          zIndex: (theme) => theme.zIndex.modal,
           bgcolor: "rgba(15, 23, 42, 0.44)"
         }}
       />
 
-      <Stack direction="column" spacing={1} alignItems="flex-end">
-        {actions.map((action, index) => (
-          <Zoom
-            key={action.key}
-            in={open}
-            unmountOnExit
-            style={{ transitionDelay: open ? `${index * 18}ms` : "0ms" }}
-          >
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Paper
-                elevation={3}
-                sx={{
-                  px: 1.1,
-                  py: 0.45,
-                  bgcolor: "#ffffff",
-                  color: "#0f172a",
-                  border: "1px solid #cbd5e1",
-                  borderRadius: 1.25
-                }}
-              >
-                <Typography variant="caption" fontWeight={700}>
-                  {action.label}
-                </Typography>
-              </Paper>
-              <Fab
-                size="small"
-                color={action.active ? "primary" : "default"}
-                onClick={() => {
-                  setOpen(false);
-                  void action.onClick();
-                }}
-                disabled={busy}
-                data-testid={`reader-speed-dial-${action.key}`}
-              >
-                {action.icon}
-              </Fab>
-            </Stack>
-          </Zoom>
-        ))}
+      <Box
+        sx={{
+          position: "fixed",
+          top: 16,
+          right: 16,
+          zIndex: (theme) => theme.zIndex.modal + 1,
+          pointerEvents: "none"
+        }}
+      >
+        <Stack direction="column" spacing={1} alignItems="flex-end" sx={{ pointerEvents: "auto" }}>
+          {open
+            ? actions.map((action) => (
+                <Stack key={action.key} direction="row" spacing={1} alignItems="center">
+                  <Paper
+                    elevation={3}
+                    sx={{
+                      px: 1.15,
+                      py: 0.45,
+                      bgcolor: "#ffffff",
+                      color: "#0f172a",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: 1.25
+                    }}
+                  >
+                    <Typography variant="caption" fontWeight={700}>
+                      {action.label}
+                    </Typography>
+                  </Paper>
+                  <Fab
+                    size="small"
+                    color={action.active ? "primary" : "default"}
+                    onClick={() => {
+                      setOpen(false);
+                      void action.onClick();
+                    }}
+                    disabled={busy}
+                    data-testid={`reader-speed-dial-${action.key}`}
+                  >
+                    {action.icon}
+                  </Fab>
+                </Stack>
+              ))
+            : null}
 
-        <Fab
-          size="small"
-          color="primary"
-          onClick={(event) => {
-            event.stopPropagation();
-            setOpen((current) => !current);
-          }}
-          data-testid="reader-quick-actions-speed-dial"
-        >
-          <SpeedDialIcon open={open} />
-        </Fab>
-      </Stack>
-    </Box>
+          <Fab
+            size="small"
+            color="primary"
+            onClick={(event) => {
+              event.stopPropagation();
+              setOpen((current) => !current);
+            }}
+            data-testid="reader-quick-actions-speed-dial"
+          >
+            <SpeedDialIcon open={open} />
+          </Fab>
+        </Stack>
+      </Box>
+    </>
   );
-}
+});
+
 export function ReaderShell({
   reader,
   busy,
