@@ -1479,11 +1479,14 @@ async fn calibre_open_book(
 
 #[cfg(target_os = "linux")]
 fn configure_linux_display_backend() {
-    let wayland_available = std::env::var_os("WAYLAND_DISPLAY").is_some()
+    let wayland_display = std::env::var("WAYLAND_DISPLAY").ok();
+    let xdg_session_type = std::env::var("XDG_SESSION_TYPE")
+        .ok()
+        .map(|value| value.to_ascii_lowercase());
+    let x_display = std::env::var("DISPLAY").ok();
+    let wayland_available = wayland_display.is_some()
         || matches!(
-            std::env::var("XDG_SESSION_TYPE")
-                .ok()
-                .map(|value| value.to_ascii_lowercase()),
+            xdg_session_type.clone(),
             Some(value) if value == "wayland"
         );
     let allow_x11 = matches!(
@@ -1494,33 +1497,43 @@ fn configure_linux_display_backend() {
     );
 
     if !wayland_available || allow_x11 {
+        info!(
+            wayland_display = ?wayland_display,
+            xdg_session_type = ?xdg_session_type,
+            x_display = ?x_display,
+            allow_x11,
+            "Skipping Wayland-first backend override"
+        );
         return;
     }
 
     let current_gdk_backend = std::env::var("GDK_BACKEND")
         .ok()
         .map(|value| value.to_ascii_lowercase());
-    let current_winit_backend = std::env::var("WINIT_UNIX_BACKEND")
-        .ok()
-        .map(|value| value.to_ascii_lowercase());
+    let current_winit_backend = std::env::var("WINIT_UNIX_BACKEND").ok();
+    let prefer_x11_first = x_display.is_some() && wayland_display.is_some();
+    let desired_gdk_backend = if prefer_x11_first {
+        "x11,wayland"
+    } else {
+        "wayland,x11"
+    };
 
-    if current_gdk_backend.as_deref() != Some("wayland") {
-        // SAFETY: Startup-time process env initialization before Tauri runtime threads start.
+    // Prefer Wayland but include X11 fallback so startup does not hard-fail when Wayland is present
+    // but runtime-incompatible on this machine/session.
+    if current_gdk_backend.as_deref() != Some(desired_gdk_backend) {
+        // SAFETY: startup-time process env initialization before Tauri runtime threads start.
         unsafe {
-            std::env::set_var("GDK_BACKEND", "wayland");
-        }
-    }
-    if current_winit_backend.as_deref() != Some("wayland") {
-        // SAFETY: Startup-time process env initialization before Tauri runtime threads start.
-        unsafe {
-            std::env::set_var("WINIT_UNIX_BACKEND", "wayland");
+            std::env::set_var("GDK_BACKEND", desired_gdk_backend);
         }
     }
 
     info!(
-        gdk_backend = "wayland",
-        winit_backend = "wayland",
-        "Configured Linux display backend defaults"
+        wayland_display = ?wayland_display,
+        xdg_session_type = ?xdg_session_type,
+        x_display = ?x_display,
+        gdk_backend = desired_gdk_backend,
+        winit_backend = ?current_winit_backend,
+        "Configured Linux display backend defaults with safe fallback ordering"
     );
 }
 
