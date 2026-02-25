@@ -102,9 +102,12 @@ export function StarterShell({
   const [showCalibre, setShowCalibre] = useState(true);
   const [calibreSort, setCalibreSort] = useState<CalibreSort>("title_asc");
   const [recentsSort, setRecentsSort] = useState<"recent_first" | "recent_last" | "title_asc" | "title_desc" | "path_asc" | "path_desc">("recent_first");
+  const [recentsScrollTop, setRecentsScrollTop] = useState(0);
   const [calibreScrollTop, setCalibreScrollTop] = useState(0);
   const [logLevelValue, setLogLevelValue] = useState(runtimeLogLevel);
 
+  const recentsRowHeight = 132;
+  const recentsOverscan = 8;
   const calibreRowHeight = 58;
   const calibreViewportHeight = 384;
   const calibreOverscan = 10;
@@ -164,9 +167,29 @@ export function StarterShell({
     filteredCalibre
   ]);
 
+  const recentsVirtualWindow = useMemo(() => {
+    return computeVirtualWindow(
+      filteredRecents,
+      recentsScrollTop,
+      recentsRowHeight,
+      recentsViewportHeight,
+      recentsOverscan
+    );
+  }, [
+    filteredRecents,
+    recentsOverscan,
+    recentsRowHeight,
+    recentsScrollTop,
+    recentsViewportHeight
+  ]);
+
   useEffect(() => {
     setCalibreScrollTop(0);
   }, [calibreSearch, calibreSort, showCalibre]);
+
+  useEffect(() => {
+    setRecentsScrollTop(0);
+  }, [recentsSearch, recentsSort]);
 
   useEffect(() => {
     setLogLevelValue(runtimeLogLevel);
@@ -400,65 +423,82 @@ export function StarterShell({
               ) : null}
 
               {hasFilteredRecents ? (
-                <div className="overflow-y-auto pr-1" style={{ maxHeight: recentsViewportHeight }}>
-                  <div className="grid grid-cols-1 gap-3">
-                    {filteredRecents.map((recent) => {
+                <div
+                  className="overflow-y-auto pr-1"
+                  style={{ maxHeight: recentsViewportHeight }}
+                  onScroll={(event) => {
+                    setRecentsScrollTop(event.currentTarget.scrollTop);
+                  }}
+                >
+                  <div>
+                    {recentsVirtualWindow.topSpacerPx > 0 ? (
+                      <div style={{ height: recentsVirtualWindow.topSpacerPx }} />
+                    ) : null}
+                    {recentsVirtualWindow.items.map((recent) => {
                       const recentThumbnailSrc = toThumbnailSrc(recent.thumbnail_path);
                       return (
-                    <Card
-                      key={recent.source_path}
-                      variant="outlined"
-                      className="rounded-2xl border-slate-200 shadow-none"
-                      data-testid="starter-recent-card"
-                      data-recent-path={recent.source_path}
-                    >
-                      <CardContent className="pb-3">
-                        <Stack direction="row" spacing={1.25} alignItems="center">
-                          {recentThumbnailSrc ? (
-                            <img
-                              src={recentThumbnailSrc}
-                              alt={recent.display_title}
-                              className="h-11 w-9 shrink-0 rounded border border-slate-200 object-cover"
-                              loading="lazy"
-                            />
-                          ) : null}
-                          <Stack spacing={0.75} className="min-w-0">
-                            <Typography variant="subtitle1" fontWeight={700} noWrap>
-                              {recent.display_title}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary" className="truncate">
-                              {recent.source_path}
-                            </Typography>
-                          </Stack>
-                        </Stack>
-                      </CardContent>
-                      <CardActions className="px-4 pb-4 pt-0">
-                        <Button
-                          size="small"
-                          variant="contained"
-                          onClick={() => void onOpenPath(recent.source_path)}
-                          disabled={busy}
-                          data-testid="starter-recent-open-button"
-                          data-recent-path={recent.source_path}
-                        >
-                          Open
-                        </Button>
-                        <Button
-                          size="small"
-                          color="error"
-                          variant="outlined"
-                          startIcon={<DeleteOutlineIcon />}
-                          onClick={() => void onDeleteRecent(recent.source_path)}
-                          disabled={busy}
-                          data-testid="starter-recent-delete-button"
-                          data-recent-path={recent.source_path}
-                        >
-                          Delete
-                        </Button>
-                      </CardActions>
-                    </Card>
-                    );
+                        <div key={recent.source_path} style={{ height: recentsRowHeight }}>
+                          <Card
+                            variant="outlined"
+                            className="h-full rounded-2xl border-slate-200 shadow-none"
+                            data-testid="starter-recent-card"
+                            data-recent-path={recent.source_path}
+                          >
+                            <CardContent className="pb-3">
+                              <Stack direction="row" spacing={1.25} alignItems="center">
+                                {recentThumbnailSrc ? (
+                                  <img
+                                    src={recentThumbnailSrc}
+                                    alt={recent.display_title}
+                                    className="h-11 w-9 shrink-0 rounded border border-slate-200 object-cover"
+                                    loading="lazy"
+                                  />
+                                ) : null}
+                                <Stack spacing={0.75} className="min-w-0">
+                                  <Typography variant="subtitle1" fontWeight={700} noWrap>
+                                    {recent.display_title}
+                                  </Typography>
+                                  <Typography
+                                    variant="caption"
+                                    color="text.secondary"
+                                    className="truncate"
+                                  >
+                                    {recent.source_path}
+                                  </Typography>
+                                </Stack>
+                              </Stack>
+                            </CardContent>
+                            <CardActions className="px-4 pb-4 pt-0">
+                              <Button
+                                size="small"
+                                variant="contained"
+                                onClick={() => void onOpenPath(recent.source_path)}
+                                disabled={busy}
+                                data-testid="starter-recent-open-button"
+                                data-recent-path={recent.source_path}
+                              >
+                                Open
+                              </Button>
+                              <Button
+                                size="small"
+                                color="error"
+                                variant="outlined"
+                                startIcon={<DeleteOutlineIcon />}
+                                onClick={() => void onDeleteRecent(recent.source_path)}
+                                disabled={busy}
+                                data-testid="starter-recent-delete-button"
+                                data-recent-path={recent.source_path}
+                              >
+                                Delete
+                              </Button>
+                            </CardActions>
+                          </Card>
+                        </div>
+                      );
                     })}
+                    {recentsVirtualWindow.bottomSpacerPx > 0 ? (
+                      <div style={{ height: recentsVirtualWindow.bottomSpacerPx }} />
+                    ) : null}
                   </div>
                 </div>
               ) : null}
