@@ -1008,7 +1008,22 @@ fn run_tts_runtime_loop(
     cancel_token: cancellation::CancellationToken,
     pause_requested: Arc<AtomicBool>,
 ) {
+    struct PrefetchedBatch {
+        source_path: PathBuf,
+        page: usize,
+        start_idx: usize,
+        prepared: Vec<(PathBuf, Duration)>,
+    }
+
+    struct PendingPrefetch {
+        source_path: PathBuf,
+        page: usize,
+        start_idx: usize,
+        handle: std::thread::JoinHandle<Result<Vec<(PathBuf, Duration)>, String>>,
+    }
+
     let mut engine: Option<tts::TtsEngine> = None;
+    let mut ready_prefetch: Option<PrefetchedBatch> = None;
     loop {
         if cancel_token.is_cancelled() {
             break;
@@ -1039,27 +1054,60 @@ fn run_tts_runtime_loop(
         }
 
         let chunk_end = (plan.start_idx + TTS_PREPARE_SENTENCE_WINDOW).min(plan.sentences.len());
-        let chunk_sentences = plan.sentences[plan.start_idx..chunk_end].to_vec();
-        let cache_root = cache::hash_dir(&plan.source_path).join("tts");
-        let prepared = match engine.as_ref().unwrap().prepare_batch(
-            cache_root,
-            chunk_sentences,
-            0,
-            plan.threads,
-            plan.progress_log_interval,
-        ) {
-            Ok(batch) => batch,
-            Err(err) => {
-                if cancel_token.is_cancelled() {
+        let prepared = if let Some(prefetched) = ready_prefetch.take() {
+            if prefetched.source_path == plan.source_path
+                && prefetched.page == plan.page
+                && prefetched.start_idx == plan.start_idx
+            {
+                prefetched.prepared
+            } else {
+                let chunk_sentences = plan.sentences[plan.start_idx..chunk_end].to_vec();
+                let cache_root = cache::hash_dir(&plan.source_path).join("tts");
+                match engine.as_ref().unwrap().prepare_batch(
+                    cache_root,
+                    chunk_sentences,
+                    0,
+                    plan.threads,
+                    plan.progress_log_interval,
+                ) {
+                    Ok(batch) => batch,
+                    Err(err) => {
+                        if cancel_token.is_cancelled() {
+                            break;
+                        }
+                        transition_tts_runtime_to_paused(
+                            &app,
+                            runtime_request_id,
+                            "reader_tts_runtime_error",
+                            &format!("Failed to prepare TTS audio batch: {err}"),
+                        );
+                        break;
+                    }
+                }
+            }
+        } else {
+            let chunk_sentences = plan.sentences[plan.start_idx..chunk_end].to_vec();
+            let cache_root = cache::hash_dir(&plan.source_path).join("tts");
+            match engine.as_ref().unwrap().prepare_batch(
+                cache_root,
+                chunk_sentences,
+                0,
+                plan.threads,
+                plan.progress_log_interval,
+            ) {
+                Ok(batch) => batch,
+                Err(err) => {
+                    if cancel_token.is_cancelled() {
+                        break;
+                    }
+                    transition_tts_runtime_to_paused(
+                        &app,
+                        runtime_request_id,
+                        "reader_tts_runtime_error",
+                        &format!("Failed to prepare TTS audio batch: {err}"),
+                    );
                     break;
                 }
-                transition_tts_runtime_to_paused(
-                    &app,
-                    runtime_request_id,
-                    "reader_tts_runtime_error",
-                    &format!("Failed to prepare TTS audio batch: {err}"),
-                );
-                break;
             }
         };
 
@@ -1072,6 +1120,38 @@ fn run_tts_runtime_loop(
             );
             break;
         }
+
+        let next_chunk_start = chunk_end;
+        let pending_prefetch = if next_chunk_start < plan.sentences.len() {
+            let next_chunk_end =
+                (next_chunk_start + TTS_PREPARE_SENTENCE_WINDOW).min(plan.sentences.len());
+            let next_sentences = plan.sentences[next_chunk_start..next_chunk_end].to_vec();
+            let next_source_path = plan.source_path.clone();
+            let next_page = plan.page;
+            let next_threads = plan.threads;
+            let next_progress_interval = plan.progress_log_interval;
+            let next_cache_root = cache::hash_dir(&next_source_path).join("tts");
+            let next_engine = engine.as_ref().unwrap().clone();
+
+            Some(PendingPrefetch {
+                source_path: next_source_path,
+                page: next_page,
+                start_idx: next_chunk_start,
+                handle: std::thread::spawn(move || {
+                    next_engine
+                        .prepare_batch(
+                            next_cache_root,
+                            next_sentences,
+                            0,
+                            next_threads,
+                            next_progress_interval,
+                        )
+                        .map_err(|err| err.to_string())
+                }),
+            })
+        } else {
+            None
+        };
 
         let files: Vec<PathBuf> = prepared.into_iter().map(|(path, _)| path).collect();
         let playback = match engine.as_ref().unwrap().play_files(
@@ -1149,6 +1229,36 @@ fn run_tts_runtime_loop(
 
         if !continue_playback {
             break;
+        }
+
+        if let Some(pending) = pending_prefetch {
+            match pending.handle.join() {
+                Ok(Ok(prepared)) => {
+                    ready_prefetch = Some(PrefetchedBatch {
+                        source_path: pending.source_path,
+                        page: pending.page,
+                        start_idx: pending.start_idx,
+                        prepared,
+                    });
+                }
+                Ok(Err(err)) => {
+                    warn!(
+                        runtime_request_id,
+                        page = pending.page + 1,
+                        sentence_idx = pending.start_idx,
+                        error = %err,
+                        "Failed to prefetch next TTS batch; runtime will fall back to inline prepare"
+                    );
+                }
+                Err(_) => {
+                    warn!(
+                        runtime_request_id,
+                        page = pending.page + 1,
+                        sentence_idx = pending.start_idx,
+                        "TTS prefetch worker panicked; runtime will fall back to inline prepare"
+                    );
+                }
+            }
         }
     }
     clear_tts_request_if_current(&app, runtime_request_id);
