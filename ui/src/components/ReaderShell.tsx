@@ -193,6 +193,21 @@ function withAlpha(current: HighlightColor, alpha: number): HighlightColor {
   };
 }
 
+function toReaderImageSrc(path: string): string {
+  const lower = path.toLowerCase();
+  if (
+    lower.startsWith("http://") ||
+    lower.startsWith("https://") ||
+    lower.startsWith("data:") ||
+    lower.startsWith("asset:")
+  ) {
+    return path;
+  }
+  const normalized = path.replace(/\\/g, "/");
+  const withLeadingSlash = normalized.startsWith("/") ? normalized : `/${normalized}`;
+  return encodeURI(`file://${withLeadingSlash}`);
+}
+
 function scrollSentenceIntoView(
   container: HTMLElement,
   sentence: HTMLElement,
@@ -721,6 +736,10 @@ export const ReaderShell = memo(function ReaderShell({
     () => computeReaderTypographyLayout(reader.settings),
     [reader.settings]
   );
+  const readerImageSources = useMemo(
+    () => reader.images.map((path) => toReaderImageSrc(path)),
+    [reader.images]
+  );
 
   const playbackLabel = reader.tts.state === "playing" ? "Pause" : "Play";
   const hasHighlightSentence = reader.highlighted_sentence_idx !== null;
@@ -908,6 +927,24 @@ export const ReaderShell = memo(function ReaderShell({
                 }}
               >
                 <Stack spacing={0.75}>
+                  {!reader.text_only_mode && readerImageSources.length > 0 ? (
+                    <Stack spacing={1}>
+                      {readerImageSources.map((src, idx) => (
+                        <img
+                          key={`${reader.source_path}:image:${idx}`}
+                          src={src}
+                          alt={`Book image ${idx + 1}`}
+                          loading="lazy"
+                          style={{
+                            maxWidth: "100%",
+                            maxHeight: 360,
+                            objectFit: "contain",
+                            borderRadius: 10
+                          }}
+                        />
+                      ))}
+                    </Stack>
+                  ) : null}
                   {reader.sentences.map((sentence, idx) => {
                     const highlighted = reader.highlighted_sentence_idx === idx;
                     const searchMatch = searchMatchSet.has(idx);

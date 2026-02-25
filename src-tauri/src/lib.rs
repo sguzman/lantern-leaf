@@ -2824,6 +2824,7 @@ mod tests {
                 current_page: 0,
                 total_pages: 1,
                 text_only_mode: false,
+                images: Vec::new(),
                 page_text: "hello".to_string(),
                 sentences: vec!["hello".to_string()],
                 highlighted_sentence_idx: Some(0),

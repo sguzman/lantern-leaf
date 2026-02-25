@@ -98,6 +98,7 @@ const mockReaderSnapshot = (): ReaderSnapshot => ({
   current_page: 0,
   total_pages: MOCK_PAGES.length,
   text_only_mode: false,
+  images: [],
   page_text: MOCK_PAGES[0].text,
   sentences: MOCK_PAGES[0].sentences,
   highlighted_sentence_idx: 0,

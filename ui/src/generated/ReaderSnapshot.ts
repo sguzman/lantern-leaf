@@ -4,4 +4,4 @@ import type { ReaderSettingsView } from "./ReaderSettingsView";
 import type { ReaderStats } from "./ReaderStats";
 import type { ReaderTtsView } from "./ReaderTtsView";
 
-export type ReaderSnapshot = { source_path: string, source_name: string, current_page: number, total_pages: number, text_only_mode: boolean, page_text: string, sentences: Array<string>, highlighted_sentence_idx: number | null, search_query: string, search_matches: Array<number>, selected_search_match: number | null, settings: ReaderSettingsView, tts: ReaderTtsView, stats: ReaderStats, panels: PanelState, };
+export type ReaderSnapshot = { source_path: string, source_name: string, current_page: number, total_pages: number, text_only_mode: boolean, images: Array<string>, page_text: string, sentences: Array<string>, highlighted_sentence_idx: number | null, search_query: string, search_matches: Array<number>, selected_search_match: number | null, settings: ReaderSettingsView, tts: ReaderTtsView, stats: ReaderStats, panels: PanelState, };

@@ -128,6 +128,7 @@ pub struct ReaderSnapshot {
     pub current_page: usize,
     pub total_pages: usize,
     pub text_only_mode: bool,
+    pub images: Vec<String>,
     pub page_text: String,
     pub sentences: Vec<String>,
     pub highlighted_sentence_idx: Option<usize>,
@@ -204,6 +205,7 @@ pub struct ReaderSession {
     pub source_path: PathBuf,
     source_name: String,
     full_text: String,
+    images: Vec<String>,
     pub config: config::AppConfig,
     pages: Vec<String>,
     raw_page_sentences: Vec<Vec<String>>,
@@ -260,6 +262,11 @@ impl ReaderSession {
             source_path,
             source_name,
             full_text: loaded.text,
+            images: loaded
+                .images
+                .into_iter()
+                .map(|image| image.path.to_string_lossy().to_string())
+                .collect(),
             config,
             pages: Vec::new(),
             raw_page_sentences: Vec::new(),
@@ -331,6 +338,7 @@ impl ReaderSession {
             current_page: self.current_page,
             total_pages: self.pages.len(),
             text_only_mode: self.text_only_mode,
+            images: self.images.clone(),
             page_text: self
                 .pages
                 .get(self.current_page)
@@ -1251,6 +1259,7 @@ mod tests {
             source_path: PathBuf::from("/tmp/test.epub"),
             source_name: "test.epub".to_string(),
             full_text: pages.join("\n\n"),
+            images: Vec::new(),
             config: config::AppConfig::default(),
             pages,
             raw_page_sentences,
