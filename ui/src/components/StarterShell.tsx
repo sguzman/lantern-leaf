@@ -3,6 +3,7 @@ import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   Button,
   Card,
@@ -72,7 +73,11 @@ function toThumbnailSrc(path: string | null | undefined): string | null {
 
   const normalized = path.replace(/\\/g, "/");
   const withLeadingSlash = normalized.startsWith("/") ? normalized : `/${normalized}`;
-  return encodeURI(`file://${withLeadingSlash}`);
+  try {
+    return convertFileSrc(withLeadingSlash);
+  } catch {
+    return encodeURI(`file://${withLeadingSlash}`);
+  }
 }
 
 export function StarterShell({

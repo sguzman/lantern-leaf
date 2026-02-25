@@ -10,6 +10,7 @@ import SpeedDialIcon from "@mui/material/SpeedDialIcon";
 import TextFieldsIcon from "@mui/icons-material/TextFields";
 import TuneIcon from "@mui/icons-material/Tune";
 import QueryStatsIcon from "@mui/icons-material/QueryStats";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   Box,
   Button,
@@ -205,7 +206,11 @@ function toReaderImageSrc(path: string): string {
   }
   const normalized = path.replace(/\\/g, "/");
   const withLeadingSlash = normalized.startsWith("/") ? normalized : `/${normalized}`;
-  return encodeURI(`file://${withLeadingSlash}`);
+  try {
+    return convertFileSrc(withLeadingSlash);
+  } catch {
+    return encodeURI(`file://${withLeadingSlash}`);
+  }
 }
 
 function scrollSentenceIntoView(
