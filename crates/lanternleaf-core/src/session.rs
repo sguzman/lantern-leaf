@@ -3,6 +3,7 @@ use crate::{
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use ts_rs::TS;
@@ -265,7 +266,12 @@ impl ReaderSession {
             images: loaded
                 .images
                 .into_iter()
-                .map(|image| image.path.to_string_lossy().to_string())
+                .map(|image| {
+                    fs::canonicalize(&image.path)
+                        .unwrap_or(image.path)
+                        .to_string_lossy()
+                        .to_string()
+                })
                 .collect(),
             config,
             pages: Vec::new(),
