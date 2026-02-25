@@ -1225,6 +1225,35 @@ fn run_tts_runtime_loop(
             }
         }
 
+        // Guard against duration under-estimation by waiting for the sink queue
+        // to fully drain before stopping/chunk-switching. This prevents clipping
+        // the tail end of the current sentence at batch boundaries.
+        loop {
+            if cancel_token.is_cancelled() {
+                playback.stop();
+                clear_tts_request_if_current(&app, runtime_request_id);
+                return;
+            }
+
+            if pause_requested.load(Ordering::SeqCst) {
+                if !playback.is_paused() {
+                    playback.pause();
+                }
+                std::thread::sleep(TTS_PROGRESS_POLL_INTERVAL);
+                continue;
+            }
+
+            if playback.is_paused() {
+                playback.play();
+            }
+
+            if playback.queued_sources() == 0 {
+                break;
+            }
+
+            std::thread::sleep(TTS_PROGRESS_POLL_INTERVAL);
+        }
+
         playback.stop();
 
         if !continue_playback {

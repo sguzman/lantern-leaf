@@ -438,50 +438,6 @@ const ReaderQuickActions = memo(function ReaderQuickActions({
         }}
       >
         <Stack direction="column" spacing={1} alignItems="flex-end">
-          {open ? (
-            <Stack
-              spacing={1}
-              alignItems="flex-end"
-              sx={{
-                opacity: 1,
-                transform: "translateY(0)",
-                transition: "opacity 120ms ease-out, transform 120ms ease-out"
-              }}
-            >
-              {actions.map((action) => (
-                <Stack key={action.key} direction="row" spacing={1} alignItems="center">
-                  <Paper
-                    elevation={3}
-                    sx={{
-                      px: 1.15,
-                      py: 0.45,
-                      bgcolor: "#ffffff",
-                      color: "#0f172a",
-                      border: "1px solid #cbd5e1",
-                      borderRadius: 1.25
-                    }}
-                  >
-                    <Typography variant="caption" fontWeight={700}>
-                      {action.label}
-                    </Typography>
-                  </Paper>
-                  <Fab
-                    size="small"
-                    color={action.active ? "primary" : "default"}
-                    onClick={() => {
-                      setOpen(false);
-                      void action.onClick();
-                    }}
-                    disabled={busy}
-                    data-testid={`reader-speed-dial-${action.key}`}
-                  >
-                    {action.icon}
-                  </Fab>
-                </Stack>
-              ))}
-            </Stack>
-          ) : null}
-
           <Fab
             size="small"
             color="primary"
@@ -489,10 +445,69 @@ const ReaderQuickActions = memo(function ReaderQuickActions({
               event.stopPropagation();
               setOpen((current) => !current);
             }}
+            sx={{
+              transform: open ? "rotate(90deg)" : "rotate(0deg)",
+              transition: "transform 170ms cubic-bezier(0.2, 0, 0, 1)"
+            }}
             data-testid="reader-quick-actions-speed-dial"
           >
             <SpeedDialIcon open={open} />
           </Fab>
+
+          <Stack
+            spacing={1}
+            alignItems="flex-end"
+            sx={{
+              maxHeight: open ? 280 : 0,
+              opacity: open ? 1 : 0,
+              overflow: "hidden",
+              pointerEvents: open ? "auto" : "none",
+              transition:
+                "max-height 220ms cubic-bezier(0.2, 0, 0, 1), opacity 160ms ease-out"
+            }}
+          >
+            {actions.map((action, index) => (
+              <Stack
+                key={action.key}
+                direction="row"
+                spacing={1}
+                alignItems="center"
+                sx={{
+                  transform: open ? "translateY(0) scale(1)" : "translateY(-8px) scale(0.95)",
+                  opacity: open ? 1 : 0,
+                  transition: `transform 180ms cubic-bezier(0.2, 0, 0, 1) ${index * 28}ms, opacity 140ms ease-out ${index * 28}ms`
+                }}
+              >
+                <Paper
+                  elevation={3}
+                  sx={{
+                    px: 1.15,
+                    py: 0.45,
+                    bgcolor: "#ffffff",
+                    color: "#0f172a",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: 1.25
+                  }}
+                >
+                  <Typography variant="caption" fontWeight={700}>
+                    {action.label}
+                  </Typography>
+                </Paper>
+                <Fab
+                  size="small"
+                  color={action.active ? "primary" : "default"}
+                  onClick={() => {
+                    setOpen(false);
+                    void action.onClick();
+                  }}
+                  disabled={busy}
+                  data-testid={`reader-speed-dial-${action.key}`}
+                >
+                  {action.icon}
+                </Fab>
+              </Stack>
+            ))}
+          </Stack>
         </Stack>
       </Box>
     </ClickAwayListener>
