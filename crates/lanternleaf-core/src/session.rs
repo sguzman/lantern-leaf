@@ -206,7 +206,7 @@ pub struct ReaderSession {
     pub source_path: PathBuf,
     source_name: String,
     full_text: String,
-    images: Vec<String>,
+    images: Vec<SessionImage>,
     pub config: config::AppConfig,
     pages: Vec<String>,
     raw_page_sentences: Vec<Vec<String>>,
@@ -222,6 +222,12 @@ pub struct ReaderSession {
     tts_state: TtsPlaybackState,
     current_plan_page: Option<usize>,
     current_plan: Option<normalizer::PageNormalization>,
+}
+
+#[derive(Debug, Clone)]
+struct SessionImage {
+    path: String,
+    char_offset: usize,
 }
 
 impl ReaderSession {
@@ -267,10 +273,11 @@ impl ReaderSession {
                 .images
                 .into_iter()
                 .map(|image| {
-                    fs::canonicalize(&image.path)
-                        .unwrap_or(image.path)
-                        .to_string_lossy()
-                        .to_string()
+                    let path = fs::canonicalize(&image.path).unwrap_or(image.path);
+                    SessionImage {
+                        path: path.to_string_lossy().to_string(),
+                        char_offset: image.char_offset,
+                    }
                 })
                 .collect(),
             config,
@@ -344,7 +351,7 @@ impl ReaderSession {
             current_page: self.current_page,
             total_pages: self.pages.len(),
             text_only_mode: self.text_only_mode,
-            images: self.images.clone(),
+            images: self.current_page_images(),
             page_text: self
                 .pages
                 .get(self.current_page)
@@ -898,6 +905,36 @@ impl ReaderSession {
             .take(self.current_page)
             .sum();
         self.highlighted_display_idx.map(|idx| page_base + idx)
+    }
+
+    fn current_page_images(&self) -> Vec<String> {
+        if self.images.is_empty() || self.pages.is_empty() {
+            return Vec::new();
+        }
+
+        let mut page_start = 0usize;
+        for idx in 0..self.current_page {
+            page_start = page_start.saturating_add(self.pages.get(idx).map(|p| p.len()).unwrap_or(0));
+        }
+        let page_len = self
+            .pages
+            .get(self.current_page)
+            .map(|page| page.len())
+            .unwrap_or(0);
+        let page_end = page_start.saturating_add(page_len);
+        let is_last_page = self.current_page + 1 >= self.pages.len();
+
+        self.images
+            .iter()
+            .filter(|image| {
+                if is_last_page {
+                    image.char_offset >= page_start && image.char_offset <= page_end
+                } else {
+                    image.char_offset >= page_start && image.char_offset < page_end
+                }
+            })
+            .map(|image| image.path.clone())
+            .collect()
     }
 
     fn tts_view(

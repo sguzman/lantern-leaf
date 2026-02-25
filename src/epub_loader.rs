@@ -20,6 +20,10 @@ use tracing::{debug, info, warn};
 
 static RE_MARKDOWN_IMAGE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").expect("valid markdown image regex"));
+static RE_HTML_IMG_SRC: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?is)<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["'][^>]*>"#)
+        .expect("valid html image src regex")
+});
 const PANDOC_FILTER_REL_PATH: &str = "conf/pandoc/strip-nontext.lua";
 const PANDOC_PIPELINE_REV: &str = "pandoc-clean-v1";
 const QUACK_CHECK_CONFIG_REL_PATH: &str = "conf/quack-check.toml";
@@ -30,6 +34,7 @@ const QUACK_CHECK_TEXT_FILENAME_DEFAULT: &str = "transcript.txt";
 pub struct BookImage {
     pub path: PathBuf,
     pub label: String,
+    pub char_offset: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -415,6 +420,7 @@ fn collect_markdown_images(path: &Path) -> Result<Vec<BookImage>> {
         images.push(BookImage {
             path: canonical,
             label,
+            char_offset: captures.get(0).map(|m| m.start()).unwrap_or(0),
         });
     }
 
@@ -422,6 +428,12 @@ fn collect_markdown_images(path: &Path) -> Result<Vec<BookImage>> {
 }
 
 fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
+    #[derive(Debug, Clone)]
+    struct ExtractedImage {
+        output: PathBuf,
+        label: String,
+    }
+
     let mut doc =
         EpubDoc::new(path).with_context(|| format!("Failed to open EPUB at {}", path.display()))?;
     let mut entries: Vec<(String, PathBuf, String)> = doc
@@ -436,8 +448,12 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
     fs::create_dir_all(&image_dir)
         .with_context(|| format!("Failed to create image cache dir {}", image_dir.display()))?;
 
-    let mut images = Vec::new();
+    let mut extracted = Vec::new();
     let mut seen = HashSet::new();
+    let mut path_lookup: std::collections::HashMap<String, ExtractedImage> =
+        std::collections::HashMap::new();
+    let mut basename_lookup: std::collections::HashMap<String, ExtractedImage> =
+        std::collections::HashMap::new();
 
     for (idx, (id, resource_path, mime)) in entries.into_iter().enumerate() {
         let Some((bytes, _)) = doc.get_resource(&id) else {
@@ -470,13 +486,117 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
             .unwrap_or("image")
             .to_string();
 
-        images.push(BookImage {
-            path: output,
-            label,
-        });
+        let image = ExtractedImage {
+            output: output.clone(),
+            label: label.clone(),
+        };
+
+        let normalized_key = normalize_epub_path_key(resource_path.to_string_lossy().as_ref());
+        path_lookup.insert(normalized_key, image.clone());
+        if let Some(base_name) = resource_path.file_name().and_then(|s| s.to_str()) {
+            let base_key = normalize_epub_path_key(base_name);
+            basename_lookup.entry(base_key).or_insert_with(|| image.clone());
+        }
+
+        extracted.push(image);
+    }
+
+    if extracted.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut images = Vec::new();
+    let mut chapter_idx = 0usize;
+    let mut chapter_start = 0usize;
+    let mut seen_anchors = HashSet::new();
+
+    loop {
+        let Some((chapter, _mime)) = doc.get_current_str() else {
+            break;
+        };
+
+        if chapter_idx > 0 {
+            chapter_start += 2;
+        }
+
+        let chapter_len = match html2text::from_read(chapter.as_bytes(), 10_000) {
+            Ok(clean) => clean.len(),
+            Err(_) => chapter.len(),
+        };
+
+        let mut chapter_images = Vec::new();
+        for captures in RE_HTML_IMG_SRC.captures_iter(&chapter) {
+            let Some(raw_src) = captures.get(1).map(|m| m.as_str()) else {
+                continue;
+            };
+            let src = raw_src
+                .split('#')
+                .next()
+                .unwrap_or(raw_src)
+                .split('?')
+                .next()
+                .unwrap_or(raw_src)
+                .trim();
+            if src.is_empty() {
+                continue;
+            }
+
+            let normalized_src = normalize_epub_path_key(src);
+            let resolved = path_lookup
+                .get(&normalized_src)
+                .cloned()
+                .or_else(|| {
+                    Path::new(src)
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .map(normalize_epub_path_key)
+                        .and_then(|base| basename_lookup.get(&base).cloned())
+                });
+
+            if let Some(image) = resolved {
+                chapter_images.push(image);
+            }
+        }
+
+        for (idx, image) in chapter_images.iter().enumerate() {
+            let pos_in_chapter = if chapter_len == 0 {
+                0
+            } else {
+                ((idx + 1) * chapter_len) / (chapter_images.len() + 1)
+            };
+            let char_offset = chapter_start.saturating_add(pos_in_chapter);
+            let anchor_key = format!("{}:{char_offset}", image.output.to_string_lossy());
+            if !seen_anchors.insert(anchor_key) {
+                continue;
+            }
+            images.push(BookImage {
+                path: image.output.clone(),
+                label: image.label.clone(),
+                char_offset,
+            });
+        }
+
+        chapter_start = chapter_start.saturating_add(chapter_len);
+        chapter_idx = chapter_idx.saturating_add(1);
+        if !doc.go_next() {
+            break;
+        }
     }
 
     Ok(images)
+}
+
+fn normalize_epub_path_key(raw: &str) -> String {
+    let trimmed = raw.trim().trim_matches('/');
+    let mut out = String::with_capacity(trimmed.len());
+    for ch in trimmed.chars() {
+        if ch == '\\' {
+            out.push('/');
+        } else {
+            out.push(ch.to_ascii_lowercase());
+        }
+    }
+    out
 }
 
 fn normalize_markdown_image_target(raw: &str) -> Option<&str> {
