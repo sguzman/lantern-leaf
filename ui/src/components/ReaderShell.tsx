@@ -1523,6 +1523,13 @@ export const ReaderShell = memo(function ReaderShell({
                             <Typography variant="body2">
                               TTS global progress: {reader.stats.global_progress_pct.toFixed(3)}%
                             </Typography>
+                            <Typography variant="body2">
+                              Book time remaining:{" "}
+                              {formatRemainingTime(
+                                reader.stats.book_time_remaining_secs,
+                                reader.settings.time_remaining_display
+                              )}
+                            </Typography>
                           </Stack>
                         ) : null}
                         {statsTab === "session" ? (
