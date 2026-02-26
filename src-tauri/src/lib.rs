@@ -2857,6 +2857,7 @@ mod tests {
                     pause_after_sentence: 0.06,
                     auto_scroll_tts: false,
                     center_spoken_sentence: true,
+                    time_remaining_display: config::TimeRemainingDisplay::Adaptive,
                     tts_speed: 2.5,
                     tts_volume: 1.0,
                 },

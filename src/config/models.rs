@@ -67,6 +67,8 @@ pub struct AppConfig {
     pub center_spoken_sentence: bool,
     #[serde(default = "crate::config::defaults::default_tts_pause_resume_behavior")]
     pub tts_pause_resume_behavior: TtsPauseResumeBehavior,
+    #[serde(default = "crate::config::defaults::default_time_remaining_display")]
+    pub time_remaining_display: TimeRemainingDisplay,
     #[serde(default = "crate::config::defaults::default_key_toggle_play_pause")]
     pub key_toggle_play_pause: String,
     #[serde(default = "crate::config::defaults::default_key_safe_quit")]
@@ -122,6 +124,7 @@ impl Default for AppConfig {
             auto_scroll_tts: crate::config::defaults::default_auto_scroll_tts(),
             center_spoken_sentence: crate::config::defaults::default_center_spoken_sentence(),
             tts_pause_resume_behavior: crate::config::defaults::default_tts_pause_resume_behavior(),
+            time_remaining_display: crate::config::defaults::default_time_remaining_display(),
             key_toggle_play_pause: crate::config::defaults::default_key_toggle_play_pause(),
             key_safe_quit: crate::config::defaults::default_key_safe_quit(),
             key_next_sentence: crate::config::defaults::default_key_next_sentence(),
@@ -171,6 +174,20 @@ pub enum TtsPauseResumeBehavior {
 impl Default for TtsPauseResumeBehavior {
     fn default() -> Self {
         TtsPauseResumeBehavior::ResumeFromPausePoint
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum TimeRemainingDisplay {
+    Adaptive,
+    MinutesSeconds,
+}
+
+impl Default for TimeRemainingDisplay {
+    fn default() -> Self {
+        TimeRemainingDisplay::Adaptive
     }
 }
 

@@ -125,9 +125,37 @@ const FONT_WEIGHT_OPTIONS: Array<{ value: FontWeight; label: string }> = [
 
 function formatSeconds(seconds: number): string {
   const rounded = Math.max(0, Math.round(seconds));
+  if (rounded >= 7 * 24 * 60 * 60) {
+    const weeks = Math.floor(rounded / (7 * 24 * 60 * 60));
+    const days = Math.floor((rounded % (7 * 24 * 60 * 60)) / (24 * 60 * 60));
+    return days > 0 ? `${weeks}w ${days}d` : `${weeks}w`;
+  }
+  if (rounded >= 24 * 60 * 60) {
+    const days = Math.floor(rounded / (24 * 60 * 60));
+    const hours = Math.floor((rounded % (24 * 60 * 60)) / (60 * 60));
+    return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  }
+  if (rounded >= 60 * 60) {
+    const hours = Math.floor(rounded / (60 * 60));
+    const mins = Math.floor((rounded % (60 * 60)) / 60);
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  }
   const mins = Math.floor(rounded / 60);
   const secs = rounded % 60;
   return `${mins}m ${secs}s`;
+}
+
+function formatRemainingTime(
+  seconds: number,
+  mode: "adaptive" | "minutes-seconds"
+): string {
+  if (mode === "minutes-seconds") {
+    const rounded = Math.max(0, Math.round(seconds));
+    const mins = Math.floor(rounded / 60);
+    const secs = rounded % 60;
+    return `${mins}m ${secs}s`;
+  }
+  return formatSeconds(seconds);
 }
 
 function formatPercent(value: number): string {
@@ -1266,10 +1294,16 @@ export const ReaderShell = memo(function ReaderShell({
                           TTS progress (global): {reader.stats.global_progress_pct.toFixed(3)}%
                         </Typography>
                         <Typography variant="body2">
-                          Page time remaining: {formatSeconds(reader.stats.page_time_remaining_secs)}
+                          Page time remaining: {formatRemainingTime(
+                            reader.stats.page_time_remaining_secs,
+                            reader.settings.time_remaining_display
+                          )}
                         </Typography>
                         <Typography variant="body2">
-                          Book time remaining: {formatSeconds(reader.stats.book_time_remaining_secs)}
+                          Book time remaining: {formatRemainingTime(
+                            reader.stats.book_time_remaining_secs,
+                            reader.settings.time_remaining_display
+                          )}
                         </Typography>
                         <Divider />
                         <Typography variant="body2">

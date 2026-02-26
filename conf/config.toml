@@ -31,6 +31,7 @@ pause_after_sentence = 0.06
 auto_scroll_tts = true
 center_spoken_sentence = true
 tts_pause_resume_behavior = "resume_from_pause_point"
+time_remaining_display = "adaptive"
 
 [ui]
 show_tts = true

@@ -46,6 +46,7 @@ pub struct ReaderSettingsView {
     pub pause_after_sentence: f32,
     pub auto_scroll_tts: bool,
     pub center_spoken_sentence: bool,
+    pub time_remaining_display: config::TimeRemainingDisplay,
     pub tts_speed: f32,
     pub tts_volume: f32,
 }
@@ -331,6 +332,7 @@ impl ReaderSession {
             pause_after_sentence: self.config.pause_after_sentence,
             auto_scroll_tts: self.config.auto_scroll_tts,
             center_spoken_sentence: self.config.center_spoken_sentence,
+            time_remaining_display: self.config.time_remaining_display,
             tts_speed: self.config.tts_speed,
             tts_volume: self.config.tts_volume,
         }

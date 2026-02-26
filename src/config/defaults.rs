@@ -107,6 +107,10 @@ pub(crate) fn default_tts_pause_resume_behavior() -> crate::config::TtsPauseResu
     crate::config::TtsPauseResumeBehavior::ResumeFromPausePoint
 }
 
+pub(crate) fn default_time_remaining_display() -> crate::config::TimeRemainingDisplay {
+    crate::config::TimeRemainingDisplay::Adaptive
+}
+
 pub(crate) fn default_key_toggle_play_pause() -> String {
     "space".to_string()
 }
