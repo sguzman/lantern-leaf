@@ -246,40 +246,15 @@ impl TextNormalizer {
         let cache_path =
             self.normalized_cache_path(epub_path, page_idx, &source_hash, &config_hash);
 
-        if let Ok(contents) = fs::read_to_string(&cache_path) {
-            if let Ok(cached) = toml::from_str::<PageNormalization>(&contents) {
-                tracing::debug!(
-                    path = %cache_path.display(),
-                    page = page_idx + 1,
-                    "Loaded normalized page cache"
-                );
-                return cached;
-            }
+        if let Some(cached) = self.read_page_plan_cache(&cache_path, page_idx) {
+            return cached;
         }
 
         let plan = self.plan_page(display_sentences);
         if let Some(parent) = cache_path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        match toml::to_string(&plan) {
-            Ok(serialized) => {
-                if let Err(err) = fs::write(&cache_path, serialized) {
-                    tracing::warn!(
-                        path = %cache_path.display(),
-                        "Failed to write normalized page cache: {err}"
-                    );
-                } else {
-                    tracing::debug!(
-                        path = %cache_path.display(),
-                        page = page_idx + 1,
-                        "Stored normalized page cache"
-                    );
-                }
-            }
-            Err(err) => {
-                tracing::warn!("Failed to serialize normalized page cache: {err}");
-            }
-        }
+        self.write_page_plan_cache(&cache_path, page_idx, &plan);
         plan
     }
 
@@ -301,15 +276,8 @@ impl TextNormalizer {
         let config_hash = self.config_hash();
         let page_cache_path =
             self.normalized_cache_path(epub_path, page_idx, &source_hash, &config_hash);
-        if let Ok(contents) = fs::read_to_string(&page_cache_path) {
-            if let Ok(cached) = toml::from_str::<PageNormalization>(&contents) {
-                tracing::debug!(
-                    path = %page_cache_path.display(),
-                    page = page_idx + 1,
-                    "Loaded normalized page cache"
-                );
-                return cached;
-            }
+        if let Some(cached) = self.read_page_plan_cache(&page_cache_path, page_idx) {
+            return cached;
         }
 
         let mut audio_sentences = Vec::with_capacity(display_sentences.len());
@@ -338,25 +306,7 @@ impl TextNormalizer {
         if let Some(parent) = page_cache_path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        match toml::to_string(&plan) {
-            Ok(serialized) => {
-                if let Err(err) = fs::write(&page_cache_path, serialized) {
-                    tracing::warn!(
-                        path = %page_cache_path.display(),
-                        "Failed to write normalized page cache: {err}"
-                    );
-                } else {
-                    tracing::debug!(
-                        path = %page_cache_path.display(),
-                        page = page_idx + 1,
-                        "Stored normalized page cache"
-                    );
-                }
-            }
-            Err(err) => {
-                tracing::warn!("Failed to serialize normalized page cache: {err}");
-            }
-        }
+        self.write_page_plan_cache(&page_cache_path, page_idx, &plan);
 
         plan
     }
@@ -575,7 +525,7 @@ impl TextNormalizer {
             chunks.push(cleaned.to_string());
         }
 
-        tracing::warn!(
+        tracing::debug!(
             original_chars = cleaned.chars().count(),
             original_words = cleaned.split_whitespace().count(),
             chunk_count = chunks.len(),
@@ -735,6 +685,55 @@ impl TextNormalizer {
             }
             Err(err) => {
                 tracing::warn!("Failed to serialize normalized sentence cache: {err}");
+            }
+        }
+    }
+
+    fn read_page_plan_cache(
+        &self,
+        cache_path: &Path,
+        page_idx: usize,
+    ) -> Option<PageNormalization> {
+        let contents = fs::read_to_string(cache_path).ok()?;
+        if let Ok(cached) = toml::from_str::<PageNormalization>(&contents) {
+            tracing::debug!(
+                path = %cache_path.display(),
+                page = page_idx + 1,
+                "Loaded normalized page cache"
+            );
+            return Some(cached);
+        }
+        if let Ok(cached) = toml::from_str::<PageNormalizationCache>(&contents) {
+            let plan = cached.into_plan();
+            tracing::debug!(
+                path = %cache_path.display(),
+                page = page_idx + 1,
+                "Loaded normalized page cache"
+            );
+            return Some(plan);
+        }
+        None
+    }
+
+    fn write_page_plan_cache(&self, cache_path: &Path, page_idx: usize, plan: &PageNormalization) {
+        let serializable = PageNormalizationCache::from_plan(plan);
+        match toml::to_string(&serializable) {
+            Ok(serialized) => {
+                if let Err(err) = fs::write(cache_path, serialized) {
+                    tracing::warn!(
+                        path = %cache_path.display(),
+                        "Failed to write normalized page cache: {err}"
+                    );
+                } else {
+                    tracing::debug!(
+                        path = %cache_path.display(),
+                        page = page_idx + 1,
+                        "Stored normalized page cache"
+                    );
+                }
+            }
+            Err(err) => {
+                tracing::warn!("Failed to serialize normalized page cache: {err}");
             }
         }
     }
@@ -1121,6 +1120,40 @@ struct NormalizedSentenceCache {
     normalized: Option<String>,
     #[serde(default)]
     chunks: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct PageNormalizationCache {
+    audio_sentences: Vec<String>,
+    // TOML cannot encode `None` in arrays directly; use `-1` sentinel.
+    display_to_audio: Vec<isize>,
+    audio_to_display: Vec<usize>,
+}
+
+impl PageNormalizationCache {
+    fn from_plan(plan: &PageNormalization) -> Self {
+        Self {
+            audio_sentences: plan.audio_sentences.clone(),
+            display_to_audio: plan
+                .display_to_audio
+                .iter()
+                .map(|entry| entry.map(|idx| idx as isize).unwrap_or(-1))
+                .collect(),
+            audio_to_display: plan.audio_to_display.clone(),
+        }
+    }
+
+    fn into_plan(self) -> PageNormalization {
+        PageNormalization {
+            audio_sentences: self.audio_sentences,
+            display_to_audio: self
+                .display_to_audio
+                .into_iter()
+                .map(|idx| if idx < 0 { None } else { Some(idx as usize) })
+                .collect(),
+            audio_to_display: self.audio_to_display,
+        }
+    }
 }
 
 #[cfg(test)]
