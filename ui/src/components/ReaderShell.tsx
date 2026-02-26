@@ -27,6 +27,8 @@ import {
   Slider,
   Stack,
   Switch,
+  Tab,
+  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
@@ -594,12 +596,24 @@ export const ReaderShell = memo(function ReaderShell({
 }: ReaderShellProps) {
   const [pageInput, setPageInput] = useState(String(reader.current_page + 1));
   const [searchInput, setSearchInput] = useState(reader.search_query);
+  const [statsTab, setStatsTab] = useState<"page" | "global" | "session">("page");
   const sentenceRefs = useRef<Record<number, HTMLButtonElement | null>>({});
   const sentenceScrollRef = useRef<HTMLDivElement | null>(null);
   const topBarRef = useRef<HTMLDivElement | null>(null);
   const ttsControlRowRef = useRef<HTMLDivElement | null>(null);
   const [topBarWidth, setTopBarWidth] = useState(0);
   const [ttsControlRowWidth, setTtsControlRowWidth] = useState(0);
+  const [sessionNowMs, setSessionNowMs] = useState(Date.now());
+  const sessionStartMsRef = useRef(Date.now());
+  const listeningAccumulatedMsRef = useRef(0);
+  const listeningStartedAtMsRef = useRef<number | null>(
+    reader.tts.state === "playing" ? Date.now() : null
+  );
+  const sessionBaselineWordsRef = useRef(reader.stats.words_read_up_to_current_position);
+  const sessionMaxWordsRef = useRef(reader.stats.words_read_up_to_current_position);
+  const sessionFinishedPagesRef = useRef<Set<number>>(new Set());
+  const [sessionWordsRead, setSessionWordsRead] = useState(0);
+  const [sessionPagesFinished, setSessionPagesFinished] = useState(0);
 
   useEffect(() => {
     const node = topBarRef.current;
@@ -773,6 +787,71 @@ export const ReaderShell = memo(function ReaderShell({
     () => reader.images.map((path) => toReaderImageSrc(path)),
     [reader.images]
   );
+  const estimatedTotalWords = useMemo(() => {
+    if (reader.stats.page_end_percent <= 0) {
+      return reader.stats.words_read_up_to_page_end;
+    }
+    return Math.max(
+      reader.stats.words_read_up_to_page_end,
+      Math.round((reader.stats.words_read_up_to_page_end * 100) / reader.stats.page_end_percent)
+    );
+  }, [reader.stats.page_end_percent, reader.stats.words_read_up_to_page_end]);
+  const estimatedTotalSentences = useMemo(() => {
+    if (reader.stats.page_end_percent <= 0) {
+      return reader.stats.sentences_read_up_to_page_end;
+    }
+    return Math.max(
+      reader.stats.sentences_read_up_to_page_end,
+      Math.round(
+        (reader.stats.sentences_read_up_to_page_end * 100) / reader.stats.page_end_percent
+      )
+    );
+  }, [reader.stats.page_end_percent, reader.stats.sentences_read_up_to_page_end]);
+  const wordsReadOnPage = useMemo(
+    () =>
+      Math.max(
+        0,
+        reader.stats.words_read_up_to_current_position - reader.stats.words_read_up_to_page_start
+      ),
+    [reader.stats.words_read_up_to_current_position, reader.stats.words_read_up_to_page_start]
+  );
+  const sentencesReadOnPage = useMemo(
+    () =>
+      Math.max(
+        0,
+        reader.stats.sentences_read_up_to_current_position -
+          reader.stats.sentences_read_up_to_page_start
+      ),
+    [
+      reader.stats.sentences_read_up_to_current_position,
+      reader.stats.sentences_read_up_to_page_start
+    ]
+  );
+  const pageFinishedPct = useMemo(() => {
+    if (reader.stats.page_word_count <= 0) {
+      return 0;
+    }
+    return clamp((wordsReadOnPage / reader.stats.page_word_count) * 100, 0, 100);
+  }, [reader.stats.page_word_count, wordsReadOnPage]);
+  const sessionSecondsInApp = Math.floor((sessionNowMs - sessionStartMsRef.current) / 1000);
+  const sessionSecondsListening = Math.floor(
+    (listeningAccumulatedMsRef.current +
+      (reader.tts.state === "playing" && listeningStartedAtMsRef.current !== null
+        ? sessionNowMs - listeningStartedAtMsRef.current
+        : 0)) /
+      1000
+  );
+  const estimatedReadPages = useMemo(
+    () =>
+      Math.min(
+        reader.stats.total_pages,
+        Math.max(
+          reader.stats.page_index,
+          Math.floor((reader.stats.global_progress_pct / 100) * reader.stats.total_pages)
+        )
+      ),
+    [reader.stats.global_progress_pct, reader.stats.page_index, reader.stats.total_pages]
+  );
 
   const playbackLabel = reader.tts.state === "playing" ? "Pause" : "Play";
   const hasHighlightSentence = reader.highlighted_sentence_idx !== null;
@@ -780,6 +859,52 @@ export const ReaderShell = memo(function ReaderShell({
   const themeLabel = reader.settings.theme === "night" ? "Day" : "Night";
   const themeIcon =
     reader.settings.theme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />;
+
+  useEffect(() => {
+    const tick = window.setInterval(() => {
+      setSessionNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(tick);
+  }, []);
+
+  useEffect(() => {
+    const now = Date.now();
+    if (reader.tts.state === "playing") {
+      if (listeningStartedAtMsRef.current === null) {
+        listeningStartedAtMsRef.current = now;
+      }
+    } else if (listeningStartedAtMsRef.current !== null) {
+      listeningAccumulatedMsRef.current += now - listeningStartedAtMsRef.current;
+      listeningStartedAtMsRef.current = null;
+    }
+  }, [reader.tts.state]);
+
+  useEffect(() => {
+    sessionStartMsRef.current = Date.now();
+    listeningAccumulatedMsRef.current = 0;
+    listeningStartedAtMsRef.current = reader.tts.state === "playing" ? Date.now() : null;
+    sessionBaselineWordsRef.current = reader.stats.words_read_up_to_current_position;
+    sessionMaxWordsRef.current = reader.stats.words_read_up_to_current_position;
+    sessionFinishedPagesRef.current = new Set();
+    setSessionWordsRead(0);
+    setSessionPagesFinished(0);
+    setSessionNowMs(Date.now());
+    setStatsTab("page");
+  }, [reader.source_path]);
+
+  useEffect(() => {
+    sessionMaxWordsRef.current = Math.max(
+      sessionMaxWordsRef.current,
+      reader.stats.words_read_up_to_current_position
+    );
+    setSessionWordsRead(
+      Math.max(0, sessionMaxWordsRef.current - sessionBaselineWordsRef.current)
+    );
+    if (pageFinishedPct >= 99.9) {
+      sessionFinishedPagesRef.current.add(reader.current_page);
+      setSessionPagesFinished(sessionFinishedPagesRef.current.size);
+    }
+  }, [pageFinishedPct, reader.current_page, reader.stats.words_read_up_to_current_position]);
 
   return (
     <Card className="w-full max-w-[1700px] min-h-0 rounded-3xl border border-slate-200 shadow-sm lg:h-full">
@@ -1283,53 +1408,102 @@ export const ReaderShell = memo(function ReaderShell({
                     ) : null}
 
                     {reader.panels.show_stats ? (
-                      <Stack spacing={0.8}>
-                        <Typography variant="body2">
-                          Page index: {reader.stats.page_index} / {reader.stats.total_pages}
-                        </Typography>
-                        <Typography variant="body2">
-                          TTS progress (page): {reader.stats.tts_progress_pct.toFixed(3)}%
-                        </Typography>
-                        <Typography variant="body2">
-                          TTS progress (global): {reader.stats.global_progress_pct.toFixed(3)}%
-                        </Typography>
-                        <Typography variant="body2">
-                          Page time remaining: {formatRemainingTime(
-                            reader.stats.page_time_remaining_secs,
-                            reader.settings.time_remaining_display
-                          )}
-                        </Typography>
-                        <Typography variant="body2">
-                          Book time remaining: {formatRemainingTime(
-                            reader.stats.book_time_remaining_secs,
-                            reader.settings.time_remaining_display
-                          )}
-                        </Typography>
-                        <Divider />
-                        <Typography variant="body2">
-                          Words on page: {reader.stats.page_word_count}
-                        </Typography>
-                        <Typography variant="body2">
-                          Sentences on page: {reader.stats.page_sentence_count}
-                        </Typography>
-                        <Typography variant="body2">
-                          Percent at start of page: {formatPercent(reader.stats.page_start_percent)}
-                        </Typography>
-                        <Typography variant="body2">
-                          Percent at end of page: {formatPercent(reader.stats.page_end_percent)}
-                        </Typography>
-                        <Typography variant="body2">
-                          Words read to page start: {reader.stats.words_read_up_to_page_start}
-                        </Typography>
-                        <Typography variant="body2">
-                          Sentences read to page start: {reader.stats.sentences_read_up_to_page_start}
-                        </Typography>
-                        <Typography variant="body2">
-                          Words read to current position: {reader.stats.words_read_up_to_current_position}
-                        </Typography>
-                        <Typography variant="body2">
-                          Sentences read to current position: {reader.stats.sentences_read_up_to_current_position}
-                        </Typography>
+                      <Stack spacing={1.2}>
+                        <Tabs
+                          value={statsTab}
+                          onChange={(_, value: "page" | "global" | "session") =>
+                            setStatsTab(value)
+                          }
+                          variant="scrollable"
+                          allowScrollButtonsMobile
+                          sx={{ minHeight: 32 }}
+                        >
+                          <Tab label="Current Page Stats" value="page" />
+                          <Tab label="Global Stats" value="global" />
+                          <Tab label="Current Session Stats" value="session" />
+                        </Tabs>
+                        {statsTab === "page" ? (
+                          <Stack spacing={0.8}>
+                            <Typography variant="body2">
+                              Page index: {reader.stats.page_index} / {reader.stats.total_pages}
+                            </Typography>
+                            <Typography variant="body2">
+                              Words on page: {reader.stats.page_word_count}
+                            </Typography>
+                            <Typography variant="body2">
+                              Sentences on page: {reader.stats.page_sentence_count}
+                            </Typography>
+                            <Typography variant="body2">
+                              Percent at start of page: {formatPercent(reader.stats.page_start_percent)}
+                            </Typography>
+                            <Typography variant="body2">
+                              Percent at end of page: {formatPercent(reader.stats.page_end_percent)}
+                            </Typography>
+                            <Divider />
+                            <Typography variant="body2" fontWeight={700}>
+                              Page Progress
+                            </Typography>
+                            <Typography variant="body2">
+                              TTS progress (page): {reader.stats.tts_progress_pct.toFixed(3)}%
+                            </Typography>
+                            <Typography variant="body2">
+                              Page time remaining:{" "}
+                              {formatRemainingTime(
+                                reader.stats.page_time_remaining_secs,
+                                reader.settings.time_remaining_display
+                              )}
+                            </Typography>
+                            <Typography variant="body2">Words read on page: {wordsReadOnPage}</Typography>
+                            <Typography variant="body2">
+                              Sentences read on page: {sentencesReadOnPage}
+                            </Typography>
+                          </Stack>
+                        ) : null}
+                        {statsTab === "global" ? (
+                          <Stack spacing={0.8}>
+                            <Typography variant="body2" fontWeight={700}>
+                              Global Stats
+                            </Typography>
+                            <Typography variant="body2">Total page count: {reader.stats.total_pages}</Typography>
+                            <Typography variant="body2">Total words in book: {estimatedTotalWords}</Typography>
+                            <Typography variant="body2">
+                              Total sentences in book: {estimatedTotalSentences}
+                            </Typography>
+                            <Divider />
+                            <Typography variant="body2" fontWeight={700}>
+                              Global Progress
+                            </Typography>
+                            <Typography variant="body2">Total read pages: {estimatedReadPages}</Typography>
+                            <Typography variant="body2">
+                              Total read words: {reader.stats.words_read_up_to_current_position}
+                            </Typography>
+                            <Typography variant="body2">
+                              Total read sentences: {reader.stats.sentences_read_up_to_current_position}
+                            </Typography>
+                            <Typography variant="body2">
+                              TTS global progress: {reader.stats.global_progress_pct.toFixed(3)}%
+                            </Typography>
+                          </Stack>
+                        ) : null}
+                        {statsTab === "session" ? (
+                          <Stack spacing={0.8}>
+                            <Typography variant="body2">
+                              Time spent in app: {formatSeconds(sessionSecondsInApp)}
+                            </Typography>
+                            <Typography variant="body2">
+                              Time spent listening to audio: {formatSeconds(sessionSecondsListening)}
+                            </Typography>
+                            <Typography variant="body2">Words read: {sessionWordsRead}</Typography>
+                            <Typography variant="body2">Pages finished: {sessionPagesFinished}</Typography>
+                            <Typography variant="body2">
+                              Percent (global) finished: {reader.stats.global_progress_pct.toFixed(3)}%
+                            </Typography>
+                            <Typography variant="body2">
+                              Percent (page) finished: {pageFinishedPct.toFixed(3)}%
+                            </Typography>
+                            <Typography variant="body2">State: {reader.tts.state}</Typography>
+                          </Stack>
+                        ) : null}
                       </Stack>
                     ) : null}
 
