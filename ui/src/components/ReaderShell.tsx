@@ -852,6 +852,12 @@ export const ReaderShell = memo(function ReaderShell({
       ),
     [reader.stats.global_progress_pct, reader.stats.page_index, reader.stats.total_pages]
   );
+  const sessionGlobalPercentFinished = useMemo(() => {
+    if (estimatedTotalWords <= 0) {
+      return 0;
+    }
+    return clamp((sessionWordsRead / estimatedTotalWords) * 100, 0, 100);
+  }, [estimatedTotalWords, sessionWordsRead]);
 
   const playbackLabel = reader.tts.state === "playing" ? "Pause" : "Play";
   const hasHighlightSentence = reader.highlighted_sentence_idx !== null;
@@ -1496,7 +1502,7 @@ export const ReaderShell = memo(function ReaderShell({
                             <Typography variant="body2">Words read: {sessionWordsRead}</Typography>
                             <Typography variant="body2">Pages finished: {sessionPagesFinished}</Typography>
                             <Typography variant="body2">
-                              Percent (global) finished: {reader.stats.global_progress_pct.toFixed(3)}%
+                              Percent (global) finished: {sessionGlobalPercentFinished.toFixed(3)}%
                             </Typography>
                             <Typography variant="body2">
                               Percent (page) finished: {pageFinishedPct.toFixed(3)}%
