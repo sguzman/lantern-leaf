@@ -317,12 +317,9 @@ impl TextNormalizer {
         let mut audio_to_display = Vec::new();
 
         for (display_idx, sentence) in display_sentences.iter().enumerate() {
-            if let Some(cleaned) = self.normalize_sentence_cached(epub_path, &config_hash, sentence)
+            if let Some(chunks) =
+                self.normalize_sentence_chunks_cached(epub_path, &config_hash, sentence)
             {
-                let chunks = self.chunk_sentence_for_tts(&cleaned);
-                if chunks.is_empty() {
-                    continue;
-                }
                 let first_audio_idx = audio_sentences.len();
                 display_to_audio[display_idx] = Some(first_audio_idx);
                 for chunk in chunks {
@@ -669,33 +666,67 @@ impl TextNormalizer {
         normalized_dir(epub_path).join(file_name)
     }
 
-    fn normalize_sentence_cached(
+    fn normalize_sentence_chunks_cached(
         &self,
         epub_path: &Path,
         config_hash: &str,
         sentence: &str,
-    ) -> Option<String> {
+    ) -> Option<Vec<String>> {
         let source_hash = hash_sentence(sentence);
         let cache_path = self.normalized_sentence_cache_path(epub_path, &source_hash, config_hash);
 
         if let Ok(contents) = fs::read_to_string(&cache_path) {
             if let Ok(cached) = toml::from_str::<NormalizedSentenceCache>(&contents) {
-                return cached.normalized;
+                if let Some(chunks) = cached.chunks {
+                    return if chunks.is_empty() {
+                        None
+                    } else {
+                        Some(chunks)
+                    };
+                }
+                if let Some(normalized) = cached.normalized {
+                    let chunks = self.chunk_sentence_for_tts(&normalized);
+                    let upgraded = NormalizedSentenceCache {
+                        normalized: Some(normalized),
+                        chunks: Some(chunks.clone()),
+                    };
+                    self.write_normalized_sentence_cache(&cache_path, &upgraded);
+                    return if chunks.is_empty() {
+                        None
+                    } else {
+                        Some(chunks)
+                    };
+                }
+                return None;
             }
         }
 
         let cleaned = self.clean_text_core(sentence);
         let normalized = self.finalize_sentence(&cleaned);
+        let chunks = normalized
+            .as_deref()
+            .map(|text| self.chunk_sentence_for_tts(text))
+            .unwrap_or_default();
         let cached = NormalizedSentenceCache {
-            normalized: normalized.clone(),
+            normalized,
+            chunks: Some(chunks.clone()),
         };
+        self.write_normalized_sentence_cache(&cache_path, &cached);
 
+        if chunks.is_empty() {
+            None
+        } else {
+            Some(chunks)
+        }
+    }
+
+    fn write_normalized_sentence_cache(&self, cache_path: &Path, cached: &NormalizedSentenceCache) {
         if let Some(parent) = cache_path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        match toml::to_string(&cached) {
+        match toml::to_string(cached) {
             Ok(serialized) => {
-                if let Err(err) = fs::write(&cache_path, serialized) {
+                if let Err(err) = fs::write(cache_path, serialized) {
                     tracing::warn!(
                         path = %cache_path.display(),
                         "Failed to write normalized sentence cache: {err}"
@@ -706,8 +737,6 @@ impl TextNormalizer {
                 tracing::warn!("Failed to serialize normalized sentence cache: {err}");
             }
         }
-
-        normalized
     }
 }
 
@@ -1088,7 +1117,10 @@ fn hash_sentence(sentence: &str) -> String {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct NormalizedSentenceCache {
+    #[serde(default)]
     normalized: Option<String>,
+    #[serde(default)]
+    chunks: Option<Vec<String>>,
 }
 
 #[cfg(test)]
