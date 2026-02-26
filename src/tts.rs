@@ -179,7 +179,7 @@ impl TtsEngine {
                         continue;
                     }
                     Ok(Err(err)) => {
-                        warn!("Failed to synthesize sentence: {err}");
+                        warn!("Failed to synthesize sentence: {err:#}");
                         return Err(err);
                     }
                     Err(mpsc::TryRecvError::Disconnected) => {
@@ -514,7 +514,7 @@ fn worker_loop(rx: mpsc::Receiver<Job>, model_path: PathBuf, espeak_root: PathBu
     let mut child = match child {
         Ok(child) => child,
         Err(err) => {
-            let err_msg = err.to_string();
+            let err_msg = format!("{err:#}");
             warn!("Failed to spawn TTS worker: {err_msg}");
             for job in rx {
                 if let Job::Synthesize { result_tx, .. } = job {
@@ -566,6 +566,18 @@ fn worker_loop(rx: mpsc::Receiver<Job>, model_path: PathBuf, espeak_root: PathBu
 
 fn spawn_worker(model_path: &Path, espeak_root: &Path) -> Result<std::process::Child> {
     let exe = env::current_exe().context("Finding current executable")?;
+    let exe_meta = fs::metadata(&exe).with_context(|| {
+        format!(
+            "Inspecting current executable metadata at {}",
+            exe.display()
+        )
+    })?;
+    if !exe_meta.is_file() {
+        anyhow::bail!(
+            "Current executable path is not a file: {}",
+            exe.display()
+        );
+    }
     Command::new(exe)
         .arg("--tts-worker")
         .arg("--model")
@@ -575,7 +587,17 @@ fn spawn_worker(model_path: &Path, espeak_root: &Path) -> Result<std::process::C
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .context("Starting TTS worker process")
+        .with_context(|| {
+            format!(
+                "Starting TTS worker process (exe={}, model={}, espeak={})",
+                env::current_exe()
+                    .ok()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "<unknown>".to_string()),
+                model_path.display(),
+                espeak_root.display()
+            )
+        })
 }
 
 fn send_request<T: Serialize>(
