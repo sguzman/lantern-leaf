@@ -230,7 +230,7 @@ impl TextNormalizer {
         display_sentences: &[String],
     ) -> PageNormalization {
         if self.config.mode == NormalizationMode::Sentence {
-            return self.plan_page_cached_sentence_mode(epub_path, display_sentences);
+            return self.plan_page_cached_sentence_mode(epub_path, page_idx, display_sentences);
         }
         self.plan_page_cached_page_mode(epub_path, page_idx, display_sentences)
     }
@@ -286,6 +286,7 @@ impl TextNormalizer {
     fn plan_page_cached_sentence_mode(
         &self,
         epub_path: &Path,
+        page_idx: usize,
         display_sentences: &[String],
     ) -> PageNormalization {
         if display_sentences.is_empty() {
@@ -296,7 +297,21 @@ impl TextNormalizer {
             };
         }
 
+        let source_hash = hash_sentences(display_sentences);
         let config_hash = self.config_hash();
+        let page_cache_path =
+            self.normalized_cache_path(epub_path, page_idx, &source_hash, &config_hash);
+        if let Ok(contents) = fs::read_to_string(&page_cache_path) {
+            if let Ok(cached) = toml::from_str::<PageNormalization>(&contents) {
+                tracing::debug!(
+                    path = %page_cache_path.display(),
+                    page = page_idx + 1,
+                    "Loaded normalized page cache"
+                );
+                return cached;
+            }
+        }
+
         let mut audio_sentences = Vec::with_capacity(display_sentences.len());
         let mut display_to_audio = vec![None; display_sentences.len()];
         let mut audio_to_display = Vec::new();
@@ -317,11 +332,36 @@ impl TextNormalizer {
             }
         }
 
-        PageNormalization {
+        let plan = PageNormalization {
             audio_sentences,
             display_to_audio,
             audio_to_display,
+        };
+
+        if let Some(parent) = page_cache_path.parent() {
+            let _ = fs::create_dir_all(parent);
         }
+        match toml::to_string(&plan) {
+            Ok(serialized) => {
+                if let Err(err) = fs::write(&page_cache_path, serialized) {
+                    tracing::warn!(
+                        path = %page_cache_path.display(),
+                        "Failed to write normalized page cache: {err}"
+                    );
+                } else {
+                    tracing::debug!(
+                        path = %page_cache_path.display(),
+                        page = page_idx + 1,
+                        "Stored normalized page cache"
+                    );
+                }
+            }
+            Err(err) => {
+                tracing::warn!("Failed to serialize normalized page cache: {err}");
+            }
+        }
+
+        plan
     }
 
     pub fn plan_page(&self, display_sentences: &[String]) -> PageNormalization {
@@ -1102,9 +1142,13 @@ mod tests {
             .filter(|name| name.starts_with("s-"))
             .count();
         assert_eq!(second_sentence_files, 3);
+        let page_cache_files = files_after_second
+            .iter()
+            .filter(|name| name.starts_with("p"))
+            .count();
         assert!(
-            !files_after_second.iter().any(|name| name.starts_with("p")),
-            "sentence mode should not create page-level normalization cache files"
+            page_cache_files >= 2,
+            "sentence mode should persist page-level normalization plans for fast reloads"
         );
 
         let _ = fs::remove_dir_all(&cache_root);

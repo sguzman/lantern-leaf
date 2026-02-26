@@ -434,7 +434,10 @@ fn configure_normalizer_config_path_from_workspace() {
 
     // SAFETY: startup-time process env initialization before background worker threads are launched.
     unsafe {
-        std::env::set_var("LANTERNLEAF_NORMALIZER_CONFIG_PATH", &normalizer_config_path);
+        std::env::set_var(
+            "LANTERNLEAF_NORMALIZER_CONFIG_PATH",
+            &normalizer_config_path,
+        );
     }
 
     info!(

@@ -495,7 +495,9 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
         path_lookup.insert(normalized_key, image.clone());
         if let Some(base_name) = resource_path.file_name().and_then(|s| s.to_str()) {
             let base_key = normalize_epub_path_key(base_name);
-            basename_lookup.entry(base_key).or_insert_with(|| image.clone());
+            basename_lookup
+                .entry(base_key)
+                .or_insert_with(|| image.clone());
         }
 
         extracted.push(image);
@@ -542,16 +544,13 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
             }
 
             let normalized_src = normalize_epub_path_key(src);
-            let resolved = path_lookup
-                .get(&normalized_src)
-                .cloned()
-                .or_else(|| {
-                    Path::new(src)
-                        .file_name()
-                        .and_then(|s| s.to_str())
-                        .map(normalize_epub_path_key)
-                        .and_then(|base| basename_lookup.get(&base).cloned())
-                });
+            let resolved = path_lookup.get(&normalized_src).cloned().or_else(|| {
+                Path::new(src)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(normalize_epub_path_key)
+                    .and_then(|base| basename_lookup.get(&base).cloned())
+            });
 
             if let Some(image) = resolved {
                 chapter_images.push(image);

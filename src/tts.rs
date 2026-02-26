@@ -573,10 +573,7 @@ fn spawn_worker(model_path: &Path, espeak_root: &Path) -> Result<std::process::C
         )
     })?;
     if !exe_meta.is_file() {
-        anyhow::bail!(
-            "Current executable path is not a file: {}",
-            exe.display()
-        );
+        anyhow::bail!("Current executable path is not a file: {}", exe.display());
     }
     Command::new(exe)
         .arg("--tts-worker")

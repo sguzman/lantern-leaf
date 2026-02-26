@@ -782,14 +782,14 @@ impl ReaderSession {
             .min(self.page_sentence_counts.len().saturating_sub(1));
         self.current_page = clamped_page;
 
-        self.highlighted_display_idx = if let Some(global_idx) = self.global_idx_for_bookmark(bookmark)
-        {
-            let (page, idx) = self.page_idx_for_global_sentence(global_idx);
-            self.current_page = page;
-            Some(idx)
-        } else {
-            Some(0).filter(|_| self.current_display_len() > 0)
-        };
+        self.highlighted_display_idx =
+            if let Some(global_idx) = self.global_idx_for_bookmark(bookmark) {
+                let (page, idx) = self.page_idx_for_global_sentence(global_idx);
+                self.current_page = page;
+                Some(idx)
+            } else {
+                Some(0).filter(|_| self.current_display_len() > 0)
+            };
 
         self.highlighted_audio_idx = None;
         if self.text_only_mode {
@@ -916,7 +916,8 @@ impl ReaderSession {
 
         let mut page_start = 0usize;
         for idx in 0..self.current_page {
-            page_start = page_start.saturating_add(self.pages.get(idx).map(|p| p.len()).unwrap_or(0));
+            page_start =
+                page_start.saturating_add(self.pages.get(idx).map(|p| p.len()).unwrap_or(0));
         }
         let page_len = self
             .pages
@@ -1195,21 +1196,26 @@ impl ReaderSession {
 
         std::thread::scope(|scope| {
             for _ in 0..worker_count {
-                scope.spawn(|| loop {
-                    if cancelled.load(Ordering::Relaxed) {
-                        break;
+                scope.spawn(|| {
+                    loop {
+                        if cancelled.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        if cancel.map(|token| token.is_cancelled()).unwrap_or(false) {
+                            cancelled.store(true, Ordering::Relaxed);
+                            break;
+                        }
+                        let page_idx = next_page.fetch_add(1, Ordering::Relaxed);
+                        if page_idx >= total_pages {
+                            break;
+                        }
+                        let display_sentences = &self.raw_page_sentences[page_idx];
+                        let _ = normalizer.plan_page_cached(
+                            &self.source_path,
+                            page_idx,
+                            display_sentences,
+                        );
                     }
-                    if cancel.map(|token| token.is_cancelled()).unwrap_or(false) {
-                        cancelled.store(true, Ordering::Relaxed);
-                        break;
-                    }
-                    let page_idx = next_page.fetch_add(1, Ordering::Relaxed);
-                    if page_idx >= total_pages {
-                        break;
-                    }
-                    let display_sentences = &self.raw_page_sentences[page_idx];
-                    let _ =
-                        normalizer.plan_page_cached(&self.source_path, page_idx, display_sentences);
                 });
             }
         });
@@ -1264,8 +1270,13 @@ pub fn load_session_for_source_with_cancel(
     }
     let bookmark = crate::cache::load_bookmark(&source_path);
     let normalizer_threads = effective_config.normalizer_threads.max(1);
-    let session =
-        ReaderSession::load_with_cancel(source_path, effective_config, normalizer, bookmark, cancel)?;
+    let session = ReaderSession::load_with_cancel(
+        source_path,
+        effective_config,
+        normalizer,
+        bookmark,
+        cancel,
+    )?;
     session.precompute_normalization_cache(normalizer, normalizer_threads, cancel)?;
     Ok(session)
 }
