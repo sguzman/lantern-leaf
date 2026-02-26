@@ -611,8 +611,11 @@ export const ReaderShell = memo(function ReaderShell({
   );
   const sessionBaselineWordsRef = useRef(reader.stats.words_read_up_to_current_position);
   const sessionMaxWordsRef = useRef(reader.stats.words_read_up_to_current_position);
+  const sessionBaselineSentencesRef = useRef(reader.stats.sentences_read_up_to_current_position);
+  const sessionMaxSentencesRef = useRef(reader.stats.sentences_read_up_to_current_position);
   const sessionFinishedPagesRef = useRef<Set<number>>(new Set());
   const [sessionWordsRead, setSessionWordsRead] = useState(0);
+  const [sessionSentencesRead, setSessionSentencesRead] = useState(0);
   const [sessionPagesFinished, setSessionPagesFinished] = useState(0);
 
   useEffect(() => {
@@ -858,6 +861,22 @@ export const ReaderShell = memo(function ReaderShell({
     }
     return clamp((sessionWordsRead / estimatedTotalWords) * 100, 0, 100);
   }, [estimatedTotalWords, sessionWordsRead]);
+  const listeningMinutes = useMemo(
+    () => sessionSecondsListening / 60,
+    [sessionSecondsListening]
+  );
+  const sessionWordsPerMinute = useMemo(
+    () => (listeningMinutes > 0 ? sessionWordsRead / listeningMinutes : 0),
+    [listeningMinutes, sessionWordsRead]
+  );
+  const sessionSentencesPerMinute = useMemo(
+    () => (listeningMinutes > 0 ? sessionSentencesRead / listeningMinutes : 0),
+    [listeningMinutes, sessionSentencesRead]
+  );
+  const sessionPercentPerMinute = useMemo(
+    () => (listeningMinutes > 0 ? sessionGlobalPercentFinished / listeningMinutes : 0),
+    [listeningMinutes, sessionGlobalPercentFinished]
+  );
 
   const playbackLabel = reader.tts.state === "playing" ? "Pause" : "Play";
   const hasHighlightSentence = reader.highlighted_sentence_idx !== null;
@@ -891,8 +910,11 @@ export const ReaderShell = memo(function ReaderShell({
     listeningStartedAtMsRef.current = reader.tts.state === "playing" ? Date.now() : null;
     sessionBaselineWordsRef.current = reader.stats.words_read_up_to_current_position;
     sessionMaxWordsRef.current = reader.stats.words_read_up_to_current_position;
+    sessionBaselineSentencesRef.current = reader.stats.sentences_read_up_to_current_position;
+    sessionMaxSentencesRef.current = reader.stats.sentences_read_up_to_current_position;
     sessionFinishedPagesRef.current = new Set();
     setSessionWordsRead(0);
+    setSessionSentencesRead(0);
     setSessionPagesFinished(0);
     setSessionNowMs(Date.now());
     setStatsTab("page");
@@ -906,11 +928,23 @@ export const ReaderShell = memo(function ReaderShell({
     setSessionWordsRead(
       Math.max(0, sessionMaxWordsRef.current - sessionBaselineWordsRef.current)
     );
+    sessionMaxSentencesRef.current = Math.max(
+      sessionMaxSentencesRef.current,
+      reader.stats.sentences_read_up_to_current_position
+    );
+    setSessionSentencesRead(
+      Math.max(0, sessionMaxSentencesRef.current - sessionBaselineSentencesRef.current)
+    );
     if (pageFinishedPct >= 99.9) {
       sessionFinishedPagesRef.current.add(reader.current_page);
       setSessionPagesFinished(sessionFinishedPagesRef.current.size);
     }
-  }, [pageFinishedPct, reader.current_page, reader.stats.words_read_up_to_current_position]);
+  }, [
+    pageFinishedPct,
+    reader.current_page,
+    reader.stats.sentences_read_up_to_current_position,
+    reader.stats.words_read_up_to_current_position
+  ]);
 
   return (
     <Card className="w-full max-w-[1700px] min-h-0 rounded-3xl border border-slate-200 shadow-sm lg:h-full">
@@ -1506,6 +1540,16 @@ export const ReaderShell = memo(function ReaderShell({
                             </Typography>
                             <Typography variant="body2">
                               Percent (page) finished: {pageFinishedPct.toFixed(3)}%
+                            </Typography>
+                            <Divider />
+                            <Typography variant="body2">
+                              Words read per minute: {sessionWordsPerMinute.toFixed(2)}
+                            </Typography>
+                            <Typography variant="body2">
+                              Sentences read per minute: {sessionSentencesPerMinute.toFixed(2)}
+                            </Typography>
+                            <Typography variant="body2">
+                              Percent read per minute: {sessionPercentPerMinute.toFixed(4)}%
                             </Typography>
                             <Typography variant="body2">State: {reader.tts.state}</Typography>
                           </Stack>
