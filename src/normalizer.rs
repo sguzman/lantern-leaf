@@ -1636,6 +1636,22 @@ mod tests {
     }
 
     #[test]
+    fn numeric_range_regex_expands_into_to_phrase() {
+        let mut config = AbbreviationConfig::default();
+        config.regex.push(AbbreviationRegexRule {
+            pattern: r"\b(\d+)-(\d+)\b".to_string(),
+            replace: "$1 to $2".to_string(),
+            case_sensitive: false,
+        });
+
+        let output = apply_abbreviation_map("Read chapters 12-34 tonight.", &config);
+        assert!(
+            output.contains("12 to 34"),
+            "expected numeric range to expand into '<number> to <number>'"
+        );
+    }
+
+    #[test]
     fn sentence_mode_cache_reused_across_page_indices() {
         let normalizer = TextNormalizer::default();
         let nonce = SystemTime::now()

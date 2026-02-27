@@ -143,3 +143,8 @@
 pattern = '\bp\.\s*(\d+)\.?'
 replace = 'page $1'
 case_sensitive = false
+
+[[abbreviations.regex]]
+pattern = '\b(\d+)-(\d+)\b'
+replace = '$1 to $2'
+case_sensitive = false
