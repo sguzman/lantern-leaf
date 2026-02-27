@@ -911,6 +911,13 @@ fn default_abbreviations() -> AbbreviationConfig {
 fn apply_abbreviation_map(text: &str, abbreviations: &AbbreviationConfig) -> String {
     let mut out = text.to_string();
     let merged = abbreviations.merged();
+    tracing::debug!(
+        regex_rules = merged.regex.len(),
+        case_rules = merged.case.len(),
+        nocase_rules = merged.nocase.len(),
+        "Applying abbreviation map"
+    );
+
     for rule in &merged.regex {
         if rule.pattern.trim().is_empty() {
             continue;
@@ -921,13 +928,25 @@ fn apply_abbreviation_map(text: &str, abbreviations: &AbbreviationConfig) -> Str
             format!("(?i){}", rule.pattern)
         };
         if let Ok(re) = Regex::new(&pattern) {
-            out = re.replace_all(&out, rule.replace.as_str()).to_string();
+            let hits = re.find_iter(&out).count();
+            if hits > 0 {
+                tracing::trace!(
+                    pattern = %rule.pattern,
+                    replacement = %rule.replace,
+                    case_sensitive = rule.case_sensitive,
+                    hits,
+                    "Applied regex abbreviation rule"
+                );
+                out = re.replace_all(&out, rule.replace.as_str()).to_string();
+            }
+        } else {
+            tracing::warn!(pattern = %rule.pattern, "Skipping invalid abbreviation regex rule");
         }
     }
+
     let mut case_entries: Vec<_> = merged.case.iter().collect();
     case_entries.sort_by_key(|(token, _)| Reverse(token.len()));
-    let mut nocase_entries: Vec<_> = merged.nocase.iter().collect();
-    nocase_entries.sort_by_key(|(token, _)| Reverse(token.len()));
+    let nocase_entries = build_nocase_abbreviation_entries(&merged.nocase);
 
     for (token, replacement) in case_entries {
         let trimmed = token.trim();
@@ -942,9 +961,21 @@ fn apply_abbreviation_map(text: &str, abbreviations: &AbbreviationConfig) -> Str
         };
 
         if let Ok(re) = Regex::new(&pattern) {
-            out = re.replace_all(&out, replacement.as_str()).to_string();
+            let hits = re.find_iter(&out).count();
+            if hits > 0 {
+                tracing::trace!(
+                    token = %trimmed,
+                    replacement = %replacement,
+                    hits,
+                    "Applied case-sensitive abbreviation rule"
+                );
+                out = re.replace_all(&out, replacement.as_str()).to_string();
+            }
+        } else {
+            tracing::warn!(token = %trimmed, "Skipping invalid case-sensitive abbreviation token");
         }
     }
+
     for (token, replacement) in nocase_entries {
         let trimmed = token.trim();
         if trimmed.is_empty() {
@@ -958,11 +989,78 @@ fn apply_abbreviation_map(text: &str, abbreviations: &AbbreviationConfig) -> Str
         };
 
         if let Ok(re) = Regex::new(&pattern) {
-            out = re.replace_all(&out, replacement.as_str()).to_string();
+            let hits = re.find_iter(&out).count();
+            if hits > 0 {
+                tracing::trace!(
+                    token = %trimmed,
+                    replacement = %replacement,
+                    hits,
+                    "Applied case-insensitive abbreviation rule"
+                );
+                out = re.replace_all(&out, replacement.as_str()).to_string();
+            }
+        } else {
+            tracing::warn!(
+                token = %trimmed,
+                "Skipping invalid case-insensitive abbreviation token"
+            );
         }
     }
 
     out
+}
+
+fn build_nocase_abbreviation_entries(nocase: &BTreeMap<String, String>) -> Vec<(String, String)> {
+    let mut deduped: BTreeMap<String, (String, String)> = BTreeMap::new();
+    for (token, replacement) in nocase {
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let folded = trimmed.to_ascii_lowercase();
+        match deduped.get(&folded) {
+            Some((existing_token, _)) => {
+                if prefer_nocase_token(existing_token, trimmed) {
+                    tracing::debug!(
+                        folded = %folded,
+                        previous_token = %existing_token,
+                        chosen_token = %trimmed,
+                        "Resolved case-insensitive abbreviation token collision"
+                    );
+                    deduped.insert(folded, (trimmed.to_string(), replacement.clone()));
+                } else {
+                    tracing::debug!(
+                        folded = %folded,
+                        previous_token = %existing_token,
+                        skipped_token = %trimmed,
+                        "Kept existing case-insensitive abbreviation token on collision"
+                    );
+                }
+            }
+            None => {
+                deduped.insert(folded, (trimmed.to_string(), replacement.clone()));
+            }
+        }
+    }
+
+    let mut entries: Vec<(String, String)> = deduped.into_values().collect();
+    entries.sort_by_key(|(token, _)| Reverse(token.len()));
+    entries
+}
+
+fn prefer_nocase_token(existing: &str, candidate: &str) -> bool {
+    let existing_lower = token_is_ascii_lowercase(existing);
+    let candidate_lower = token_is_ascii_lowercase(candidate);
+    if existing_lower != candidate_lower {
+        return candidate_lower;
+    }
+    candidate.len() > existing.len()
+}
+
+fn token_is_ascii_lowercase(token: &str) -> bool {
+    token
+        .chars()
+        .all(|ch| !ch.is_ascii_alphabetic() || ch.is_ascii_lowercase())
 }
 
 fn apply_year_pronunciation(text: &str, cfg: &PronunciationConfig) -> String {
@@ -1509,6 +1607,32 @@ mod tests {
         let _ = fs::remove_file(&normalizer_path);
         let _ = fs::remove_file(&abbreviations_path);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mixed_case_literal_abbreviation_entries_do_not_break_page_mapping() {
+        let mut config = AbbreviationConfig::default();
+        config.nocase.insert("p.".to_string(), "page".to_string());
+        config.nocase.insert("P.".to_string(), "P".to_string());
+        config.regex.push(AbbreviationRegexRule {
+            pattern: "p\\.\\s*(\\d+)\\.?".to_string(),
+            replace: "page $1".to_string(),
+            case_sensitive: false,
+        });
+
+        let joined = apply_abbreviation_map("See p. 42 and p. then P. Hart.", &config);
+        assert!(
+            joined.contains("page 42"),
+            "expected p. <number> to expand into page <number>"
+        );
+        assert!(
+            joined.contains("and page then"),
+            "expected literal p. to expand into page"
+        );
+        assert!(
+            !joined.contains("pageage"),
+            "unexpected malformed replacement indicates duplicate abbreviation collision"
+        );
     }
 
     #[test]

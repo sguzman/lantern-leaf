@@ -12,33 +12,7 @@
 "p." = "page"
 "vs." = "versus"
 
-# Letter middle names.
-"A." = "A"
-"B." = "B"
-"C." = "C"
-"D." = "D"
-"E." = "E"
-"F." = "F"
-"G." = "G"
-"H." = "H"
-"I." = "I"
-"J." = "J"
-"K." = "K"
-"L." = "L"
-"M." = "M"
-"N." = "N"
-"O." = "O"
-"P." = "P"
-"Q." = "Q"
-"R." = "R"
-"S." = "S"
-"T." = "T"
-"U." = "U"
-"V." = "V"
-"W." = "W"
-"X." = "X"
-"Y." = "Y"
-"Z." = "Z"
+[abbreviations.case]
 
 # Number suffixes.
 "II" = "the second"
@@ -136,11 +110,36 @@
 "Calif." = "California"
 "Mass." = "Massachusetts"
 
-[abbreviations.case]
-# Example:
-# "US." = "United States"
+
+# Letter middle names.
+"A." = "A"
+"B." = "B"
+"C." = "C"
+"D." = "D"
+"E." = "E"
+"F." = "F"
+"G." = "G"
+"H." = "H"
+"I." = "I"
+"J." = "J"
+"K." = "K"
+"L." = "L"
+"M." = "M"
+"N." = "N"
+"O." = "O"
+"P." = "P"
+"Q." = "Q"
+"R." = "R"
+"S." = "S"
+"T." = "T"
+"U." = "U"
+"V." = "V"
+"W." = "W"
+"X." = "X"
+"Y." = "Y"
+"Z." = "Z"
 
 [[abbreviations.regex]]
-pattern = 'p\.\s*(\d+)\.'
+pattern = '\bp\.\s*(\d+)\.?'
 replace = 'page $1'
 case_sensitive = false
