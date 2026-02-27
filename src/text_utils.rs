@@ -196,6 +196,11 @@ fn period_is_abbreviation(
         if next + 1 < chars.len() && chars[next].is_alphabetic() && chars[next + 1] == '.' {
             return true;
         }
+
+        // Handle middle initials in names like "James B. Allen".
+        if next < chars.len() && chars[next].is_uppercase() {
+            return true;
+        }
     }
 
     false
@@ -404,6 +409,13 @@ mod tests {
     #[test]
     fn keeps_initialism_together() {
         let text = "This uses U.S. spelling. Next sentence.";
+        let sentences = split_sentences(text);
+        assert_eq!(sentences.len(), 2);
+    }
+
+    #[test]
+    fn keeps_middle_initial_in_name_together() {
+        let text = "James B. Allen wrote this. Next sentence.";
         let sentences = split_sentences(text);
         assert_eq!(sentences.len(), 2);
     }
