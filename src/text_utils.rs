@@ -14,7 +14,10 @@ pub fn split_sentences(text: &str) -> Vec<String> {
     split_sentences_with_abbreviations(text, &ABBREVIATION_TOKENS)
 }
 
-fn split_sentences_with_abbreviations(text: &str, abbreviations: &HashSet<String>) -> Vec<String> {
+fn split_sentences_with_abbreviations(
+    text: &str,
+    abbreviations: &AbbreviationTokenSet,
+) -> Vec<String> {
     let mut sentences = Vec::new();
     let mut current = String::new();
     let chars: Vec<char> = text.chars().collect();
@@ -148,7 +151,11 @@ fn exceeds_limits(text: &str, max_chars: usize, max_words: usize) -> bool {
     text.chars().count() > max_chars || text.split_whitespace().count() > max_words
 }
 
-fn period_is_abbreviation(chars: &[char], dot_idx: usize, abbreviations: &HashSet<String>) -> bool {
+fn period_is_abbreviation(
+    chars: &[char],
+    dot_idx: usize,
+    abbreviations: &AbbreviationTokenSet,
+) -> bool {
     if chars.get(dot_idx).copied() != Some('.') {
         return false;
     }
@@ -166,8 +173,12 @@ fn period_is_abbreviation(chars: &[char], dot_idx: usize, abbreviations: &HashSe
         return false;
     }
 
-    let lookup = format!("{}.", token.to_ascii_lowercase());
-    if abbreviations.contains(&lookup) {
+    let lookup_nocase = format!("{}.", token.to_ascii_lowercase());
+    if abbreviations.nocase.contains(&lookup_nocase) {
+        return true;
+    }
+    let lookup_case = format!("{token}.");
+    if abbreviations.case.contains(&lookup_case) {
         return true;
     }
 
@@ -190,22 +201,30 @@ fn period_is_abbreviation(chars: &[char], dot_idx: usize, abbreviations: &HashSe
     false
 }
 
-static ABBREVIATION_TOKENS: Lazy<HashSet<String>> = Lazy::new(load_abbreviation_tokens);
+static ABBREVIATION_TOKENS: Lazy<AbbreviationTokenSet> = Lazy::new(load_abbreviation_tokens);
 
-fn load_abbreviation_tokens() -> HashSet<String> {
-    let mut out = HashSet::new();
+fn load_abbreviation_tokens() -> AbbreviationTokenSet {
+    let mut out_nocase = HashSet::new();
+    let mut out_case = HashSet::new();
     for default in ["mr.", "ms.", "mrs.", "mass.", "st."] {
-        out.insert(default.to_string());
+        out_nocase.insert(default.to_string());
     }
 
     let normalizer_path = resolve_normalizer_config_path();
     if let Ok(contents) = fs::read_to_string(&normalizer_path)
         && let Ok(file) = toml::from_str::<NormalizerFile>(&contents)
     {
-        for key in file.normalization.abbreviations.keys() {
+        let merged = file.normalization.abbreviations.merged();
+        for key in merged.nocase.keys() {
             let normalized = normalize_abbreviation_token(key);
             if !normalized.is_empty() {
-                out.insert(normalized);
+                out_nocase.insert(normalized);
+            }
+        }
+        for key in merged.case.keys() {
+            let normalized = normalize_abbreviation_token_case(key);
+            if !normalized.is_empty() {
+                out_case.insert(normalized);
             }
         }
     }
@@ -214,15 +233,25 @@ fn load_abbreviation_tokens() -> HashSet<String> {
     if let Ok(contents) = fs::read_to_string(&abbreviations_path)
         && let Ok(file) = toml::from_str::<AbbreviationsFile>(&contents)
     {
-        for key in file.abbreviations.keys() {
+        let merged = file.abbreviations.merged();
+        for key in merged.nocase.keys() {
             let normalized = normalize_abbreviation_token(key);
             if !normalized.is_empty() {
-                out.insert(normalized);
+                out_nocase.insert(normalized);
+            }
+        }
+        for key in merged.case.keys() {
+            let normalized = normalize_abbreviation_token_case(key);
+            if !normalized.is_empty() {
+                out_case.insert(normalized);
             }
         }
     }
 
-    out
+    AbbreviationTokenSet {
+        case: out_case,
+        nocase: out_nocase,
+    }
 }
 
 fn resolve_normalizer_config_path() -> PathBuf {
@@ -295,6 +324,15 @@ fn normalize_abbreviation_token(raw: &str) -> String {
     }
 }
 
+fn normalize_abbreviation_token_case(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('.');
+    if trimmed.is_empty() {
+        String::new()
+    } else {
+        format!("{trimmed}.")
+    }
+}
+
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 struct NormalizerFile {
@@ -304,18 +342,50 @@ struct NormalizerFile {
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 struct NormalizationConfig {
-    abbreviations: BTreeMap<String, String>,
+    abbreviations: AbbreviationConfig,
 }
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 struct AbbreviationsFile {
-    abbreviations: BTreeMap<String, String>,
+    abbreviations: AbbreviationConfig,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+struct AbbreviationConfig {
+    case: BTreeMap<String, String>,
+    nocase: BTreeMap<String, String>,
+    #[serde(flatten)]
+    legacy: BTreeMap<String, String>,
+}
+
+impl AbbreviationConfig {
+    fn merged(&self) -> Self {
+        let mut merged_nocase = self.nocase.clone();
+        for (token, replacement) in &self.legacy {
+            merged_nocase.insert(token.clone(), replacement.clone());
+        }
+        Self {
+            case: self.case.clone(),
+            nocase: merged_nocase,
+            legacy: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct AbbreviationTokenSet {
+    case: HashSet<String>,
+    nocase: HashSet<String>,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{load_abbreviation_tokens, split_sentences};
+    use super::{
+        AbbreviationTokenSet, load_abbreviation_tokens, split_sentences,
+        split_sentences_with_abbreviations,
+    };
     use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -372,7 +442,7 @@ mod tests {
             .expect("system time should be after epoch")
             .as_nanos();
         let path = std::env::temp_dir().join(format!("lanternleaf-abbrevs-{nonce}.toml"));
-        std::fs::write(&path, "[abbreviations]\n\"pp.\" = \"pages\"\n")
+        std::fs::write(&path, "[abbreviations.nocase]\n\"pp.\" = \"pages\"\n")
             .expect("abbreviations config should be written");
 
         // SAFETY: test-only, guarded by a process-wide mutex to avoid env var races.
@@ -385,7 +455,19 @@ mod tests {
             std::env::remove_var("LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH");
         }
 
-        assert!(tokens.contains("pp."));
+        assert!(tokens.nocase.contains("pp."));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn case_sensitive_abbreviation_tokens_require_exact_case() {
+        let only_case = AbbreviationTokenSet {
+            case: ["Dr.".to_string()].into_iter().collect(),
+            nocase: std::collections::HashSet::new(),
+        };
+        let exact = split_sentences_with_abbreviations("Dr. Smith stayed.", &only_case);
+        let lower = split_sentences_with_abbreviations("dr. Smith stayed.", &only_case);
+        assert_eq!(exact.len(), 1);
+        assert_eq!(lower.len(), 2);
     }
 }

@@ -1,19 +1,28 @@
-[abbreviations]
-"Mr." = "Mister"
-"Ms." = "Miss"
-"Mrs." = "Misses"
-"Mass." = "Massachusetts"
-"St." = "Saint"
+[abbreviations.nocase]
+"rev." = "revised"
+"vol." = "volume"
+"chap." = "chapter"
 "M." = ""
 "pp." = "pages"
-"Dr." = "Doctor"
-"Inc." = "Incorporated"
 "etc." = "et cetera"
 "i.e." = "that is"
 "e.g." = "for example"
 "vs." = "versus"
 "ibid." = "in the same place"
 "p." = "page"
+
+[abbreviations.case]
+# Example:
+# "US." = "United States"
+"Dr." = "Doctor"
+"Inc." = "Incorporated"
+"Mr." = "Mister"
+"Ms." = "Miss"
+"Mrs." = "Misses"
+"Mass." = "Massachusetts"
+"St." = "Saint"
+
+# Month abbreviations.
 "Jan." = "January"
 "Feb." = "February"
 "Mar." = "March"
@@ -25,6 +34,8 @@
 "Oct." = "October"
 "Nov." = "November"
 "Dec." = "December"
+
+# Day-of-week abbreviations.
 "Mon." = "Monday"
 "Tue." = "Tuesday"
 "Wed." = "Wednesday"
@@ -32,9 +43,8 @@
 "Fri." = "Friday"
 "Sat." = "Saturday"
 "Sun." = "Sunday"
-"rev." = "revised"
-"vol." = "volume"
-"chap." = "chapter"
+
+# US state abbreviations.
 "AL" = "Alabama"
 "AK" = "Alaska"
 "AZ" = "Arizona"
@@ -85,3 +95,6 @@
 "WV" = "West Virginia"
 "WI" = "Wisconsin"
 "WY" = "Wyoming"
+
+# Alt US state abbreviations.
+"Ala." = "Alabama"

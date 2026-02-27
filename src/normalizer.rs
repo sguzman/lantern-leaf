@@ -69,7 +69,7 @@ struct NormalizerConfig {
     min_sentence_chars: usize,
     require_alphanumeric: bool,
     replacements: BTreeMap<String, String>,
-    abbreviations: BTreeMap<String, String>,
+    abbreviations: AbbreviationConfig,
     drop_tokens: Vec<String>,
     acronyms: AcronymConfig,
     pronunciation: PronunciationConfig,
@@ -767,26 +767,27 @@ fn resolve_default_normalizer_path() -> PathBuf {
     PathBuf::from(DEFAULT_NORMALIZER_PATH)
 }
 
-fn load_external_abbreviations(normalizer_config_path: &Path) -> BTreeMap<String, String> {
+fn load_external_abbreviations(normalizer_config_path: &Path) -> AbbreviationConfig {
     let path = resolve_abbreviations_path(normalizer_config_path);
     let Ok(contents) = fs::read_to_string(&path) else {
-        return BTreeMap::new();
+        return AbbreviationConfig::default();
     };
     match toml::from_str::<AbbreviationsFile>(&contents) {
         Ok(file) => {
+            let merged = file.abbreviations.merged();
             tracing::info!(
                 path = %path.display(),
-                count = file.abbreviations.len(),
+                count = merged.case.len() + merged.nocase.len(),
                 "Loaded external abbreviations config"
             );
-            file.abbreviations
+            merged
         }
         Err(err) => {
             tracing::warn!(
                 path = %path.display(),
                 "Invalid abbreviations config TOML: {err}"
             );
-            BTreeMap::new()
+            AbbreviationConfig::default()
         }
     }
 }
@@ -892,22 +893,45 @@ fn apply_brand_map(text: &str, brand_map: &BTreeMap<String, String>) -> String {
     out
 }
 
-fn default_abbreviations() -> BTreeMap<String, String> {
-    let mut map = BTreeMap::new();
-    map.insert("Mr.".to_string(), "Mister".to_string());
-    map.insert("Ms.".to_string(), "Miss".to_string());
-    map.insert("Mrs.".to_string(), "Misses".to_string());
-    map.insert("Mass.".to_string(), "Massachusetts".to_string());
-    map.insert("St.".to_string(), "Saint".to_string());
-    map
+fn default_abbreviations() -> AbbreviationConfig {
+    let mut nocase = BTreeMap::new();
+    nocase.insert("Mr.".to_string(), "Mister".to_string());
+    nocase.insert("Ms.".to_string(), "Miss".to_string());
+    nocase.insert("Mrs.".to_string(), "Misses".to_string());
+    nocase.insert("Mass.".to_string(), "Massachusetts".to_string());
+    nocase.insert("St.".to_string(), "Saint".to_string());
+    AbbreviationConfig {
+        case: BTreeMap::new(),
+        nocase,
+        legacy: BTreeMap::new(),
+    }
 }
 
-fn apply_abbreviation_map(text: &str, abbreviation_map: &BTreeMap<String, String>) -> String {
+fn apply_abbreviation_map(text: &str, abbreviations: &AbbreviationConfig) -> String {
     let mut out = text.to_string();
-    let mut entries: Vec<_> = abbreviation_map.iter().collect();
-    entries.sort_by_key(|(token, _)| Reverse(token.len()));
+    let merged = abbreviations.merged();
+    let mut case_entries: Vec<_> = merged.case.iter().collect();
+    case_entries.sort_by_key(|(token, _)| Reverse(token.len()));
+    let mut nocase_entries: Vec<_> = merged.nocase.iter().collect();
+    nocase_entries.sort_by_key(|(token, _)| Reverse(token.len()));
 
-    for (token, replacement) in entries {
+    for (token, replacement) in case_entries {
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let pattern = if let Some(base) = trimmed.strip_suffix('.') {
+            format!(r"\b{}\.", regex::escape(base))
+        } else {
+            format!(r"\b{}\b", regex::escape(trimmed))
+        };
+
+        if let Ok(re) = Regex::new(&pattern) {
+            out = re.replace_all(&out, replacement.as_str()).to_string();
+        }
+    }
+    for (token, replacement) in nocase_entries {
         let trimmed = token.trim();
         if trimmed.is_empty() {
             continue;
@@ -1184,7 +1208,44 @@ struct NormalizedSentenceCache {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(default)]
 struct AbbreviationsFile {
-    abbreviations: BTreeMap<String, String>,
+    abbreviations: AbbreviationConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(default)]
+struct AbbreviationConfig {
+    case: BTreeMap<String, String>,
+    nocase: BTreeMap<String, String>,
+    #[serde(flatten)]
+    legacy: BTreeMap<String, String>,
+}
+
+impl AbbreviationConfig {
+    fn merged(&self) -> Self {
+        let mut merged_nocase = self.nocase.clone();
+        for (token, replacement) in &self.legacy {
+            merged_nocase.insert(token.clone(), replacement.clone());
+        }
+        Self {
+            case: self.case.clone(),
+            nocase: merged_nocase,
+            legacy: BTreeMap::new(),
+        }
+    }
+
+    fn extend(&mut self, other: Self) {
+        let other = other.merged();
+        for (k, v) in other.case {
+            self.case.insert(k, v);
+        }
+        for (k, v) in other.nocase {
+            self.nocase.insert(k, v);
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.case.is_empty() && self.nocase.is_empty() && self.legacy.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1256,7 +1317,7 @@ mod tests {
             .expect("normalizer config should be written");
         fs::write(
             &abbreviations_path,
-            "[abbreviations]\n\"pp.\" = \"pages\"\n",
+            "[abbreviations.nocase]\n\"pp.\" = \"pages\"\n",
         )
         .expect("abbreviations config should be written");
 
@@ -1274,6 +1335,57 @@ mod tests {
         assert!(
             plan.audio_sentences.iter().any(|s| s.contains("pages")),
             "expected external abbreviation expansion to be applied"
+        );
+
+        let _ = fs::remove_file(&normalizer_path);
+        let _ = fs::remove_file(&abbreviations_path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn external_case_sensitive_abbreviation_only_matches_exact_case() {
+        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("lanternleaf-normalizer-test-{nonce}"));
+        fs::create_dir_all(&dir).expect("temp dir should be created");
+        let normalizer_path = dir.join("normalizer.toml");
+        let abbreviations_path = dir.join("abbreviations.toml");
+        fs::write(&normalizer_path, "[normalization]\nmode = \"sentence\"\n")
+            .expect("normalizer config should be written");
+        fs::write(
+            &abbreviations_path,
+            "[abbreviations.case]\n\"US.\" = \"United States\"\n",
+        )
+        .expect("abbreviations config should be written");
+
+        // SAFETY: test-only, guarded by a process-wide mutex to avoid env var races.
+        unsafe {
+            std::env::set_var("LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH", &abbreviations_path);
+        }
+        let normalizer = TextNormalizer::load(&normalizer_path);
+        // SAFETY: test-only cleanup, guarded by a process-wide mutex to avoid env var races.
+        unsafe {
+            std::env::remove_var("LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH");
+        }
+
+        let upper = normalizer.plan_page(&["US. policy".to_string()]);
+        let lower = normalizer.plan_page(&["us. policy".to_string()]);
+        assert!(
+            upper
+                .audio_sentences
+                .iter()
+                .any(|s| s.contains("United States")),
+            "expected exact-case abbreviation expansion to apply"
+        );
+        assert!(
+            lower
+                .audio_sentences
+                .iter()
+                .any(|s| s.contains("us. policy")),
+            "expected lowercase token to remain unchanged for case-sensitive entry"
         );
 
         let _ = fs::remove_file(&normalizer_path);
