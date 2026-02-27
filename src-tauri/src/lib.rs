@@ -2671,6 +2671,7 @@ pub fn run() {
             }
         })
         .manage(Mutex::new(BackendState::new()))
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(log_plugin)
         .invoke_handler(bridge_command_idents!(as_generate_handler));
 

@@ -4,6 +4,7 @@ import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { readText as readClipboardText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   Button,
   Card,
@@ -207,10 +208,15 @@ export function StarterShell({
   const handleClipboardOpen = async () => {
     setClipboardError(null);
     try {
-      if (!navigator.clipboard?.readText) {
-        throw new Error("Clipboard API is not available in this runtime");
+      let text = "";
+      try {
+        text = await readClipboardText();
+      } catch {
+        if (!navigator.clipboard?.readText) {
+          throw new Error("Clipboard API is not available in this runtime");
+        }
+        text = await navigator.clipboard.readText();
       }
-      const text = await navigator.clipboard.readText();
       await onOpenClipboardText(text);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

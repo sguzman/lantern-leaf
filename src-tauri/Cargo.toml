@@ -23,6 +23,7 @@ tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 ts-rs = { version = "10.0.0", features = ["serde-compat"] }
+tauri-plugin-clipboard-manager = "2.3.2"
 
 [build-dependencies]
 tauri-build = { version = "2.5.5", features = [] }

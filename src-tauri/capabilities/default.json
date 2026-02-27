@@ -9,6 +9,7 @@
     "core:app:default",
     "core:window:default",
     "core:webview:default",
-    "log:default"
+    "log:default",
+    "clipboard-manager:allow-read-text"
   ]
 }
