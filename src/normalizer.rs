@@ -1463,6 +1463,55 @@ mod tests {
     }
 
     #[test]
+    fn regex_page_rule_takes_precedence_over_literal_p_rule() {
+        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("lanternleaf-normalizer-test-{nonce}"));
+        fs::create_dir_all(&dir).expect("temp dir should be created");
+        let normalizer_path = dir.join("normalizer.toml");
+        let abbreviations_path = dir.join("abbreviations.toml");
+        fs::write(&normalizer_path, "[normalization]\nmode = \"sentence\"\n")
+            .expect("normalizer config should be written");
+        fs::write(
+            &abbreviations_path,
+            "[abbreviations.nocase]\n\"p.\" = \"page\"\n\n[[abbreviations.regex]]\npattern = 'p\\.\\s*(\\d+)\\.'\nreplace = 'page $1'\ncase_sensitive = false\n",
+        )
+        .expect("abbreviations config should be written");
+
+        // SAFETY: test-only, guarded by a process-wide mutex to avoid env var races.
+        unsafe {
+            std::env::set_var("LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH", &abbreviations_path);
+        }
+        let normalizer = TextNormalizer::load(&normalizer_path);
+        // SAFETY: test-only cleanup, guarded by a process-wide mutex to avoid env var races.
+        unsafe {
+            std::env::remove_var("LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH");
+        }
+
+        let plan = normalizer.plan_page(&["See p. 169. and p. 8.".to_string()]);
+        let joined = plan.audio_sentences.join(" ");
+        assert!(
+            joined.contains("page 169"),
+            "expected regex to map p. 169. into page 169"
+        );
+        assert!(
+            joined.contains("page 8"),
+            "expected regex to map p. 8. into page 8"
+        );
+        assert!(
+            !joined.contains("page page"),
+            "unexpected double replacement indicates literal p. won before regex"
+        );
+
+        let _ = fs::remove_file(&normalizer_path);
+        let _ = fs::remove_file(&abbreviations_path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn sentence_mode_cache_reused_across_page_indices() {
         let normalizer = TextNormalizer::default();
         let nonce = SystemTime::now()

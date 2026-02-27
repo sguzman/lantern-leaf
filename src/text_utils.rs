@@ -506,4 +506,24 @@ mod tests {
             "expected sect. abbreviation token to be loaded from config"
         );
     }
+
+    #[test]
+    fn live_config_includes_calif_token() {
+        let tokens = load_abbreviation_tokens();
+        assert!(
+            tokens.nocase.contains("calif."),
+            "expected calif. abbreviation token to be loaded from config"
+        );
+    }
+
+    #[test]
+    fn live_config_does_not_split_calif() {
+        let text = "He moved to Calif. in 1990. Next sentence.";
+        let sentences = split_sentences(text);
+        assert_eq!(
+            sentences.len(),
+            2,
+            "expected Calif. to be treated as a non-terminal abbreviation"
+        );
+    }
 }
