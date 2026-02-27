@@ -906,18 +906,14 @@ fn build_tts_playback_plan(state: &mut BackendState) -> Option<TtsPlaybackPlan> 
     if snapshot.tts.state != session::TtsPlaybackState::Playing {
         return None;
     }
-    if snapshot.sentences.is_empty() {
+    let (audio_sentences, start_idx) = reader.current_tts_audio_slice(&normalizer);
+    if audio_sentences.is_empty() {
         return None;
     }
-    let start_idx = snapshot
-        .tts
-        .current_sentence_idx
-        .unwrap_or(0)
-        .min(snapshot.sentences.len().saturating_sub(1));
     Some(TtsPlaybackPlan {
         source_path: reader.source_path.clone(),
         page: snapshot.current_page,
-        sentences: snapshot.sentences,
+        sentences: audio_sentences,
         start_idx,
         pause_after: Duration::from_secs_f64(reader.config.pause_after_sentence.max(0.0) as f64),
         speed: reader.config.tts_speed,

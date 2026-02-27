@@ -634,13 +634,13 @@ impl ReaderSession {
     }
 
     pub fn tts_play(&mut self, normalizer: &normalizer::TextNormalizer) {
-        let count = self.current_sentences(normalizer).len();
+        let count = self.current_audio_sentences(normalizer).len();
         if count == 0 {
             self.tts_state = TtsPlaybackState::Idle;
             return;
         }
-        if self.current_highlight_idx().is_none() {
-            self.sentence_click(0, normalizer);
+        if self.current_audio_highlight_idx(normalizer).is_none() {
+            let _ = self.set_audio_highlight_idx(normalizer, 0);
         }
         self.tts_state = TtsPlaybackState::Playing;
     }
@@ -660,17 +660,17 @@ impl ReaderSession {
     }
 
     pub fn tts_play_from_page_start(&mut self, normalizer: &normalizer::TextNormalizer) {
-        let count = self.current_sentences(normalizer).len();
+        let count = self.current_audio_sentences(normalizer).len();
         if count == 0 {
             self.tts_state = TtsPlaybackState::Idle;
             return;
         }
-        self.sentence_click(0, normalizer);
+        let _ = self.set_audio_highlight_idx(normalizer, 0);
         self.tts_state = TtsPlaybackState::Playing;
     }
 
     pub fn tts_play_from_highlight(&mut self, normalizer: &normalizer::TextNormalizer) {
-        if self.current_highlight_idx().is_none() {
+        if self.current_audio_highlight_idx(normalizer).is_none() {
             self.tts_play_from_page_start(normalizer);
             return;
         }
@@ -945,8 +945,8 @@ impl ReaderSession {
         normalizer: &normalizer::TextNormalizer,
         progress_pct: f64,
     ) -> ReaderTtsView {
-        let sentence_count = self.current_sentences(normalizer).len();
-        let current_sentence_idx = self.current_highlight_idx();
+        let sentence_count = self.current_audio_sentences(normalizer).len();
+        let current_sentence_idx = self.current_audio_highlight_idx(normalizer);
         let can_seek_prev = if let Some(idx) = current_sentence_idx {
             idx > 0 || self.has_sentence_before_current_page()
         } else {
@@ -987,10 +987,10 @@ impl ReaderSession {
         normalizer: &normalizer::TextNormalizer,
     ) -> bool {
         if delta == 0 {
-            return self.current_highlight_idx().is_some();
+            return self.current_audio_highlight_idx(normalizer).is_some();
         }
 
-        let count = self.current_sentences(normalizer).len();
+        let count = self.current_audio_sentences(normalizer).len();
         if count == 0 {
             if delta > 0 {
                 return self.move_to_adjacent_page_with_sentences(1, normalizer);
@@ -999,35 +999,83 @@ impl ReaderSession {
         }
 
         let current = self
-            .current_highlight_idx()
+            .current_audio_highlight_idx(normalizer)
             .unwrap_or(0)
             .min(count.saturating_sub(1));
         if delta > 0 {
             let next = current.saturating_add(delta as usize);
             if next < count {
-                self.sentence_click(next, normalizer);
+                let _ = self.set_audio_highlight_idx(normalizer, next);
                 return true;
             }
             if self.move_to_adjacent_page_with_sentences(1, normalizer) {
-                self.sentence_click(0, normalizer);
-                return true;
+                return self.set_audio_highlight_idx(normalizer, 0);
             }
             return false;
         }
 
         let back = delta.unsigned_abs();
         if current >= back {
-            self.sentence_click(current - back, normalizer);
-            return true;
+            return self.set_audio_highlight_idx(normalizer, current - back);
         }
         if self.move_to_adjacent_page_with_sentences(-1, normalizer) {
-            let new_count = self.current_sentences(normalizer).len();
+            let new_count = self.current_audio_sentences(normalizer).len();
             if new_count > 0 {
-                self.sentence_click(new_count - 1, normalizer);
-                return true;
+                return self.set_audio_highlight_idx(normalizer, new_count - 1);
             }
         }
         false
+    }
+
+    fn current_audio_sentences(&mut self, normalizer: &normalizer::TextNormalizer) -> Vec<String> {
+        self.ensure_current_plan(normalizer).audio_sentences
+    }
+
+    fn current_audio_highlight_idx(
+        &mut self,
+        normalizer: &normalizer::TextNormalizer,
+    ) -> Option<usize> {
+        let audio_count = self.current_audio_sentences(normalizer).len();
+        if audio_count == 0 {
+            return None;
+        }
+        if let Some(idx) = self.highlighted_audio_idx {
+            return Some(idx.min(audio_count.saturating_sub(1)));
+        }
+        self.highlighted_display_idx
+            .and_then(|idx| self.map_display_to_audio_idx(normalizer, idx))
+            .map(|idx| idx.min(audio_count.saturating_sub(1)))
+    }
+
+    fn set_audio_highlight_idx(
+        &mut self,
+        normalizer: &normalizer::TextNormalizer,
+        audio_idx: usize,
+    ) -> bool {
+        let audio_count = self.current_audio_sentences(normalizer).len();
+        if audio_count == 0 {
+            self.highlighted_audio_idx = None;
+            return false;
+        }
+        let clamped = audio_idx.min(audio_count.saturating_sub(1));
+        self.highlighted_audio_idx = Some(clamped);
+        self.highlighted_display_idx = self.map_audio_to_display_idx(normalizer, clamped);
+        true
+    }
+
+    pub fn current_tts_audio_slice(
+        &mut self,
+        normalizer: &normalizer::TextNormalizer,
+    ) -> (Vec<String>, usize) {
+        let audio = self.current_audio_sentences(normalizer);
+        if audio.is_empty() {
+            return (audio, 0);
+        }
+        let start = self
+            .current_audio_highlight_idx(normalizer)
+            .unwrap_or(0)
+            .min(audio.len().saturating_sub(1));
+        (audio, start)
     }
 
     fn move_to_adjacent_page_with_sentences(
