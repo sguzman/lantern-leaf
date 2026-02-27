@@ -1,5 +1,9 @@
 [abbreviations.nocase]
+
+[abbreviations.case]
+
 # Text abbreviations.
+"ed." = "edition"
 "sect." = "section"
 "rev." = "revised"
 "vol." = "volume"
@@ -11,8 +15,6 @@
 "ibid." = "in the same place"
 "p." = "page"
 "vs." = "versus"
-
-[abbreviations.case]
 
 # Number suffixes.
 "II" = "the second"
