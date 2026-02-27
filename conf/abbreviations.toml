@@ -1,4 +1,6 @@
 [abbreviations.nocase]
+# Text abbreviations.
+"sect." = "section"
 "rev." = "revised"
 "vol." = "volume"
 "chap." = "chapter"
@@ -6,13 +8,9 @@
 "etc." = "et cetera"
 "i.e." = "that is"
 "e.g." = "for example"
-"vs." = "versus"
 "ibid." = "in the same place"
 "p." = "page"
-
-[abbreviations.case]
-# Example:
-# "US." = "United States"
+"vs." = "versus"
 
 # Letter middle names.
 "A." = "A"
@@ -53,7 +51,6 @@
 "Jr." = "Junior"
 "Sr." = "Senior"
 "Dr." = "Doctor"
-
 "Inc." = "Incorporated"
 "Mr." = "Mister"
 "Ms." = "Miss"
@@ -136,4 +133,14 @@
 
 # Alt US state abbreviations.
 "Ala." = "Alabama"
+"Calif." = "California"
 "Mass." = "Massachusetts"
+
+[abbreviations.case]
+# Example:
+# "US." = "United States"
+
+[[abbreviations.regex]]
+pattern = 'p\.\s*(\d+)\.'
+replace = 'page $1'
+case_sensitive = false

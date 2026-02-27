@@ -903,6 +903,7 @@ fn default_abbreviations() -> AbbreviationConfig {
     AbbreviationConfig {
         case: BTreeMap::new(),
         nocase,
+        regex: Vec::new(),
         legacy: BTreeMap::new(),
     }
 }
@@ -910,6 +911,19 @@ fn default_abbreviations() -> AbbreviationConfig {
 fn apply_abbreviation_map(text: &str, abbreviations: &AbbreviationConfig) -> String {
     let mut out = text.to_string();
     let merged = abbreviations.merged();
+    for rule in &merged.regex {
+        if rule.pattern.trim().is_empty() {
+            continue;
+        }
+        let pattern = if rule.case_sensitive {
+            rule.pattern.clone()
+        } else {
+            format!("(?i){}", rule.pattern)
+        };
+        if let Ok(re) = Regex::new(&pattern) {
+            out = re.replace_all(&out, rule.replace.as_str()).to_string();
+        }
+    }
     let mut case_entries: Vec<_> = merged.case.iter().collect();
     case_entries.sort_by_key(|(token, _)| Reverse(token.len()));
     let mut nocase_entries: Vec<_> = merged.nocase.iter().collect();
@@ -1216,8 +1230,18 @@ struct AbbreviationsFile {
 struct AbbreviationConfig {
     case: BTreeMap<String, String>,
     nocase: BTreeMap<String, String>,
+    regex: Vec<AbbreviationRegexRule>,
     #[serde(flatten)]
     legacy: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(default)]
+struct AbbreviationRegexRule {
+    pattern: String,
+    replace: String,
+    #[serde(default)]
+    case_sensitive: bool,
 }
 
 impl AbbreviationConfig {
@@ -1229,6 +1253,7 @@ impl AbbreviationConfig {
         Self {
             case: self.case.clone(),
             nocase: merged_nocase,
+            regex: self.regex.clone(),
             legacy: BTreeMap::new(),
         }
     }
@@ -1241,10 +1266,14 @@ impl AbbreviationConfig {
         for (k, v) in other.nocase {
             self.nocase.insert(k, v);
         }
+        self.regex.extend(other.regex);
     }
 
     fn is_empty(&self) -> bool {
-        self.case.is_empty() && self.nocase.is_empty() && self.legacy.is_empty()
+        self.case.is_empty()
+            && self.nocase.is_empty()
+            && self.regex.is_empty()
+            && self.legacy.is_empty()
     }
 }
 
@@ -1386,6 +1415,46 @@ mod tests {
                 .iter()
                 .any(|s| s.contains("us. policy")),
             "expected lowercase token to remain unchanged for case-sensitive entry"
+        );
+
+        let _ = fs::remove_file(&normalizer_path);
+        let _ = fs::remove_file(&abbreviations_path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn external_regex_abbreviation_expands_page_number_pattern() {
+        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("lanternleaf-normalizer-test-{nonce}"));
+        fs::create_dir_all(&dir).expect("temp dir should be created");
+        let normalizer_path = dir.join("normalizer.toml");
+        let abbreviations_path = dir.join("abbreviations.toml");
+        fs::write(&normalizer_path, "[normalization]\nmode = \"sentence\"\n")
+            .expect("normalizer config should be written");
+        fs::write(
+            &abbreviations_path,
+            "[[abbreviations.regex]]\npattern = 'p\\.\\s*(\\d+)\\.'\nreplace = 'page $1'\ncase_sensitive = false\n",
+        )
+        .expect("abbreviations config should be written");
+
+        // SAFETY: test-only, guarded by a process-wide mutex to avoid env var races.
+        unsafe {
+            std::env::set_var("LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH", &abbreviations_path);
+        }
+        let normalizer = TextNormalizer::load(&normalizer_path);
+        // SAFETY: test-only cleanup, guarded by a process-wide mutex to avoid env var races.
+        unsafe {
+            std::env::remove_var("LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH");
+        }
+
+        let plan = normalizer.plan_page(&["See p. 169. now.".to_string()]);
+        assert!(
+            plan.audio_sentences.iter().any(|s| s.contains("page 169")),
+            "expected regex abbreviation expansion to map p. <number>. to page <number>"
         );
 
         let _ = fs::remove_file(&normalizer_path);
