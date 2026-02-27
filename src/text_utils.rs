@@ -361,6 +361,7 @@ struct AbbreviationsFile {
 struct AbbreviationConfig {
     case: BTreeMap<String, String>,
     nocase: BTreeMap<String, String>,
+    regex: Vec<AbbreviationRegexRule>,
     #[serde(flatten)]
     legacy: BTreeMap<String, String>,
 }
@@ -374,9 +375,19 @@ impl AbbreviationConfig {
         Self {
             case: self.case.clone(),
             nocase: merged_nocase,
+            regex: self.regex.clone(),
             legacy: BTreeMap::new(),
         }
     }
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(default)]
+struct AbbreviationRegexRule {
+    pattern: String,
+    replace: String,
+    #[serde(default)]
+    case_sensitive: bool,
 }
 
 #[derive(Debug, Default)]
@@ -481,5 +492,18 @@ mod tests {
         let lower = split_sentences_with_abbreviations("dr. Smith stayed.", &only_case);
         assert_eq!(exact.len(), 1);
         assert_eq!(lower.len(), 2);
+    }
+
+    #[test]
+    fn live_config_includes_chap_and_sect_tokens() {
+        let tokens = load_abbreviation_tokens();
+        assert!(
+            tokens.nocase.contains("chap."),
+            "expected chap. abbreviation token to be loaded from config"
+        );
+        assert!(
+            tokens.nocase.contains("sect."),
+            "expected sect. abbreviation token to be loaded from config"
+        );
     }
 }
