@@ -109,6 +109,7 @@
 "Ala." = "Alabama"
 "Calif." = "California"
 "Mass." = "Massachusetts"
+"Va." = "Virginia"
 
 
 # Letter middle names.
@@ -142,9 +143,9 @@
 [[abbreviations.regex]]
 pattern = '\bp\.\s*(\d+)\.?'
 replace = 'page $1'
-case_sensitive = false
+case_sensitive = true
 
 [[abbreviations.regex]]
 pattern = '\b(\d+)-(\d+)\b'
 replace = '$1 to $2'
-case_sensitive = false
+case_sensitive = true
