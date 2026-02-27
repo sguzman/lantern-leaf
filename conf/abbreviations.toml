@@ -13,14 +13,51 @@
 [abbreviations.case]
 # Example:
 # "US." = "United States"
-"M." = "M"
+
+# Letter middle names.
+"A." = "A"
 "B." = "B"
+"C." = "C"
+"D." = "D"
+"E." = "E"
+"F." = "F"
+"G." = "G"
+"H." = "H"
+"I." = "I"
+"J." = "J"
+"K." = "K"
+"L." = "L"
+"M." = "M"
+"N." = "N"
+"O." = "O"
+"P." = "P"
+"Q." = "Q"
+"R." = "R"
+"S." = "S"
+"T." = "T"
+"U." = "U"
+"V." = "V"
+"W." = "W"
+"X." = "X"
+"Y." = "Y"
+"Z." = "Z"
+
+# Number suffixes.
+"II" = "the second"
+"III" = "the third"
+"IV" = "the fourth"
+"V" = "the fifth"
+"VI" = "the sixth"
+
+# Title suffixes.
+"Jr." = "Junior"
+"Sr." = "Senior"
 "Dr." = "Doctor"
+
 "Inc." = "Incorporated"
 "Mr." = "Mister"
 "Ms." = "Miss"
 "Mrs." = "Misses"
-"Mass." = "Massachusetts"
 "St." = "Saint"
 
 # Month abbreviations.
@@ -99,3 +136,4 @@
 
 # Alt US state abbreviations.
 "Ala." = "Alabama"
+"Mass." = "Massachusetts"
