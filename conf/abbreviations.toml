@@ -3,20 +3,21 @@
 [abbreviations.case]
 
 # Text abbreviations.
-"ed." = "edition"
-"sect." = "section"
-"rev." = "revised"
-"vol." = "volume"
 "chap." = "chapter"
-"pp." = "pages"
+"e.g." = "for example"
+"ed." = "edition"
+"esp." = "especially"
 "etc." = "et cetera"
 "i.e." = "that is"
-"e.g." = "for example"
 "ibid." = "in the same place"
 "Ibid" = "in the same place"
-"p." = "page"
-"vs." = "versus"
 "no." = "number"
+"p." = "page"
+"pp." = "pages"
+"rev." = "revised"
+"sect." = "section"
+"vol." = "volume"
+"vs." = "versus"
 
 # Number suffixes.
 "II" = "the second"
