@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 
 const DEFAULT_NORMALIZER_PATH: &str = "conf/normalizer.toml";
 const NORMALIZER_CONFIG_ENV: &str = "LANTERNLEAF_NORMALIZER_CONFIG_PATH";
+const DEFAULT_ABBREVIATIONS_PATH: &str = "conf/abbreviations.toml";
+const ABBREVIATIONS_CONFIG_ENV: &str = "LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH";
 const SENTENCE_MARKER: &str = "\n<<__EBUP_SENTENCE_BOUNDARY__>>\n";
 
 static RE_INLINE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"`([^`]+)`").unwrap());
@@ -206,10 +208,12 @@ impl TextNormalizer {
         match fs::read_to_string(path) {
             Ok(contents) => match toml::from_str::<NormalizerFile>(&contents) {
                 Ok(file) => {
+                    let mut config = file.normalization;
+                    config
+                        .abbreviations
+                        .extend(load_external_abbreviations(path));
                     tracing::info!(path = %path.display(), "Loaded text normalizer config");
-                    Self {
-                        config: file.normalization,
-                    }
+                    Self { config }
                 }
                 Err(err) => {
                     tracing::warn!(path = %path.display(), "Invalid normalizer config TOML: {err}");
@@ -763,6 +767,61 @@ fn resolve_default_normalizer_path() -> PathBuf {
     PathBuf::from(DEFAULT_NORMALIZER_PATH)
 }
 
+fn load_external_abbreviations(normalizer_config_path: &Path) -> BTreeMap<String, String> {
+    let path = resolve_abbreviations_path(normalizer_config_path);
+    let Ok(contents) = fs::read_to_string(&path) else {
+        return BTreeMap::new();
+    };
+    match toml::from_str::<AbbreviationsFile>(&contents) {
+        Ok(file) => {
+            tracing::info!(
+                path = %path.display(),
+                count = file.abbreviations.len(),
+                "Loaded external abbreviations config"
+            );
+            file.abbreviations
+        }
+        Err(err) => {
+            tracing::warn!(
+                path = %path.display(),
+                "Invalid abbreviations config TOML: {err}"
+            );
+            BTreeMap::new()
+        }
+    }
+}
+
+fn resolve_abbreviations_path(normalizer_config_path: &Path) -> PathBuf {
+    if let Some(value) = std::env::var_os(ABBREVIATIONS_CONFIG_ENV) {
+        let candidate = PathBuf::from(value);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    let relative = PathBuf::from(DEFAULT_ABBREVIATIONS_PATH);
+    if relative.exists() {
+        return relative;
+    }
+
+    if let Some(parent) = normalizer_config_path.parent() {
+        let sibling = parent.join("abbreviations.toml");
+        if sibling.exists() {
+            return sibling;
+        }
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for ancestor in manifest_dir.ancestors() {
+        let candidate = ancestor.join(DEFAULT_ABBREVIATIONS_PATH);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    PathBuf::from(DEFAULT_ABBREVIATIONS_PATH)
+}
+
 impl Default for TextNormalizer {
     fn default() -> Self {
         Self {
@@ -1122,6 +1181,12 @@ struct NormalizedSentenceCache {
     chunks: Option<Vec<String>>,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(default)]
+struct AbbreviationsFile {
+    abbreviations: BTreeMap<String, String>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct PageNormalizationCache {
     audio_sentences: Vec<String>,
@@ -1159,7 +1224,13 @@ impl PageNormalizationCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn strips_superscript_and_expands_abbreviation() {
@@ -1168,6 +1239,46 @@ mod tests {
         let plan = normalizer.plan_page(&page);
         assert_eq!(plan.audio_sentences.len(), 1);
         assert_eq!(plan.audio_sentences[0], "Mister Hale wrote this.");
+    }
+
+    #[test]
+    fn loads_external_abbreviations_file_for_expansion() {
+        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("lanternleaf-normalizer-test-{nonce}"));
+        fs::create_dir_all(&dir).expect("temp dir should be created");
+        let normalizer_path = dir.join("normalizer.toml");
+        let abbreviations_path = dir.join("abbreviations.toml");
+        fs::write(&normalizer_path, "[normalization]\nmode = \"sentence\"\n")
+            .expect("normalizer config should be written");
+        fs::write(
+            &abbreviations_path,
+            "[abbreviations]\n\"pp.\" = \"pages\"\n",
+        )
+        .expect("abbreviations config should be written");
+
+        // SAFETY: test-only, guarded by a process-wide mutex to avoid env var races.
+        unsafe {
+            std::env::set_var("LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH", &abbreviations_path);
+        }
+        let normalizer = TextNormalizer::load(&normalizer_path);
+        // SAFETY: test-only cleanup, guarded by a process-wide mutex to avoid env var races.
+        unsafe {
+            std::env::remove_var("LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH");
+        }
+
+        let plan = normalizer.plan_page(&["See pp. 10.".to_string()]);
+        assert!(
+            plan.audio_sentences.iter().any(|s| s.contains("pages")),
+            "expected external abbreviation expansion to be applied"
+        );
+
+        let _ = fs::remove_file(&normalizer_path);
+        let _ = fs::remove_file(&abbreviations_path);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

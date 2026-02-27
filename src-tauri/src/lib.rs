@@ -446,6 +446,34 @@ fn configure_normalizer_config_path_from_workspace() {
     );
 }
 
+fn configure_abbreviations_config_path_from_workspace() {
+    if std::env::var_os("LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH").is_some() {
+        return;
+    }
+
+    let Some(root) = workspace_root_from_cwd() else {
+        return;
+    };
+
+    let abbreviations_config_path = root.join("conf/abbreviations.toml");
+    if !abbreviations_config_path.exists() {
+        return;
+    }
+
+    // SAFETY: startup-time process env initialization before background worker threads are launched.
+    unsafe {
+        std::env::set_var(
+            "LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH",
+            &abbreviations_config_path,
+        );
+    }
+
+    info!(
+        path = %abbreviations_config_path.display(),
+        "Configured abbreviations config path from workspace context"
+    );
+}
+
 fn dev_logs_dir() -> PathBuf {
     if let Some(root) = workspace_root_from_cwd() {
         root.join("logs")
@@ -2600,6 +2628,7 @@ pub fn run() {
     configure_cache_dir_from_workspace();
     configure_calibre_config_path_from_workspace();
     configure_normalizer_config_path_from_workspace();
+    configure_abbreviations_config_path_from_workspace();
     let mut log_builder = tauri_plugin_log::Builder::new()
         .level(log_level_to_filter(startup_config.log_level))
         .target(Target::new(TargetKind::Stdout))

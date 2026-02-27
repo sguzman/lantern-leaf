@@ -198,11 +198,10 @@ fn load_abbreviation_tokens() -> HashSet<String> {
         out.insert(default.to_string());
     }
 
-    let path = resolve_normalizer_config_path();
-    let Ok(contents) = fs::read_to_string(&path) else {
-        return out;
-    };
-    if let Ok(file) = toml::from_str::<NormalizerFile>(&contents) {
+    let normalizer_path = resolve_normalizer_config_path();
+    if let Ok(contents) = fs::read_to_string(&normalizer_path)
+        && let Ok(file) = toml::from_str::<NormalizerFile>(&contents)
+    {
         for key in file.normalization.abbreviations.keys() {
             let normalized = normalize_abbreviation_token(key);
             if !normalized.is_empty() {
@@ -210,6 +209,19 @@ fn load_abbreviation_tokens() -> HashSet<String> {
             }
         }
     }
+
+    let abbreviations_path = resolve_abbreviations_config_path(&normalizer_path);
+    if let Ok(contents) = fs::read_to_string(&abbreviations_path)
+        && let Ok(file) = toml::from_str::<AbbreviationsFile>(&contents)
+    {
+        for key in file.abbreviations.keys() {
+            let normalized = normalize_abbreviation_token(key);
+            if !normalized.is_empty() {
+                out.insert(normalized);
+            }
+        }
+    }
+
     out
 }
 
@@ -240,6 +252,40 @@ fn resolve_normalizer_config_path() -> PathBuf {
     PathBuf::from(NORMALIZER_CONFIG_REL_PATH)
 }
 
+fn resolve_abbreviations_config_path(normalizer_config_path: &PathBuf) -> PathBuf {
+    const ABBREVIATIONS_CONFIG_ENV: &str = "LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH";
+    const ABBREVIATIONS_CONFIG_REL_PATH: &str = "conf/abbreviations.toml";
+
+    if let Some(value) = std::env::var_os(ABBREVIATIONS_CONFIG_ENV) {
+        let candidate = PathBuf::from(value);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    let relative = PathBuf::from(ABBREVIATIONS_CONFIG_REL_PATH);
+    if relative.exists() {
+        return relative;
+    }
+
+    if let Some(parent) = normalizer_config_path.parent() {
+        let sibling = parent.join("abbreviations.toml");
+        if sibling.exists() {
+            return sibling;
+        }
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for ancestor in manifest_dir.ancestors() {
+        let candidate = ancestor.join(ABBREVIATIONS_CONFIG_REL_PATH);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    PathBuf::from(ABBREVIATIONS_CONFIG_REL_PATH)
+}
+
 fn normalize_abbreviation_token(raw: &str) -> String {
     let trimmed = raw.trim().trim_end_matches('.');
     if trimmed.is_empty() {
@@ -261,9 +307,22 @@ struct NormalizationConfig {
     abbreviations: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+struct AbbreviationsFile {
+    abbreviations: BTreeMap<String, String>,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::split_sentences;
+    use super::{load_abbreviation_tokens, split_sentences};
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn does_not_split_common_abbreviations() {
@@ -303,5 +362,30 @@ mod tests {
         let text = "Alpha, beta, and gamma are fine.";
         let sentences = split_sentences(text);
         assert_eq!(sentences.len(), 1);
+    }
+
+    #[test]
+    fn loads_external_abbreviation_tokens() {
+        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("lanternleaf-abbrevs-{nonce}.toml"));
+        std::fs::write(&path, "[abbreviations]\n\"pp.\" = \"pages\"\n")
+            .expect("abbreviations config should be written");
+
+        // SAFETY: test-only, guarded by a process-wide mutex to avoid env var races.
+        unsafe {
+            std::env::set_var("LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH", &path);
+        }
+        let tokens = load_abbreviation_tokens();
+        // SAFETY: test-only cleanup, guarded by a process-wide mutex to avoid env var races.
+        unsafe {
+            std::env::remove_var("LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH");
+        }
+
+        assert!(tokens.contains("pp."));
+        let _ = std::fs::remove_file(&path);
     }
 }

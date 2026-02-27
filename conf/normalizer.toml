@@ -38,12 +38,7 @@ drop_tokens = []
 [normalization.replacements]
 "#" = " "
 
-[normalization.abbreviations]
-"Mr." = "Mister"
-"Ms." = "Miss"
-"Mrs." = "Misses"
-"Mass." = "Massachusetts"
-"St." = "Saint"
+# Abbreviation expansions/suppression live in `conf/abbreviations.toml`.
 "M." = "Monsieur"
 "Dr." = "Doctor"
 "Inc." = "Incorporated"
