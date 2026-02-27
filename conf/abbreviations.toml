@@ -2,7 +2,6 @@
 "rev." = "revised"
 "vol." = "volume"
 "chap." = "chapter"
-"M." = ""
 "pp." = "pages"
 "etc." = "et cetera"
 "i.e." = "that is"
@@ -14,6 +13,8 @@
 [abbreviations.case]
 # Example:
 # "US." = "United States"
+"M." = "M"
+"B." = "B"
 "Dr." = "Doctor"
 "Inc." = "Incorporated"
 "Mr." = "Mister"
