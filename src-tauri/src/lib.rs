@@ -2,6 +2,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -1871,10 +1872,11 @@ async fn source_open_clipboard(
     state: State<'_, Mutex<BackendState>>,
 ) -> Result<OpenSourceResult, BridgeError> {
     info!("Opening source from system clipboard");
-    let text = app
-        .clipboard()
-        .read_text()
-        .map_err(|err| bridge_error("clipboard_error", format!("Failed to read clipboard text: {err}")))?;
+    let app_for_read = app.clone();
+    let text = tauri::async_runtime::spawn_blocking(move || read_clipboard_text_with_fallback(&app_for_read))
+        .await
+        .map_err(|err| bridge_error("clipboard_error", format!("Clipboard worker task failed: {err}")))?
+        .map_err(|err| bridge_error("clipboard_error", err))?;
     let trimmed = text.trim().to_string();
     if trimmed.is_empty() {
         warn!("Clipboard read succeeded but text was empty");
@@ -1883,6 +1885,70 @@ async fn source_open_clipboard(
     let path = cache::persist_clipboard_text_source(&trimmed)
         .map_err(|err| bridge_error("invalid_input", err))?;
     open_resolved_source(&app, &state, path).await
+}
+
+fn read_clipboard_text_with_fallback(app: &tauri::AppHandle) -> Result<String, String> {
+    match app.clipboard().read_text() {
+        Ok(text) => {
+            tracing::debug!(chars = text.chars().count(), "Read clipboard text via tauri plugin");
+            Ok(text)
+        }
+        Err(primary_err) => {
+            warn!("Primary clipboard read via tauri plugin failed: {primary_err}");
+            #[cfg(target_os = "linux")]
+            {
+                let commands: &[(&str, &[&str])] = &[
+                    ("wl-paste", &["--no-newline"]),
+                    ("wl-paste", &[]),
+                    ("xclip", &["-selection", "clipboard", "-o"]),
+                    ("xsel", &["--clipboard", "--output"]),
+                ];
+                for (bin, args) in commands {
+                    match run_clipboard_command(bin, args) {
+                        Ok(Some(text)) => {
+                            info!(
+                                command = %bin,
+                                chars = text.chars().count(),
+                                "Read clipboard text via command fallback"
+                            );
+                            return Ok(text);
+                        }
+                        Ok(None) => {
+                            tracing::debug!(command = %bin, "Clipboard fallback command returned empty output");
+                        }
+                        Err(err) => {
+                            tracing::debug!(command = %bin, "Clipboard fallback command failed: {err}");
+                        }
+                    }
+                }
+                Err(format!(
+                    "Failed to read clipboard text via tauri plugin and Linux fallbacks: {primary_err}"
+                ))
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                Err(format!("Failed to read clipboard text: {primary_err}"))
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn run_clipboard_command(bin: &str, args: &[&str]) -> Result<Option<String>, String> {
+    let output = Command::new(bin)
+        .args(args)
+        .output()
+        .map_err(|err| format!("spawn failed: {err}"))?;
+    if !output.status.success() {
+        return Err(format!("exit status {}", output.status));
+    }
+    let text = String::from_utf8(output.stdout).map_err(|err| format!("utf8 decode failed: {err}"))?;
+    let trimmed = text.trim().to_string();
+    if trimmed.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(trimmed))
+    }
 }
 
 #[tauri::command]
