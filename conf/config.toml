@@ -2,25 +2,25 @@
 theme = "day"
 font_family = "lexend"
 font_weight = "bold"
-font_size = 22
-line_spacing = 1.3
+font_size = 26
+line_spacing = 1.0
 word_spacing = 0
 letter_spacing = 0
-lines_per_page = 700
-margin_horizontal = 100
+lines_per_page = 1000
+margin_horizontal = 220
 margin_vertical = 0
 
 [appearance.day_highlight]
 r = 0.2
 g = 0.4
 b = 0.7
-a = 0.15
+a = 0.60
 
 [appearance.night_highlight]
 r = 0.8
 g = 0.8
 b = 0.5
-a = 0.2
+a = 0.60
 
 [window]
 width = 1624.0
