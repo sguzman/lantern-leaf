@@ -152,6 +152,14 @@
 "Y." = "Y"
 "Z." = "Z"
 
+# Bible
+"Gen." = "Genesis"
+"Exod." = "Exodus"
+"Lev." = "Leviticus"
+"Num." = "Numbers"
+"Deut." = "Deuteronomy"
+"Judg." = "Judges"
+
 [[abbreviations.regex]]
 pattern = '\bp\.\s*(\d+)\.?'
 replace = 'page $1'
