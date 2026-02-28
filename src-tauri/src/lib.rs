@@ -1903,6 +1903,7 @@ fn read_clipboard_text_with_fallback(app: &tauri::AppHandle) -> Result<String, S
                     ("xclip", &["-selection", "clipboard", "-o"]),
                     ("xsel", &["--clipboard", "--output"]),
                 ];
+                let mut diagnostics = Vec::new();
                 for (bin, args) in commands {
                     match run_clipboard_command(bin, args) {
                         Ok(Some(text)) => {
@@ -1914,15 +1915,18 @@ fn read_clipboard_text_with_fallback(app: &tauri::AppHandle) -> Result<String, S
                             return Ok(text);
                         }
                         Ok(None) => {
+                            diagnostics.push(format!("{bin} {} => empty", args.join(" ")));
                             tracing::debug!(command = %bin, "Clipboard fallback command returned empty output");
                         }
                         Err(err) => {
+                            diagnostics.push(format!("{bin} {} => {err}", args.join(" ")));
                             tracing::debug!(command = %bin, "Clipboard fallback command failed: {err}");
                         }
                     }
                 }
                 Err(format!(
-                    "Failed to read clipboard text via tauri plugin and Linux fallbacks: {primary_err}"
+                    "Clipboard read failed. plugin_error='{primary_err}'. fallback_attempts=[{}]",
+                    diagnostics.join("; ")
                 ))
             }
             #[cfg(not(target_os = "linux"))]
@@ -1940,7 +1944,11 @@ fn run_clipboard_command(bin: &str, args: &[&str]) -> Result<Option<String>, Str
         .output()
         .map_err(|err| format!("spawn failed: {err}"))?;
     if !output.status.success() {
-        return Err(format!("exit status {}", output.status));
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            return Err(format!("exit status {}", output.status));
+        }
+        return Err(format!("exit status {} stderr='{stderr}'", output.status));
     }
     let text = String::from_utf8(output.stdout).map_err(|err| format!("utf8 decode failed: {err}"))?;
     let trimmed = text.trim().to_string();
