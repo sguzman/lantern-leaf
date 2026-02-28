@@ -124,14 +124,10 @@ export function createSessionSliceActions({ set, get, backend }: SliceContext): 
       });
     },
 
-    openClipboardText: async (text) => {
+    openClipboardText: async () => {
       await withBusy(set, get, "openClipboardText", async () => {
         try {
-          const trimmed = text.trim();
-          if (!trimmed) {
-            throw { code: "invalid_input", message: "Clipboard text is empty" };
-          }
-          const result = await backend.sourceOpenClipboardText(trimmed);
+          const result = await backend.sourceOpenClipboard();
           const recents = await backend.recentList();
           set({
             session: result.session,

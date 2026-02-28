@@ -43,7 +43,7 @@ interface StarterShellProps {
   loadingRecents: boolean;
   loadingCalibre: boolean;
   onOpenPath: (path: string) => Promise<void>;
-  onOpenClipboardText: (text: string) => Promise<void>;
+  onOpenClipboardText: () => Promise<void>;
   onDeleteRecent: (path: string) => Promise<void>;
   onRefreshRecents: () => Promise<void>;
   onLoadCalibre: (forceRefresh?: boolean) => Promise<void>;
@@ -206,16 +206,8 @@ export function StarterShell({
 
   const handleClipboardOpen = async () => {
     setClipboardError(null);
-    const manual = window.prompt(
-      "Paste your clipboard text here and press OK:",
-      ""
-    );
-    if (!manual || manual.trim().length === 0) {
-      setClipboardError("[starter-open-clipboard] No text was pasted.");
-      return;
-    }
     try {
-      await onOpenClipboardText(manual);
+      await onOpenClipboardText();
     } catch (error) {
       const message = error instanceof Error
         ? `[starter-open-clipboard] ${error.message}`
