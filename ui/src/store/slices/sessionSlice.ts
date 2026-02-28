@@ -127,9 +127,11 @@ export function createSessionSliceActions({ set, get, backend }: SliceContext): 
     openClipboardText: async (text) => {
       await withBusy(set, get, "openClipboardText", async () => {
         try {
-          const result = typeof text === "string"
-            ? await backend.sourceOpenClipboardText(text)
-            : await backend.sourceOpenClipboard();
+          const trimmed = text.trim();
+          if (!trimmed) {
+            throw { code: "invalid_input", message: "Clipboard text is empty" };
+          }
+          const result = await backend.sourceOpenClipboardText(trimmed);
           const recents = await backend.recentList();
           set({
             session: result.session,
@@ -145,9 +147,10 @@ export function createSessionSliceActions({ set, get, backend }: SliceContext): 
             });
             return;
           }
+          const detailed = `[openClipboardText:${bridgeError.code}] ${bridgeError.message}`;
           set({
-            error: bridgeError.message,
-            toast: buildToast("error", bridgeError.message)
+            error: detailed,
+            toast: buildToast("error", detailed)
           });
           throw bridgeError;
         }

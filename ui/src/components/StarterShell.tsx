@@ -43,7 +43,7 @@ interface StarterShellProps {
   loadingRecents: boolean;
   loadingCalibre: boolean;
   onOpenPath: (path: string) => Promise<void>;
-  onOpenClipboardText: (text?: string) => Promise<void>;
+  onOpenClipboardText: (text: string) => Promise<void>;
   onDeleteRecent: (path: string) => Promise<void>;
   onRefreshRecents: () => Promise<void>;
   onLoadCalibre: (forceRefresh?: boolean) => Promise<void>;

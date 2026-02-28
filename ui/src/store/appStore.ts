@@ -77,7 +77,7 @@ export interface AppStore {
   bootstrap: () => Promise<void>;
   refreshRecents: () => Promise<void>;
   openSourcePath: (path: string) => Promise<void>;
-  openClipboardText: (text?: string) => Promise<void>;
+  openClipboardText: (text: string) => Promise<void>;
   deleteRecent: (path: string) => Promise<void>;
   returnToStarter: () => Promise<void>;
   closeReaderSession: () => Promise<void>;
