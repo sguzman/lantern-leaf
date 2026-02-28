@@ -579,6 +579,7 @@ export interface BackendApi {
   recentList: (limit?: number) => Promise<RecentBook[]>;
   recentDelete: (path: string) => Promise<void>;
   sourceOpenPath: (path: string) => Promise<OpenSourceResult>;
+  sourceOpenClipboard: () => Promise<OpenSourceResult>;
   sourceOpenClipboardText: (text: string) => Promise<OpenSourceResult>;
   readerGetSnapshot: () => Promise<ReaderSnapshot>;
   readerNextPage: () => Promise<ReaderSnapshot>;
@@ -629,6 +630,7 @@ function createTauriBackendApi(): BackendApi {
       invokeCommand<RecentBook[]>("recent_list", { limit: normalizeRecentLimit(limit) }),
     recentDelete: (path) => invokeCommand<void>("recent_delete", { path }),
     sourceOpenPath: (path) => invokeCommand<OpenSourceResult>("source_open_path", { path }),
+    sourceOpenClipboard: () => invokeCommand<OpenSourceResult>("source_open_clipboard"),
     sourceOpenClipboardText: (text) =>
       invokeCommand<OpenSourceResult>("source_open_clipboard_text", { text }),
     readerGetSnapshot: () => invokeCommand<ReaderSnapshot>("reader_get_snapshot"),
@@ -697,6 +699,7 @@ function createMockBackendApi(): BackendApi {
     recentList: mockRecentList,
     recentDelete: mockRecentDelete,
     sourceOpenPath: mockSourceOpenPath,
+    sourceOpenClipboard: () => mockSourceOpenClipboardText(""),
     sourceOpenClipboardText: mockSourceOpenClipboardText,
     readerGetSnapshot: mockReaderGetSnapshot,
     readerNextPage: mockReaderNextPage,

@@ -4,7 +4,6 @@ import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { readText as readClipboardText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   Button,
   Card,
@@ -44,7 +43,7 @@ interface StarterShellProps {
   loadingRecents: boolean;
   loadingCalibre: boolean;
   onOpenPath: (path: string) => Promise<void>;
-  onOpenClipboardText: (text: string) => Promise<void>;
+  onOpenClipboardText: () => Promise<void>;
   onDeleteRecent: (path: string) => Promise<void>;
   onRefreshRecents: () => Promise<void>;
   onLoadCalibre: (forceRefresh?: boolean) => Promise<void>;
@@ -208,16 +207,7 @@ export function StarterShell({
   const handleClipboardOpen = async () => {
     setClipboardError(null);
     try {
-      let text = "";
-      try {
-        text = await readClipboardText();
-      } catch {
-        if (!navigator.clipboard?.readText) {
-          throw new Error("Clipboard API is not available in this runtime");
-        }
-        text = await navigator.clipboard.readText();
-      }
-      await onOpenClipboardText(text);
+      await onOpenClipboardText();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setClipboardError(message);

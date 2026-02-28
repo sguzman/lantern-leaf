@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_log::{Target, TargetKind, log::LevelFilter};
 use tracing::{info, warn};
 use tracing_appender::non_blocking::WorkerGuard;
@@ -1865,6 +1866,26 @@ async fn source_open_clipboard_text(
 }
 
 #[tauri::command]
+async fn source_open_clipboard(
+    app: tauri::AppHandle,
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<OpenSourceResult, BridgeError> {
+    info!("Opening source from system clipboard");
+    let text = app
+        .clipboard()
+        .read_text()
+        .map_err(|err| bridge_error("clipboard_error", format!("Failed to read clipboard text: {err}")))?;
+    let trimmed = text.trim().to_string();
+    if trimmed.is_empty() {
+        warn!("Clipboard read succeeded but text was empty");
+        return Err(bridge_error("invalid_input", "clipboard text is empty"));
+    }
+    let path = cache::persist_clipboard_text_source(&trimmed)
+        .map_err(|err| bridge_error("invalid_input", err))?;
+    open_resolved_source(&app, &state, path).await
+}
+
+#[tauri::command]
 fn reader_get_snapshot(
     app: tauri::AppHandle,
     state: State<'_, Mutex<BackendState>>,
@@ -2556,6 +2577,7 @@ macro_rules! bridge_command_idents {
             recent_list,
             recent_delete,
             source_open_path,
+            source_open_clipboard,
             source_open_clipboard_text,
             reader_get_snapshot,
             reader_next_page,
@@ -2697,7 +2719,7 @@ mod tests {
 
     #[test]
     fn bridge_command_surface_remains_stable() {
-        assert_eq!(BRIDGE_COMMAND_NAMES.len(), 38);
+        assert_eq!(BRIDGE_COMMAND_NAMES.len(), 39);
         assert_eq!(BRIDGE_COMMAND_NAMES[0], "session_get_bootstrap");
         assert_eq!(
             BRIDGE_COMMAND_NAMES[BRIDGE_COMMAND_NAMES.len() - 1],
@@ -2705,6 +2727,7 @@ mod tests {
         );
         assert!(BRIDGE_COMMAND_NAMES.contains(&"source_open_path"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"session_toggle_theme"));
+        assert!(BRIDGE_COMMAND_NAMES.contains(&"source_open_clipboard"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"source_open_clipboard_text"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"reader_tts_play"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"reader_tts_repeat_sentence"));
