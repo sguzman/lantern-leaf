@@ -209,7 +209,9 @@ export function StarterShell({
     try {
       await onOpenClipboardText();
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error
+        ? `[starter-open-clipboard] ${error.message}`
+        : `[starter-open-clipboard] ${String(error)}`;
       setClipboardError(message);
     }
   };

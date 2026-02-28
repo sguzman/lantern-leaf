@@ -114,9 +114,10 @@ export function createSessionSliceActions({ set, get, backend }: SliceContext): 
             });
             return;
           }
+          const detailed = `[openClipboardText:${bridgeError.code}] ${bridgeError.message}`;
           set({
-            error: bridgeError.message,
-            toast: buildToast("error", bridgeError.message)
+            error: detailed,
+            toast: buildToast("error", detailed)
           });
           throw bridgeError;
         }

@@ -64,7 +64,11 @@ async function invokeCommand<T>(command: string, args?: Record<string, unknown>)
   try {
     return await invoke<T>(command, args);
   } catch (error) {
-    throw bridgeErrorFromUnknown(error);
+    const normalized = bridgeErrorFromUnknown(error);
+    throw {
+      code: normalized.code,
+      message: `[invoke:${command}] ${normalized.message}`
+    } satisfies BridgeError;
   }
 }
 
