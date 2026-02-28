@@ -159,6 +159,9 @@
 "Num." = "Numbers"
 "Deut." = "Deuteronomy"
 "Judg." = "Judges"
+"Phil." = "Philemon"
+"Eph." = "Ephesians"
+"Rom." = "Romans"
 
 [[abbreviations.regex]]
 pattern = '\bp\.\s*(\d+)\.?'
