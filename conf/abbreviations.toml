@@ -35,6 +35,10 @@
 "Ms." = "Miss"
 "Mrs." = "Misses"
 "St." = "Saint"
+"Gov." = "Governor"
+"Pres." = "President"
+"Sen." = "Senator"
+"Rep." = "Representative"
 
 # Month abbreviations.
 "Jan." = "January"
