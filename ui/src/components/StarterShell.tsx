@@ -206,25 +206,17 @@ export function StarterShell({
 
   const handleClipboardOpen = async () => {
     setClipboardError(null);
+    const manual = window.prompt(
+      "Paste your clipboard text here and press OK:",
+      ""
+    );
+    if (!manual || manual.trim().length === 0) {
+      setClipboardError("[starter-open-clipboard] No text was pasted.");
+      return;
+    }
     try {
-      await onOpenClipboardText();
+      await onOpenClipboardText(manual);
     } catch (error) {
-      const manual = window.prompt(
-        "Clipboard read is blocked by this platform/runtime. Paste your text here to continue:",
-        ""
-      );
-      if (manual && manual.trim().length > 0) {
-        try {
-          await onOpenClipboardText(manual);
-          return;
-        } catch (manualError) {
-          const manualMessage = manualError instanceof Error
-            ? `[starter-open-clipboard-manual] ${manualError.message}`
-            : `[starter-open-clipboard-manual] ${String(manualError)}`;
-          setClipboardError(manualMessage);
-          return;
-        }
-      }
       const message = error instanceof Error
         ? `[starter-open-clipboard] ${error.message}`
         : `[starter-open-clipboard] ${String(error)}`;
