@@ -504,21 +504,6 @@ fn app_config_path() -> PathBuf {
 
     PathBuf::from("conf/config.toml")
 }
-fn persist_base_config(config: &config::AppConfig, path: &Path) -> Result<(), BridgeError> {
-    let serialized = config::serialize_config(config).map_err(|err| {
-        bridge_error(
-            "config_serialize_failed",
-            format!("Failed to serialize config for update: {err}"),
-        )
-    })?;
-    fs::write(path, serialized).map_err(|err| {
-        bridge_error(
-            "io_error",
-            format!("Failed to persist config to {}: {err}", path.display()),
-        )
-    })
-}
-
 fn parse_log_level_label(label: &str) -> Option<config::LogLevel> {
     match label.trim().to_ascii_lowercase().as_str() {
         "trace" => Some(config::LogLevel::Trace),
@@ -805,17 +790,9 @@ fn cleanup_for_shutdown(state: &mut BackendState) -> Option<u64> {
     cancelled_open_request
 }
 
-fn finalize_shutdown_with_config_path(state: &Mutex<BackendState>, config_path: &Path) {
+fn finalize_shutdown_with_config_path(state: &Mutex<BackendState>, _config_path: &Path) {
     match state.lock() {
         Ok(mut guard) => {
-            if let Err(err) = persist_base_config(&guard.base_config, config_path) {
-                warn!(
-                    path = %config_path.display(),
-                    code = %err.code,
-                    error = %err.message,
-                    "Failed to persist base config during shutdown"
-                );
-            }
             let _ = cleanup_for_shutdown(&mut guard);
         }
         Err(_) => warn!("Skipping shutdown housekeeping: backend state lock poisoned"),
@@ -1718,8 +1695,6 @@ fn session_toggle_theme(
             config::ThemeMode::Day => config::ThemeMode::Night,
             config::ThemeMode::Night => config::ThemeMode::Day,
         };
-        let config_path = app_config_path();
-        persist_base_config(&guard.base_config, &config_path)?;
         (request_id, bootstrap_state_from_backend(&guard))
     };
     info!(
@@ -2383,8 +2358,6 @@ fn logging_set_level(
             .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
         let request_id = allocate_request_id(&mut guard);
         guard.base_config.log_level = parsed;
-        let config_path = app_config_path();
-        persist_base_config(&guard.base_config, &config_path)?;
         request_id
     };
 
@@ -3115,19 +3088,6 @@ mod tests {
     }
 
     #[test]
-    fn persist_base_config_writes_updated_log_level() {
-        let path = unique_temp_file("persist_base_config", "toml");
-        let mut cfg = config::AppConfig::default();
-        cfg.log_level = config::LogLevel::Warn;
-        persist_base_config(&cfg, &path).expect("persist config");
-
-        let loaded = config::load_config(&path);
-        assert_eq!(loaded.log_level, config::LogLevel::Warn);
-
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
     fn cleanup_for_shutdown_clears_inflight_open_request() {
         let mut state = BackendState::new();
         state.mode = UiMode::Reader;
@@ -3204,7 +3164,7 @@ mod tests {
     }
 
     #[test]
-    fn finalize_shutdown_persists_base_config_and_reader_housekeeping() {
+    fn finalize_shutdown_persists_reader_housekeeping_without_writing_base_config() {
         let source = unique_temp_file("finalize_housekeeping_source", "txt");
         fs::write(
             &source,
@@ -3227,8 +3187,10 @@ mod tests {
 
         finalize_shutdown_with_config_path(&state_mutex, &config_path);
 
-        let persisted = config::load_config(&config_path);
-        assert_eq!(persisted.log_level, config::LogLevel::Warn);
+        assert!(
+            !config_path.exists(),
+            "base config should not be persisted during shutdown"
+        );
         let bookmark = cache::load_bookmark(&source).expect("bookmark should be persisted");
         assert_eq!(bookmark.page, 0);
         let cached_config =
