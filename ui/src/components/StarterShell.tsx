@@ -43,7 +43,7 @@ interface StarterShellProps {
   loadingRecents: boolean;
   loadingCalibre: boolean;
   onOpenPath: (path: string) => Promise<void>;
-  onOpenClipboardText: () => Promise<void>;
+  onOpenClipboardText: (text?: string) => Promise<void>;
   onDeleteRecent: (path: string) => Promise<void>;
   onRefreshRecents: () => Promise<void>;
   onLoadCalibre: (forceRefresh?: boolean) => Promise<void>;
@@ -209,6 +209,22 @@ export function StarterShell({
     try {
       await onOpenClipboardText();
     } catch (error) {
+      const manual = window.prompt(
+        "Clipboard read is blocked by this platform/runtime. Paste your text here to continue:",
+        ""
+      );
+      if (manual && manual.trim().length > 0) {
+        try {
+          await onOpenClipboardText(manual);
+          return;
+        } catch (manualError) {
+          const manualMessage = manualError instanceof Error
+            ? `[starter-open-clipboard-manual] ${manualError.message}`
+            : `[starter-open-clipboard-manual] ${String(manualError)}`;
+          setClipboardError(manualMessage);
+          return;
+        }
+      }
       const message = error instanceof Error
         ? `[starter-open-clipboard] ${error.message}`
         : `[starter-open-clipboard] ${String(error)}`;

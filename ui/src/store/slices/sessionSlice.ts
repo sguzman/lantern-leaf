@@ -124,10 +124,12 @@ export function createSessionSliceActions({ set, get, backend }: SliceContext): 
       });
     },
 
-    openClipboardText: async () => {
+    openClipboardText: async (text) => {
       await withBusy(set, get, "openClipboardText", async () => {
         try {
-          const result = await backend.sourceOpenClipboard();
+          const result = typeof text === "string"
+            ? await backend.sourceOpenClipboardText(text)
+            : await backend.sourceOpenClipboard();
           const recents = await backend.recentList();
           set({
             session: result.session,
