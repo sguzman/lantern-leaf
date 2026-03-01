@@ -38,6 +38,7 @@ drop_tokens = []
 [normalization.replacements]
 "#" = " "
 "*" = " "
+":" = " "
 
 # Abbreviation expansions/suppression live in `conf/abbreviations.toml`.
 
