@@ -4,6 +4,7 @@
 
 # Text abbreviations.
 "chap." = "chapter"
+"ch." = "chapter"
 "e.g." = "for example"
 "ed." = "edition"
 "esp." = "especially"
