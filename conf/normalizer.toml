@@ -37,6 +37,7 @@ drop_tokens = []
 # Symbol/word replacements.
 [normalization.replacements]
 "#" = " "
+"*" = " "
 
 # Abbreviation expansions/suppression live in `conf/abbreviations.toml`.
 
@@ -106,4 +107,3 @@ Calhoun = "Cahl Hoon"
 Byrd = "bird"
 fentanyl = "fenta nill"
 hippies = "hip peas"
-"*" = ""
