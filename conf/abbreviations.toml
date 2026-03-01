@@ -40,6 +40,12 @@
 "Sen." = "Senator"
 "Rep." = "Representative"
 
+# Time 
+"AM" = "A M"
+"PM" = "P M"
+"a.m." = "A M"
+"p.m." = "P M"
+
 # Month abbreviations.
 "Jan." = "January"
 "Feb." = "February"
