@@ -419,7 +419,9 @@ fn infer_recent_title(source_path: &Path) -> String {
         .map(|name| name == "clipboard")
         .unwrap_or(false)
     {
-        return "Clipboard Text".to_string();
+        if let Some(title) = infer_clipboard_recent_title(source_path) {
+            return title;
+        }
     }
 
     if source_path
@@ -447,6 +449,31 @@ fn infer_recent_title(source_path: &Path) -> String {
                 .unwrap_or("book")
         })
         .to_string()
+}
+
+fn infer_clipboard_recent_title(source_path: &Path) -> Option<String> {
+    let contents = fs::read_to_string(source_path).ok()?;
+    let first_non_empty_line = contents
+        .lines()
+        .find_map(|line| {
+            let compact = line.split_whitespace().collect::<Vec<_>>().join(" ");
+            if compact.is_empty() {
+                None
+            } else {
+                Some(compact)
+            }
+        })?;
+    const MAX_TITLE_CHARS: usize = 96;
+    let char_count = first_non_empty_line.chars().count();
+    if char_count <= MAX_TITLE_CHARS {
+        return Some(first_non_empty_line);
+    }
+    let mut truncated = first_non_empty_line
+        .chars()
+        .take(MAX_TITLE_CHARS - 3)
+        .collect::<String>();
+    truncated = truncated.trim_end().to_string();
+    Some(format!("{truncated}..."))
 }
 
 fn infer_recent_thumbnail(source_path: &Path) -> Option<PathBuf> {
@@ -674,5 +701,25 @@ sentence_text = "legacy bookmark entry"
         assert_eq!(loaded.key_toggle_tts, "ctrl+alt+y");
 
         cleanup_source_and_cache(&source);
+    }
+
+    #[test]
+    fn clipboard_recent_title_uses_first_non_empty_line() {
+        let source = cache_root()
+            .join("clipboard")
+            .join(format!("clipboard-title-{}.txt", std::process::id()));
+        if let Some(parent) = source.parent() {
+            fs::create_dir_all(parent).expect("create clipboard cache dir");
+        }
+        fs::write(
+            &source,
+            "\n\n   \nFirst clipboard line with useful context\nSecond line",
+        )
+        .expect("write clipboard source");
+
+        let title = infer_recent_title(&source);
+        assert_eq!(title, "First clipboard line with useful context");
+
+        let _ = fs::remove_file(&source);
     }
 }
