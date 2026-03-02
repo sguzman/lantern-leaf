@@ -160,6 +160,15 @@ fn period_is_abbreviation(
         return false;
     }
 
+    // Keep decimal numbers intact (e.g. 3.14) so "." does not terminate sentence.
+    if dot_idx > 0
+        && dot_idx + 1 < chars.len()
+        && chars[dot_idx - 1].is_ascii_digit()
+        && chars[dot_idx + 1].is_ascii_digit()
+    {
+        return true;
+    }
+
     let mut start = dot_idx;
     while start > 0 && chars[start - 1].is_alphabetic() {
         start -= 1;
@@ -492,6 +501,15 @@ mod tests {
         let lower = split_sentences_with_abbreviations("dr. Smith stayed.", &only_case);
         assert_eq!(exact.len(), 1);
         assert_eq!(lower.len(), 2);
+    }
+
+    #[test]
+    fn does_not_split_decimal_numbers() {
+        let text = "Pi is about 3.14159 and e is 2.71828. Next sentence.";
+        let sentences = split_sentences(text);
+        assert_eq!(sentences.len(), 2);
+        assert!(sentences[0].contains("3.14159"));
+        assert!(sentences[0].contains("2.71828"));
     }
 
     #[test]

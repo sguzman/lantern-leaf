@@ -180,3 +180,8 @@ case_sensitive = true
 pattern = '\b(\d+)-(\d+)\b'
 replace = '$1 to $2'
 case_sensitive = true
+
+[[abbreviations.regex]]
+pattern = '\b(\d+)\.(\d+)\b'
+replace = '$1 dot $2'
+case_sensitive = true
