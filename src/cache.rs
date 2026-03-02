@@ -461,13 +461,19 @@ fn infer_recent_snippet(source_path: &Path, display_title: &str) -> String {
     }
 
     let normalized_title = normalize_preview_line(display_title);
+    let mut context_parts = Vec::new();
     for line in preview_lines {
         if normalize_preview_line(&line) != normalized_title {
-            return truncate_preview_line(&line, 120);
+            context_parts.push(line);
         }
     }
 
-    String::new()
+    if context_parts.is_empty() {
+        return String::new();
+    }
+
+    // Keep this as a single line in the UI but include broad context from many lines.
+    truncate_preview_line(&context_parts.join(" "), 640)
 }
 
 fn infer_clipboard_recent_title(source_path: &Path) -> Option<String> {
@@ -550,7 +556,7 @@ fn preview_lines_from_text(text: &str) -> Vec<String> {
                 Some(normalized)
             }
         })
-        .take(8)
+        .take(128)
         .collect()
 }
 
