@@ -39,6 +39,7 @@ drop_tokens = []
 "#" = " "
 "*" = " "
 ":" = " "
+"%" = " percent "
 
 # Abbreviation expansions/suppression live in `conf/abbreviations.toml`.
 

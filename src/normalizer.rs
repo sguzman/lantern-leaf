@@ -79,6 +79,7 @@ impl Default for NormalizerConfig {
     fn default() -> Self {
         let mut replacements = BTreeMap::new();
         replacements.insert("#".to_string(), " ".to_string());
+        replacements.insert("%".to_string(), " percent ".to_string());
 
         Self {
             enabled: true,
