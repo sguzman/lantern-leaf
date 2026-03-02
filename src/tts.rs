@@ -564,17 +564,11 @@ fn worker_loop(rx: mpsc::Receiver<Job>, model_path: PathBuf, espeak_root: PathBu
     let _ = child.wait();
 }
 
-fn spawn_worker(model_path: &Path, espeak_root: &Path) -> Result<std::process::Child> {
-    let exe = env::current_exe().context("Finding current executable")?;
-    let exe_meta = fs::metadata(&exe).with_context(|| {
-        format!(
-            "Inspecting current executable metadata at {}",
-            exe.display()
-        )
-    })?;
-    if !exe_meta.is_file() {
-        anyhow::bail!("Current executable path is not a file: {}", exe.display());
-    }
+fn spawn_worker_with_exe(
+    exe: &Path,
+    model_path: &Path,
+    espeak_root: &Path,
+) -> Result<std::process::Child> {
     Command::new(exe)
         .arg("--tts-worker")
         .arg("--model")
@@ -587,14 +581,39 @@ fn spawn_worker(model_path: &Path, espeak_root: &Path) -> Result<std::process::C
         .with_context(|| {
             format!(
                 "Starting TTS worker process (exe={}, model={}, espeak={})",
-                env::current_exe()
-                    .ok()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| "<unknown>".to_string()),
+                exe.display(),
                 model_path.display(),
                 espeak_root.display()
             )
         })
+}
+
+fn spawn_worker(model_path: &Path, espeak_root: &Path) -> Result<std::process::Child> {
+    let exe = env::current_exe().context("Finding current executable")?;
+    match spawn_worker_with_exe(&exe, model_path, espeak_root) {
+        Ok(child) => Ok(child),
+        Err(primary_err) => {
+            #[cfg(target_os = "linux")]
+            {
+                let proc_self_exe = Path::new("/proc/self/exe");
+                warn!(
+                    primary_exe = %exe.display(),
+                    fallback_exe = %proc_self_exe.display(),
+                    "Primary TTS worker spawn failed; retrying via /proc/self/exe: {primary_err:#}"
+                );
+                if proc_self_exe.exists() {
+                    return spawn_worker_with_exe(proc_self_exe, model_path, espeak_root)
+                        .with_context(|| {
+                            format!(
+                                "Fallback worker spawn via {} failed after primary error: {primary_err:#}",
+                                proc_self_exe.display()
+                            )
+                        });
+                }
+            }
+            Err(primary_err)
+        }
+    }
 }
 
 fn send_request<T: Serialize>(
