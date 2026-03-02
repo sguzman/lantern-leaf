@@ -130,8 +130,8 @@ export function StarterShell({
       ? recents
       : recents.filter((recent) => {
           const title = recent.display_title.toLowerCase();
-          const sourcePath = recent.source_path.toLowerCase();
-          return title.includes(needle) || sourcePath.includes(needle);
+          const snippet = recent.snippet.toLowerCase();
+          return title.includes(needle) || snippet.includes(needle);
         });
 
     const sorted = [...matches];
@@ -368,7 +368,7 @@ export function StarterShell({
                   <TextField
                     size="small"
                     fullWidth
-                    label="Search recents (title/path)"
+                    label="Search recents (title/snippet)"
                     value={recentsSearch}
                     inputProps={{ "data-testid": "starter-recents-search-input" }}
                     onChange={(event) => setRecentsSearch(event.target.value)}
@@ -464,9 +464,10 @@ export function StarterShell({
                                   <Typography
                                     variant="caption"
                                     color="text.secondary"
+                                    noWrap
                                     className="truncate"
                                   >
-                                    {recent.source_path}
+                                    {recent.snippet}
                                   </Typography>
                                 </Stack>
                               </Stack>

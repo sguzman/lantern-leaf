@@ -87,6 +87,7 @@ struct OpenSourceResult {
 struct RecentBook {
     source_path: String,
     display_title: String,
+    snippet: String,
     thumbnail_path: Option<String>,
     #[ts(type = "number")]
     last_opened_unix_secs: u64,
@@ -1798,6 +1799,7 @@ fn recent_list(limit: Option<usize>) -> Vec<RecentBook> {
         .map(|recent| RecentBook {
             source_path: recent.source_path.to_string_lossy().to_string(),
             display_title: recent.display_title,
+            snippet: recent.snippet,
             thumbnail_path: recent
                 .thumbnail_path
                 .as_deref()

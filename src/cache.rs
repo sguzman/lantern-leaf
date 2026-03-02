@@ -50,6 +50,7 @@ pub struct Bookmark {
 pub struct RecentBook {
     pub source_path: PathBuf,
     pub display_title: String,
+    pub snippet: String,
     pub thumbnail_path: Option<PathBuf>,
     pub last_opened_unix_secs: u64,
 }
@@ -386,10 +387,12 @@ pub fn list_recent_books(limit: usize) -> Vec<RecentBook> {
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
             let display_title = infer_recent_title(&source_path);
+            let snippet = infer_recent_snippet(&source_path, &display_title);
             let thumbnail_path = infer_recent_thumbnail(&source_path);
             Some(RecentBook {
                 source_path,
                 display_title,
+                snippet,
                 thumbnail_path,
                 last_opened_unix_secs,
             })
@@ -451,6 +454,22 @@ fn infer_recent_title(source_path: &Path) -> String {
         .to_string()
 }
 
+fn infer_recent_snippet(source_path: &Path, display_title: &str) -> String {
+    let preview_lines = infer_recent_preview_lines(source_path);
+    if preview_lines.is_empty() {
+        return String::new();
+    }
+
+    let normalized_title = normalize_preview_line(display_title);
+    for line in preview_lines {
+        if normalize_preview_line(&line) != normalized_title {
+            return truncate_preview_line(&line, 120);
+        }
+    }
+
+    String::new()
+}
+
 fn infer_clipboard_recent_title(source_path: &Path) -> Option<String> {
     let contents = fs::read_to_string(source_path).ok()?;
     let first_non_empty_line = contents
@@ -474,6 +493,82 @@ fn infer_clipboard_recent_title(source_path: &Path) -> Option<String> {
         .collect::<String>();
     truncated = truncated.trim_end().to_string();
     Some(format!("{truncated}..."))
+}
+
+fn infer_recent_preview_lines(source_path: &Path) -> Vec<String> {
+    if source_path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .map(|name| name == "clipboard")
+        .unwrap_or(false)
+    {
+        return preview_lines_from_text(&fs::read_to_string(source_path).unwrap_or_default());
+    }
+
+    if source_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            ext.eq_ignore_ascii_case("txt")
+                || ext.eq_ignore_ascii_case("md")
+                || ext.eq_ignore_ascii_case("markdown")
+        })
+        .unwrap_or(false)
+    {
+        return preview_lines_from_text(&fs::read_to_string(source_path).unwrap_or_default());
+    }
+
+    if source_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("epub"))
+        .unwrap_or(false)
+        && let Ok(mut doc) = EpubDoc::new(source_path)
+        && let Some((chapter, _mime)) = doc.get_current_str()
+    {
+        let plain = match html2text::from_read(chapter.as_bytes(), 10_000) {
+            Ok(text) => text,
+            Err(err) => {
+                warn!("Failed to convert EPUB preview HTML to text: {err}");
+                chapter
+            }
+        };
+        return preview_lines_from_text(&plain);
+    }
+
+    Vec::new()
+}
+
+fn preview_lines_from_text(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| {
+            let normalized = normalize_preview_line(line);
+            if normalized.is_empty() {
+                None
+            } else {
+                Some(normalized)
+            }
+        })
+        .take(8)
+        .collect()
+}
+
+fn normalize_preview_line(line: &str) -> String {
+    line.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn truncate_preview_line(line: &str, max_chars: usize) -> String {
+    let char_count = line.chars().count();
+    if char_count <= max_chars {
+        return line.to_string();
+    }
+    let mut truncated = line
+        .chars()
+        .take(max_chars.saturating_sub(3))
+        .collect::<String>();
+    truncated = truncated.trim_end().to_string();
+    format!("{truncated}...")
 }
 
 fn infer_recent_thumbnail(source_path: &Path) -> Option<PathBuf> {
