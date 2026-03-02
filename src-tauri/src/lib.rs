@@ -232,11 +232,7 @@ impl BackendState {
     fn new() -> Self {
         let config_path = app_config_path();
         let base_config = config::load_config(&config_path);
-        let panels = session::PanelState {
-            show_settings: base_config.show_settings,
-            show_stats: false,
-            show_tts: base_config.show_tts,
-        };
+        let panels = panels_from_config(&base_config);
         Self {
             mode: UiMode::Starter,
             active_source_path: None,
@@ -255,6 +251,16 @@ impl BackendState {
             calibre_config: calibre::CalibreConfig::load_default(),
             calibre_books: Vec::new(),
         }
+    }
+}
+
+fn panels_from_config(cfg: &config::AppConfig) -> session::PanelState {
+    let show_stats = cfg.show_stats;
+    let show_settings = if show_stats { false } else { cfg.show_settings };
+    session::PanelState {
+        show_settings,
+        show_stats,
+        show_tts: cfg.show_tts,
     }
 }
 
@@ -1409,10 +1415,15 @@ where
             .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
         let request_id = allocate_request_id(&mut guard);
         toggle(&mut guard.panels);
+        let panels = guard.panels;
+        if let Some(reader) = guard.reader.as_mut() {
+            reader.config.show_settings = panels.show_settings;
+            reader.config.show_stats = panels.show_stats;
+            reader.config.show_tts = panels.show_tts;
+        }
 
         let session = to_session_state(&guard);
         let normalizer = guard.normalizer.clone();
-        let panels = guard.panels;
         let reader_snapshot = guard
             .reader
             .as_mut()
@@ -1587,11 +1598,7 @@ async fn open_resolved_source(
 
     match reader_result {
         Ok(mut reader) => {
-            let reader_panels = session::PanelState {
-                show_settings: reader.config.show_settings,
-                show_stats: false,
-                show_tts: reader.config.show_tts,
-            };
+            let reader_panels = panels_from_config(&reader.config);
             guard.panels = reader_panels;
             let snapshot = reader.snapshot(reader_panels, &normalizer);
 

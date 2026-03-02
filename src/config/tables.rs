@@ -57,6 +57,7 @@ impl From<ConfigTables> for AppConfig {
             key_toggle_tts: tables.keybindings.toggle_tts,
             show_tts: tables.ui.show_tts,
             show_settings: tables.ui.show_settings,
+            show_stats: tables.ui.show_stats,
             log_level: tables.logging.log_level,
             cache_dir: tables.storage.cache_dir,
             tts_model_path: tables.tts.tts_model_path,
@@ -103,6 +104,7 @@ impl From<&AppConfig> for ConfigTables {
             ui: UiConfig {
                 show_tts: config.show_tts,
                 show_settings: config.show_settings,
+                show_stats: config.show_stats,
             },
             logging: LoggingConfig {
                 log_level: config.log_level,
@@ -236,6 +238,8 @@ struct UiConfig {
     show_tts: bool,
     #[serde(default = "defaults::default_show_settings")]
     show_settings: bool,
+    #[serde(default = "defaults::default_show_stats")]
+    show_stats: bool,
 }
 
 impl Default for UiConfig {
@@ -243,6 +247,7 @@ impl Default for UiConfig {
         UiConfig {
             show_tts: defaults::default_show_tts(),
             show_settings: defaults::default_show_settings(),
+            show_stats: defaults::default_show_stats(),
         }
     }
 }

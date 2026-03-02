@@ -49,6 +49,8 @@ pub struct AppConfig {
     pub show_tts: bool,
     #[serde(default = "crate::config::defaults::default_show_settings")]
     pub show_settings: bool,
+    #[serde(default = "crate::config::defaults::default_show_stats")]
+    pub show_stats: bool,
     #[serde(default = "crate::config::defaults::default_day_highlight")]
     pub day_highlight: HighlightColor,
     #[serde(default = "crate::config::defaults::default_night_highlight")]
@@ -115,6 +117,7 @@ impl Default for AppConfig {
                 crate::config::defaults::default_tts_progress_log_interval_secs(),
             show_tts: crate::config::defaults::default_show_tts(),
             show_settings: crate::config::defaults::default_show_settings(),
+            show_stats: crate::config::defaults::default_show_stats(),
             day_highlight: crate::config::defaults::default_day_highlight(),
             night_highlight: crate::config::defaults::default_night_highlight(),
             log_level: crate::config::defaults::default_log_level(),

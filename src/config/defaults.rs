@@ -61,6 +61,10 @@ pub(crate) fn default_show_settings() -> bool {
     true
 }
 
+pub(crate) fn default_show_stats() -> bool {
+    false
+}
+
 pub(crate) fn default_day_highlight() -> crate::config::HighlightColor {
     crate::config::HighlightColor {
         r: 0.2,
