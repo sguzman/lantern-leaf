@@ -70,6 +70,7 @@ impl Default for CalibreConfig {
             allowed_extensions: vec![
                 "epub".to_string(),
                 "pdf".to_string(),
+                "html".to_string(),
                 "md".to_string(),
                 "txt".to_string(),
             ],
@@ -161,6 +162,7 @@ impl CalibreConfig {
                 "epub" => "epub",
                 "pdf" => "pdf",
                 "txt" => "txt",
+                "html" => "html",
                 "md" | "markdown" => "md",
                 _ => continue,
             };
@@ -172,6 +174,7 @@ impl CalibreConfig {
             vec![
                 "epub".to_string(),
                 "pdf".to_string(),
+                "html".to_string(),
                 "md".to_string(),
                 "txt".to_string(),
             ]

@@ -164,19 +164,18 @@ function normalizeCalibreExt(raw) {
   return normalized;
 }
 
+const SUPPORTED_CALIBRE_EXTENSION_RE = /^(epub|pdf|txt|md|html)$/;
+
 function sanitizeCalibreExts(exts) {
   const out = [];
   for (const raw of exts ?? []) {
     const normalized = normalizeCalibreExt(raw);
-    const mapped =
-      normalized === "epub" || normalized === "pdf" || normalized === "txt" || normalized === "md"
-        ? normalized
-        : null;
+    const mapped = SUPPORTED_CALIBRE_EXTENSION_RE.test(normalized) ? normalized : null;
     if (mapped && !out.includes(mapped)) {
       out.push(mapped);
     }
   }
-  return out.length > 0 ? out : ["epub", "pdf", "md", "txt"];
+  return out.length > 0 ? out : ["epub", "pdf", "html", "md", "txt"];
 }
 
 function sanitizeCalibreServerUrls(urls) {
@@ -723,7 +722,7 @@ test("tauri runner opens source and exercises core reader controls", async (t) =
     content_username: "",
     content_password: "",
     allow_local_library_fallback: false,
-    allowed_extensions: ["epub", "pdf", "md", "txt"],
+    allowed_extensions: ["epub", "pdf", "html", "md", "txt"],
     columns: ["title", "extension", "author", "year", "size"],
     list_cache_ttl_secs: 3600
   };

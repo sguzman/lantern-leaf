@@ -23,7 +23,7 @@ password = "admin"
 allow_local_library_fallback = false
 
 # Allowed reader formats.
-allowed_extensions = ["epub", "pdf", "md", "txt"]
+allowed_extensions = ["epub", "pdf", "html", "md", "txt"]
 
 # Configurable calibre browser columns.
 columns = ["title", "extension", "author", "year", "size"]

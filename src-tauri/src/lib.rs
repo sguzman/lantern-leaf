@@ -597,7 +597,13 @@ fn is_supported_source(path: &Path) -> bool {
         path.extension()
             .and_then(|ext| ext.to_str())
             .map(|ext| ext.to_ascii_lowercase()),
-        Some(ext) if ext == "epub" || ext == "pdf" || ext == "txt" || ext == "md" || ext == "markdown"
+        Some(ext)
+            if ext == "epub"
+                || ext == "pdf"
+                || ext == "txt"
+                || ext == "md"
+                || ext == "markdown"
+                || ext == "html"
     )
 }
 
@@ -623,10 +629,20 @@ fn resolve_source_path(path: &str) -> Result<PathBuf, BridgeError> {
     }
 
     if !is_supported_source(&candidate) {
+        let extension = candidate
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .unwrap_or_else(|| "<none>".to_string());
+        warn!(
+            path = %candidate.display(),
+            extension,
+            "Rejected unsupported source extension"
+        );
         return Err(bridge_error(
             "unsupported_source",
             format!(
-                "Unsupported source type for {} (expected .epub/.pdf/.txt/.md/.markdown)",
+                "Unsupported source type for {} (expected .epub/.pdf/.txt/.md/.markdown/.html)",
                 candidate.display()
             ),
         ));
@@ -3027,6 +3043,7 @@ mod tests {
         assert!(is_supported_source(Path::new("/tmp/book.txt")));
         assert!(is_supported_source(Path::new("/tmp/book.md")));
         assert!(is_supported_source(Path::new("/tmp/book.markdown")));
+        assert!(is_supported_source(Path::new("/tmp/book.html")));
         assert!(!is_supported_source(Path::new("/tmp/book.docx")));
     }
 

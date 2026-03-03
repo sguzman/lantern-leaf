@@ -112,7 +112,7 @@ fn load_source_text(path: &Path, cancel: Option<&CancellationToken>) -> Result<S
 
     if !is_epub(path) {
         anyhow::bail!(
-            "Unsupported source format for {}. Supported source types are .epub, .pdf, .md, .markdown, and .txt (other formats require successful pandoc conversion).",
+            "Unsupported source format for {}. Supported source types are .epub, .pdf, .md, .markdown, .html, and .txt (other formats require successful pandoc conversion).",
             path.display(),
         );
     }
