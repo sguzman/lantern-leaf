@@ -13,6 +13,7 @@ const NORMALIZER_CONFIG_ENV: &str = "LANTERNLEAF_NORMALIZER_CONFIG_PATH";
 const DEFAULT_ABBREVIATIONS_PATH: &str = "conf/abbreviations.toml";
 const ABBREVIATIONS_CONFIG_ENV: &str = "LANTERNLEAF_ABBREVIATIONS_CONFIG_PATH";
 const SENTENCE_MARKER: &str = "\n<<__EBUP_SENTENCE_BOUNDARY__>>\n";
+const NORMALIZER_PIPELINE_REV: &str = "normalizer-v2-fancy-brackets";
 
 static RE_INLINE_CODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"`([^`]+)`").unwrap());
 static RE_MARKDOWN_LINK: Lazy<Regex> = Lazy::new(|| Regex::new(r"\[([^\]]+)\]\([^)]*\)").unwrap());
@@ -24,7 +25,7 @@ static RE_SUPERSCRIPT_CITE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[⁰¹²³�
 static RE_WORD_SUFFIX_FOOTNOTE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?P<prefix>\p{L})\d{1,3}\b").unwrap());
 static RE_SQUARE_BRACKET_BLOCK: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\[[^\]]*\]|【[^】]*】").unwrap());
+    Lazy::new(|| Regex::new(r"\[[^\]]*\]|【[^】]*】|［[^］]*］").unwrap());
 static RE_CURLY_BRACKET_BLOCK: Lazy<Regex> = Lazy::new(|| Regex::new(r"\{[^}]*\}").unwrap());
 static RE_HORIZONTAL_WS: Lazy<Regex> = Lazy::new(|| Regex::new(r"[ \t\u{00A0}]+").unwrap());
 static RE_SPACE_BEFORE_PUNCT: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+([,.;:!?])").unwrap());
@@ -597,6 +598,7 @@ impl TextNormalizer {
     fn config_hash(&self) -> String {
         let serialized = toml::to_string(&self.config).unwrap_or_default();
         let mut hasher = Sha256::new();
+        hasher.update(NORMALIZER_PIPELINE_REV.as_bytes());
         hasher.update(serialized.as_bytes());
         format!("{:x}", hasher.finalize())
     }
@@ -1745,7 +1747,7 @@ mod tests {
     fn drops_ascii_and_fancy_square_bracket_blocks() {
         let normalizer = TextNormalizer::default();
         let page = vec![String::from(
-            "Alpha [12] beta ”【50†L260-L270】 gamma [note] delta.",
+            "Alpha [12] beta ”【50†L260-L270】 gamma ［note］ delta.",
         )];
         let plan = normalizer.plan_page(&page);
         assert_eq!(plan.audio_sentences.len(), 1);
