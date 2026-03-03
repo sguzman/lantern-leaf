@@ -169,6 +169,10 @@ fn period_is_abbreviation(
         return true;
     }
 
+    if period_is_domain_tld(chars, dot_idx) {
+        return true;
+    }
+
     let mut start = dot_idx;
     while start > 0 && chars[start - 1].is_alphabetic() {
         start -= 1;
@@ -213,6 +217,41 @@ fn period_is_abbreviation(
     }
 
     false
+}
+
+fn period_is_domain_tld(chars: &[char], dot_idx: usize) -> bool {
+    if dot_idx == 0 || dot_idx + 1 >= chars.len() || chars[dot_idx] != '.' {
+        return false;
+    }
+    if !chars[dot_idx + 1].is_ascii_alphabetic() {
+        return false;
+    }
+
+    let mut label_start = dot_idx;
+    while label_start > 0 {
+        let ch = chars[label_start - 1];
+        if ch.is_ascii_alphanumeric() || ch == '-' {
+            label_start -= 1;
+        } else {
+            break;
+        }
+    }
+    if label_start == dot_idx {
+        return false;
+    }
+
+    let mut tld_end = dot_idx + 1;
+    while tld_end < chars.len() && chars[tld_end].is_ascii_alphabetic() {
+        tld_end += 1;
+    }
+    let tld = chars[dot_idx + 1..tld_end]
+        .iter()
+        .collect::<String>()
+        .to_ascii_lowercase();
+    matches!(
+        tld.as_str(),
+        "net" | "com" | "gov" | "org" | "uk" | "mx" | "cn" | "de" | "ru" | "br"
+    )
 }
 
 static ABBREVIATION_TOKENS: Lazy<AbbreviationTokenSet> = Lazy::new(load_abbreviation_tokens);
@@ -510,6 +549,15 @@ mod tests {
         assert_eq!(sentences.len(), 2);
         assert!(sentences[0].contains("3.14159"));
         assert!(sentences[0].contains("2.71828"));
+    }
+
+    #[test]
+    fn does_not_split_known_domain_tlds() {
+        let text = "Visit example.com and sample.org now. Next sentence.";
+        let sentences = split_sentences(text);
+        assert_eq!(sentences.len(), 2);
+        assert!(sentences[0].contains("example.com"));
+        assert!(sentences[0].contains("sample.org"));
     }
 
     #[test]
