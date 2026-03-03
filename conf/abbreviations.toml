@@ -23,6 +23,8 @@
 
 # Internet abbreviations.
 "www." = "w w w dot "
+"http://www." = "h t t p w w w dot "
+"https://www." = "h t t p s w w w dot "
 "ftp." = "f t p dot "
 "mailto:" = "mail to "
 
@@ -131,9 +133,7 @@
 "Ala." = "Alabama"
 "Calif." = "California"
 "Mass." = "Massachusetts"
-"Va." = "Virginia"我会说一点普通话
-Translate to English
-￼
+"Va." = "Virginia"
 
 "N.J." = "New Jersey"
 "Ind." = "Indiana"
