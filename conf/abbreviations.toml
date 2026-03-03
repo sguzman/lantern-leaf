@@ -190,3 +190,8 @@ case_sensitive = true
 pattern = '\b([A-Za-z0-9-]+)\.(net|com|gov|org|uk|mx|cn|de|ru|br)\b'
 replace = '$1 dot $2'
 case_sensitive = false
+
+[[abbreviations.regex]]
+pattern = '\b([A-Za-z0-9_][A-Za-z0-9_.-]*)\.(txt|md|html|pdf|epub)\b'
+replace = '$1 dot $2'
+case_sensitive = false

@@ -1,6 +1,7 @@
 //! Text splitting helpers for TTS alignment.
 
 use once_cell::sync::Lazy;
+use regex::Regex;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
@@ -21,10 +22,14 @@ fn split_sentences_with_abbreviations(
     let mut sentences = Vec::new();
     let mut current = String::new();
     let chars: Vec<char> = text.chars().collect();
+    let protected_periods = protected_period_indices(text, abbreviations);
 
     for (idx, ch) in chars.iter().copied().enumerate() {
         current.push(ch);
-        if matches!(ch, '.' | '!' | '?') && !period_is_abbreviation(&chars, idx, abbreviations) {
+        if matches!(ch, '.' | '!' | '?')
+            && !(ch == '.' && protected_periods.contains(&idx))
+            && !period_is_abbreviation(&chars, idx, abbreviations)
+        {
             push_sentence_with_soft_breaks(&mut sentences, &current);
             current.clear();
         }
@@ -219,6 +224,34 @@ fn period_is_abbreviation(
     false
 }
 
+fn protected_period_indices(text: &str, abbreviations: &AbbreviationTokenSet) -> HashSet<usize> {
+    if abbreviations.regex.is_empty() {
+        return HashSet::new();
+    }
+
+    let period_positions: Vec<(usize, usize)> = text
+        .char_indices()
+        .enumerate()
+        .filter_map(|(char_idx, (byte_idx, ch))| (ch == '.').then_some((byte_idx, char_idx)))
+        .collect();
+
+    if period_positions.is_empty() {
+        return HashSet::new();
+    }
+
+    let mut out = HashSet::new();
+    for re in &abbreviations.regex {
+        for mat in re.find_iter(text) {
+            for (period_byte_idx, period_char_idx) in &period_positions {
+                if *period_byte_idx >= mat.start() && *period_byte_idx < mat.end() {
+                    out.insert(*period_char_idx);
+                }
+            }
+        }
+    }
+    out
+}
+
 fn period_is_domain_tld(chars: &[char], dot_idx: usize) -> bool {
     if dot_idx == 0 || dot_idx + 1 >= chars.len() || chars[dot_idx] != '.' {
         return false;
@@ -259,6 +292,7 @@ static ABBREVIATION_TOKENS: Lazy<AbbreviationTokenSet> = Lazy::new(load_abbrevia
 fn load_abbreviation_tokens() -> AbbreviationTokenSet {
     let mut out_nocase = HashSet::new();
     let mut out_case = HashSet::new();
+    let mut out_regex = Vec::new();
     for default in ["mr.", "ms.", "mrs.", "mass.", "st."] {
         out_nocase.insert(default.to_string());
     }
@@ -280,6 +314,11 @@ fn load_abbreviation_tokens() -> AbbreviationTokenSet {
                 out_case.insert(normalized);
             }
         }
+        for rule in &merged.regex {
+            if let Some(compiled) = compile_abbreviation_regex(rule) {
+                out_regex.push(compiled);
+            }
+        }
     }
 
     let abbreviations_path = resolve_abbreviations_config_path(&normalizer_path);
@@ -299,12 +338,31 @@ fn load_abbreviation_tokens() -> AbbreviationTokenSet {
                 out_case.insert(normalized);
             }
         }
+        for rule in &merged.regex {
+            if let Some(compiled) = compile_abbreviation_regex(rule) {
+                out_regex.push(compiled);
+            }
+        }
     }
 
     AbbreviationTokenSet {
         case: out_case,
         nocase: out_nocase,
+        regex: out_regex,
     }
+}
+
+fn compile_abbreviation_regex(rule: &AbbreviationRegexRule) -> Option<Regex> {
+    let pattern = rule.pattern.trim();
+    if pattern.is_empty() {
+        return None;
+    }
+    let effective = if rule.case_sensitive {
+        pattern.to_string()
+    } else {
+        format!("(?i:{pattern})")
+    };
+    Regex::new(&effective).ok()
 }
 
 fn resolve_normalizer_config_path() -> PathBuf {
@@ -442,6 +500,7 @@ struct AbbreviationRegexRule {
 struct AbbreviationTokenSet {
     case: HashSet<String>,
     nocase: HashSet<String>,
+    regex: Vec<Regex>,
 }
 
 #[cfg(test)]
@@ -535,6 +594,7 @@ mod tests {
         let only_case = AbbreviationTokenSet {
             case: ["Dr.".to_string()].into_iter().collect(),
             nocase: std::collections::HashSet::new(),
+            regex: Vec::new(),
         };
         let exact = split_sentences_with_abbreviations("Dr. Smith stayed.", &only_case);
         let lower = split_sentences_with_abbreviations("dr. Smith stayed.", &only_case);
@@ -558,6 +618,19 @@ mod tests {
         assert_eq!(sentences.len(), 2);
         assert!(sentences[0].contains("example.com"));
         assert!(sentences[0].contains("sample.org"));
+    }
+
+    #[test]
+    fn does_not_split_at_filename_extension_dot() {
+        let text =
+            "Open cat.txt and dog.html before reading book.epub or paper.pdf with notes.md. Next sentence.";
+        let sentences = split_sentences(text);
+        assert_eq!(sentences.len(), 2);
+        assert!(sentences[0].contains("cat.txt"));
+        assert!(sentences[0].contains("dog.html"));
+        assert!(sentences[0].contains("book.epub"));
+        assert!(sentences[0].contains("paper.pdf"));
+        assert!(sentences[0].contains("notes.md"));
     }
 
     #[test]
