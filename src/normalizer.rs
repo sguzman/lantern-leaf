@@ -23,7 +23,8 @@ static RE_PARENTHETICAL_NUMERIC: Lazy<Regex> =
 static RE_SUPERSCRIPT_CITE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[⁰¹²³⁴⁵⁶⁷⁸⁹]+").unwrap());
 static RE_WORD_SUFFIX_FOOTNOTE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?P<prefix>\p{L})\d{1,3}\b").unwrap());
-static RE_SQUARE_BRACKET_BLOCK: Lazy<Regex> = Lazy::new(|| Regex::new(r"\[[^\]]*\]").unwrap());
+static RE_SQUARE_BRACKET_BLOCK: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\[[^\]]*\]|【[^】]*】").unwrap());
 static RE_CURLY_BRACKET_BLOCK: Lazy<Regex> = Lazy::new(|| Regex::new(r"\{[^}]*\}").unwrap());
 static RE_HORIZONTAL_WS: Lazy<Regex> = Lazy::new(|| Regex::new(r"[ \t\u{00A0}]+").unwrap());
 static RE_SPACE_BEFORE_PUNCT: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+([,.;:!?])").unwrap());
@@ -1738,5 +1739,16 @@ mod tests {
         let plan = normalizer.plan_page(&page);
         assert_eq!(plan.audio_sentences.len(), 1);
         assert_eq!(plan.audio_sentences[0], "Quote - and 'apostrophe'... done.");
+    }
+
+    #[test]
+    fn drops_ascii_and_fancy_square_bracket_blocks() {
+        let normalizer = TextNormalizer::default();
+        let page = vec![String::from(
+            "Alpha [12] beta ”【50†L260-L270】 gamma [note] delta.",
+        )];
+        let plan = normalizer.plan_page(&page);
+        assert_eq!(plan.audio_sentences.len(), 1);
+        assert_eq!(plan.audio_sentences[0], "Alpha beta gamma delta.");
     }
 }
