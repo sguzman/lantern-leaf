@@ -305,20 +305,73 @@ pub fn persist_clipboard_text_source(text: &str) -> Result<PathBuf, String> {
 pub fn delete_recent_source_and_cache(source_path: &Path) -> Result<(), String> {
     let cache_path = hash_dir(source_path);
 
-    if source_path.exists() {
-        let metadata = fs::metadata(source_path).map_err(|err| err.to_string())?;
-        if metadata.is_dir() {
-            fs::remove_dir_all(source_path).map_err(|err| err.to_string())?;
-        } else {
-            fs::remove_file(source_path).map_err(|err| err.to_string())?;
-        }
-    }
-
-    if cache_path.exists() {
-        fs::remove_dir_all(&cache_path).map_err(|err| err.to_string())?;
-    }
+    delete_path_if_present(source_path)?;
+    delete_dir_if_present(&cache_path)?;
 
     Ok(())
+}
+
+fn delete_path_if_present(path: &Path) -> Result<(), String> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            debug!(path = %path.display(), "Delete skipped: source path already missing");
+            return Ok(());
+        }
+        Err(err) => {
+            warn!(path = %path.display(), "Delete failed while reading metadata: {err}");
+            return Err(err.to_string());
+        }
+    };
+
+    let remove_result = if metadata.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    };
+    match remove_result {
+        Ok(()) => {
+            debug!(
+                path = %path.display(),
+                is_dir = metadata.is_dir(),
+                "Deleted recent source path"
+            );
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            debug!(
+                path = %path.display(),
+                is_dir = metadata.is_dir(),
+                "Delete raced with another remover; source already missing"
+            );
+            Ok(())
+        }
+        Err(err) => {
+            warn!(
+                path = %path.display(),
+                is_dir = metadata.is_dir(),
+                "Delete failed while removing source path: {err}"
+            );
+            Err(err.to_string())
+        }
+    }
+}
+
+fn delete_dir_if_present(path: &Path) -> Result<(), String> {
+    match fs::remove_dir_all(path) {
+        Ok(()) => {
+            debug!(path = %path.display(), "Deleted cache directory");
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            debug!(path = %path.display(), "Delete skipped: cache directory already missing");
+            Ok(())
+        }
+        Err(err) => {
+            warn!(path = %path.display(), "Delete failed while removing cache directory: {err}");
+            Err(err.to_string())
+        }
+    }
 }
 
 fn resolve_existing_recent_source_path(source_path: &Path) -> Option<PathBuf> {
@@ -822,5 +875,32 @@ sentence_text = "legacy bookmark entry"
         assert_eq!(title, "First clipboard line with useful context");
 
         let _ = fs::remove_file(&source);
+    }
+
+    #[test]
+    fn delete_recent_source_and_cache_is_ok_when_paths_are_missing() {
+        let source = unique_source_path("epub");
+        cleanup_source_and_cache(&source);
+
+        let result = delete_recent_source_and_cache(&source);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn delete_recent_source_and_cache_is_idempotent() {
+        let source = unique_source_path("txt");
+        write_source_file(&source);
+
+        let cache_path = hash_dir(&source);
+        fs::create_dir_all(&cache_path).expect("create cache dir");
+        fs::write(cache_path.join("bookmark.toml"), "page = 1").expect("write cache marker");
+
+        let first = delete_recent_source_and_cache(&source);
+        assert!(first.is_ok());
+        assert!(!source.exists());
+        assert!(!cache_path.exists());
+
+        let second = delete_recent_source_and_cache(&source);
+        assert!(second.is_ok());
     }
 }
