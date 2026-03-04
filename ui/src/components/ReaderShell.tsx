@@ -271,10 +271,11 @@ function scrollSentenceIntoView(
   }
 
   const clampedTop = clamp(targetTop, 0, maxTop);
-  if (Math.abs(clampedTop - currentTop) < 1) {
+  const targetTopPx = Math.round(clampedTop);
+  if (Math.abs(targetTopPx - currentTop) < 1) {
     return;
   }
-  container.scrollTo({ top: clampedTop, behavior });
+  container.scrollTo({ top: targetTopPx, behavior });
 }
 
 function NumericSettingControl({
@@ -706,7 +707,9 @@ export const ReaderShell = memo(function ReaderShell({
     }
     const frame = requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        alignHighlightedSentence("smooth");
+        const behavior: ScrollBehavior =
+          reader.tts.state === "playing" ? "auto" : "smooth";
+        alignHighlightedSentence(behavior);
       });
     });
     return () => cancelAnimationFrame(frame);
@@ -716,6 +719,7 @@ export const ReaderShell = memo(function ReaderShell({
     reader.highlighted_sentence_idx,
     reader.settings.auto_scroll_tts,
     reader.settings.center_spoken_sentence,
+    reader.tts.state,
     reader.settings.font_size,
     reader.settings.line_spacing,
     reader.settings.margin_horizontal,
@@ -1121,7 +1125,8 @@ export const ReaderShell = memo(function ReaderShell({
                   paddingLeft: `${readerTypography.horizontalMarginPx}px`,
                   paddingRight: `${readerTypography.horizontalMarginPx}px`,
                   paddingTop: `${readerTypography.verticalMarginPx}px`,
-                  paddingBottom: `${readerTypography.verticalMarginPx}px`
+                  paddingBottom: `${readerTypography.verticalMarginPx}px`,
+                  scrollbarGutter: "stable"
                 }}
               >
                 <Stack spacing={0.75}>
