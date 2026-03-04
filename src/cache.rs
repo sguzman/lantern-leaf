@@ -18,7 +18,8 @@ use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::time::UNIX_EPOCH;
+use std::thread;
+use std::time::{Duration, UNIX_EPOCH};
 use tracing::{debug, warn};
 
 pub const CACHE_DIR: &str = ".cache";
@@ -325,7 +326,7 @@ fn delete_path_if_present(path: &Path) -> Result<(), String> {
     };
 
     let remove_result = if metadata.is_dir() {
-        fs::remove_dir_all(path)
+        remove_dir_all_with_retries(path)
     } else {
         fs::remove_file(path)
     };
@@ -358,7 +359,7 @@ fn delete_path_if_present(path: &Path) -> Result<(), String> {
 }
 
 fn delete_dir_if_present(path: &Path) -> Result<(), String> {
-    match fs::remove_dir_all(path) {
+    match remove_dir_all_with_retries(path) {
         Ok(()) => {
             debug!(path = %path.display(), "Deleted cache directory");
             Ok(())
@@ -367,11 +368,42 @@ fn delete_dir_if_present(path: &Path) -> Result<(), String> {
             debug!(path = %path.display(), "Delete skipped: cache directory already missing");
             Ok(())
         }
+        Err(err) if err.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
+            warn!(
+                path = %path.display(),
+                "Cache delete remained busy after retries; leaving for next cleanup pass: {err}"
+            );
+            Ok(())
+        }
         Err(err) => {
             warn!(path = %path.display(), "Delete failed while removing cache directory: {err}");
             Err(err.to_string())
         }
     }
+}
+
+fn remove_dir_all_with_retries(path: &Path) -> Result<(), std::io::Error> {
+    const MAX_RETRIES: u32 = 4;
+    for attempt in 0..=MAX_RETRIES {
+        match fs::remove_dir_all(path) {
+            Ok(()) => return Ok(()),
+            Err(err)
+                if err.kind() == std::io::ErrorKind::DirectoryNotEmpty && attempt < MAX_RETRIES =>
+            {
+                let retry_in_ms = 25 * u64::from(attempt + 1);
+                warn!(
+                    path = %path.display(),
+                    attempt = attempt + 1,
+                    max_attempts = MAX_RETRIES + 1,
+                    retry_in_ms,
+                    "Directory still had concurrent writes during delete; retrying"
+                );
+                thread::sleep(Duration::from_millis(retry_in_ms));
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    unreachable!("retry loop always returns on success or terminal error");
 }
 
 fn resolve_existing_recent_source_path(source_path: &Path) -> Option<PathBuf> {
