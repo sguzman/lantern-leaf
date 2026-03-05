@@ -26,10 +26,11 @@ pub const CACHE_DIR: &str = ".cache";
 const CACHE_APP_SUBDIR: &str = "lantern-leaf";
 pub const CACHE_DIR_ENV: &str = "LANTERNLEAF_CACHE_DIR";
 const SOURCE_PATH_FILE: &str = "source-path.txt";
-const CONTENT_LAYOUT_VERSION: &str = "dual-view-v1";
+const CONTENT_LAYOUT_VERSION: &str = "dual-view-v2";
 const CONTENT_LAYOUT_VERSION_FILE: &str = "content/layout-version.txt";
 const CONTENT_TTS_TEXT_FILE: &str = "content/tts-text.txt";
 const CONTENT_READING_MARKDOWN_FILE: &str = "content/reading-markdown.md";
+const CONTENT_READING_HTML_FILE: &str = "content/reading-html.html";
 static CONTENT_DIGEST_CACHE: OnceLock<Mutex<HashMap<PathBuf, SourceDigestEntry>>> = OnceLock::new();
 static CACHE_LAYOUT_INIT: OnceLock<()> = OnceLock::new();
 
@@ -277,6 +278,7 @@ pub fn persist_dual_view_artifacts(
     source_path: &Path,
     tts_text: &str,
     reading_markdown: Option<&str>,
+    reading_html: Option<&str>,
 ) {
     ensure_content_layout(source_path);
     let tts_path = hash_dir(source_path).join(CONTENT_TTS_TEXT_FILE);
@@ -309,6 +311,24 @@ pub fn persist_dual_view_artifacts(
         },
         None => {
             let _ = fs::remove_file(&markdown_path);
+        }
+    }
+
+    let html_path = hash_dir(source_path).join(CONTENT_READING_HTML_FILE);
+    match reading_html {
+        Some(html) => match fs::write(&html_path, html) {
+            Ok(()) => debug!(
+                path = %html_path.display(),
+                chars = html.len(),
+                "Persisted cached reading_html artifact"
+            ),
+            Err(err) => warn!(
+                path = %html_path.display(),
+                "Failed to persist reading_html artifact: {err}"
+            ),
+        },
+        None => {
+            let _ = fs::remove_file(&html_path);
         }
     }
 }
@@ -419,6 +439,42 @@ fn migrate_legacy_content_files(hash_root: &Path) {
             );
         }
     }
+
+    let legacy_markdown = hash_root.join("source-markdown.txt");
+    let new_markdown = hash_root.join(CONTENT_READING_MARKDOWN_FILE);
+    if legacy_markdown.exists() && !new_markdown.exists() {
+        if let Err(err) = fs::rename(&legacy_markdown, &new_markdown) {
+            warn!(
+                from = %legacy_markdown.display(),
+                to = %new_markdown.display(),
+                "Failed to migrate legacy markdown cache file: {err}"
+            );
+        } else {
+            debug!(
+                from = %legacy_markdown.display(),
+                to = %new_markdown.display(),
+                "Migrated legacy markdown cache file"
+            );
+        }
+    }
+
+    let legacy_html = hash_root.join("source-html.html");
+    let new_html = hash_root.join(CONTENT_READING_HTML_FILE);
+    if legacy_html.exists() && !new_html.exists() {
+        if let Err(err) = fs::rename(&legacy_html, &new_html) {
+            warn!(
+                from = %legacy_html.display(),
+                to = %new_html.display(),
+                "Failed to migrate legacy HTML cache file: {err}"
+            );
+        } else {
+            debug!(
+                from = %legacy_html.display(),
+                to = %new_html.display(),
+                "Migrated legacy HTML cache file"
+            );
+        }
+    }
 }
 
 pub fn remember_source_path(source_path: &Path) {
@@ -496,6 +552,14 @@ fn delete_path_if_present(path: &Path) -> Result<(), String> {
                 path = %path.display(),
                 is_dir = metadata.is_dir(),
                 "Delete raced with another remover; source already missing"
+            );
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
+            warn!(
+                path = %path.display(),
+                is_dir = metadata.is_dir(),
+                "Source delete remained busy after retries; leaving for next cleanup pass: {err}"
             );
             Ok(())
         }
@@ -1091,7 +1155,12 @@ sentence_text = "legacy bookmark entry"
         let source = unique_source_path("txt");
         write_source_file(&source);
 
-        persist_dual_view_artifacts(&source, "tts text payload", Some("# Heading\n\nBody"));
+        persist_dual_view_artifacts(
+            &source,
+            "tts text payload",
+            Some("# Heading\n\nBody"),
+            Some("<p>Pretty HTML</p>"),
+        );
         let tts_path = hash_dir(&source).join(CONTENT_TTS_TEXT_FILE);
         let markdown_path = hash_dir(&source).join(CONTENT_READING_MARKDOWN_FILE);
         assert_eq!(

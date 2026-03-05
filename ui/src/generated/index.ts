@@ -19,6 +19,7 @@ export type { ReaderTtsView } from "./ReaderTtsView";
 export type { ReaderSettingsPatch } from "./ReaderSettingsPatch";
 export type { ReaderStats } from "./ReaderStats";
 export type { ReaderSnapshot } from "./ReaderSnapshot";
+export type { PrettyKind } from "./PrettyKind";
 export type { TtsPlaybackState } from "./TtsPlaybackState";
 export type { ThemeMode } from "./ThemeMode";
 export type { FontFamily } from "./FontFamily";

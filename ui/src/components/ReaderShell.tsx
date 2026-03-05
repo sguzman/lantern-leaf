@@ -32,7 +32,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, memo, type MouseEvent } from "react";
 
 import {
   computeReaderTopBarVisibility,
@@ -486,6 +486,206 @@ function renderMarkdownToHtml(
   return out.join("");
 }
 
+function renderNativeHtml(
+  html: string,
+  imageCandidates: Array<{ rawPath: string; src: string }>
+): string {
+  const parser = new DOMParser();
+  const parsed = parser.parseFromString(html, "text/html");
+  const allowTags = new Set([
+    "a",
+    "article",
+    "aside",
+    "b",
+    "blockquote",
+    "br",
+    "code",
+    "div",
+    "em",
+    "figcaption",
+    "figure",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "hr",
+    "i",
+    "img",
+    "li",
+    "main",
+    "nav",
+    "ol",
+    "p",
+    "pre",
+    "s",
+    "section",
+    "small",
+    "span",
+    "strong",
+    "sub",
+    "sup",
+    "table",
+    "tbody",
+    "td",
+    "th",
+    "thead",
+    "tr",
+    "u",
+    "ul"
+  ]);
+  const allowedGlobalAttrs = new Set(["id", "title", "lang", "dir", "role", "aria-label"]);
+  const allowedPerTagAttrs = new Map<string, Set<string>>([
+    ["a", new Set(["href"])],
+    ["img", new Set(["src", "alt", "width", "height", "loading"])],
+    ["td", new Set(["colspan", "rowspan"])],
+    ["th", new Set(["colspan", "rowspan"])]
+  ]);
+  const unusedImages = [...imageCandidates];
+  const resolveImageTarget = (target: string): string | null => {
+    const normalizedTarget = normalizeImageTarget(target);
+    if (!normalizedTarget) {
+      return null;
+    }
+    if (
+      normalizedTarget.startsWith("http://") ||
+      normalizedTarget.startsWith("https://") ||
+      normalizedTarget.startsWith("data:") ||
+      normalizedTarget.startsWith("asset:")
+    ) {
+      return target;
+    }
+    const targetBaseName = imageBaseName(normalizedTarget);
+    const matched = unusedImages.find((candidate) => {
+      const candidateNormalized = normalizeImageTarget(candidate.rawPath);
+      return (
+        candidateNormalized === normalizedTarget ||
+        candidateNormalized.endsWith(`/${normalizedTarget}`) ||
+        imageBaseName(candidateNormalized) === targetBaseName
+      );
+    });
+    if (matched) {
+      return matched.src;
+    }
+    return null;
+  };
+  const isSafeScheme = (value: string): boolean =>
+    value.startsWith("http://") ||
+    value.startsWith("https://") ||
+    value.startsWith("data:") ||
+    value.startsWith("asset:") ||
+    value.startsWith("#");
+  const toInternalAnchor = (raw: string): string | null => {
+    if (raw.startsWith("#")) {
+      return raw;
+    }
+    const hashIdx = raw.indexOf("#");
+    if (hashIdx >= 0) {
+      const fragment = raw.slice(hashIdx);
+      return fragment.startsWith("#") ? fragment : null;
+    }
+    return null;
+  };
+
+  let anchorIndex = 0;
+  const anchorTags = new Set([
+    "section",
+    "article",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "p",
+    "li",
+    "blockquote",
+    "pre",
+    "img"
+  ]);
+  const sanitizeNode = (node: Node): void => {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const element = node as Element;
+      const tag = element.tagName.toLowerCase();
+      if (!allowTags.has(tag)) {
+        const parent = element.parentNode;
+        if (!parent) {
+          element.remove();
+          return;
+        }
+        while (element.firstChild) {
+          parent.insertBefore(element.firstChild, element);
+        }
+        parent.removeChild(element);
+        return;
+      }
+      const allowAttrs = allowedPerTagAttrs.get(tag) ?? new Set<string>();
+      const attrs = [...element.attributes];
+      for (const attr of attrs) {
+        const name = attr.name.toLowerCase();
+        if (name.startsWith("on")) {
+          element.removeAttribute(attr.name);
+          continue;
+        }
+        if (name === "class" || name === "style") {
+          element.removeAttribute(attr.name);
+          continue;
+        }
+        if (allowedGlobalAttrs.has(name) || name.startsWith("aria-") || allowAttrs.has(name)) {
+          continue;
+        }
+        element.removeAttribute(attr.name);
+      }
+      if (tag === "img") {
+        const src = (element.getAttribute("src") ?? "").trim();
+        const resolved = resolveImageTarget(src) ?? (isSafeScheme(src) ? src : "");
+        if (resolved) {
+          element.setAttribute("src", resolved);
+        } else {
+          element.remove();
+          return;
+        }
+        if (!element.hasAttribute("loading")) {
+          element.setAttribute("loading", "lazy");
+        }
+      } else if (tag === "a") {
+        const href = (element.getAttribute("href") ?? "").trim();
+        const resolvedImage = resolveImageTarget(href);
+        const internal = toInternalAnchor(href);
+        let resolved = "";
+        if (resolvedImage) {
+          resolved = resolvedImage;
+        } else if (internal) {
+          resolved = internal;
+        } else if (isSafeScheme(href)) {
+          resolved = href;
+        }
+        if (!resolved) {
+          element.removeAttribute("href");
+        } else {
+          element.setAttribute("href", resolved);
+          if (resolved.startsWith("http://") || resolved.startsWith("https://")) {
+            element.setAttribute("target", "_blank");
+            element.setAttribute("rel", "noreferrer");
+          }
+        }
+      }
+      if (anchorTags.has(tag)) {
+        element.setAttribute("data-ll-html-anchor", String(anchorIndex));
+        anchorIndex += 1;
+      }
+    }
+    const children = [...node.childNodes];
+    for (const child of children) {
+      sanitizeNode(child);
+    }
+  };
+  sanitizeNode(parsed.body);
+  return parsed.body.innerHTML;
+}
+
 function scrollSentenceIntoView(
   container: HTMLElement,
   sentence: HTMLElement,
@@ -921,7 +1121,7 @@ export const ReaderShell = memo(function ReaderShell({
       if (!container) {
         return;
       }
-      if (!reader.text_only_mode && reader.reading_markdown_page) {
+      if (!reader.text_only_mode && reader.pretty_kind === "markdown" && reader.reading_markdown_page) {
         const anchors = reader.sentence_anchor_map;
         let anchorIdx = anchors[idx] ?? null;
         if (anchorIdx === null || anchorIdx === undefined) {
@@ -953,6 +1153,38 @@ export const ReaderShell = memo(function ReaderShell({
           }
         }
       }
+      if (!reader.text_only_mode && reader.pretty_kind === "html" && reader.reading_html_page) {
+        const anchors = reader.sentence_anchor_map;
+        let anchorIdx = anchors[idx] ?? null;
+        if (anchorIdx === null || anchorIdx === undefined) {
+          for (let offset = 1; offset < anchors.length; offset += 1) {
+            const prev = idx - offset;
+            const next = idx + offset;
+            if (prev >= 0 && anchors[prev] !== null && anchors[prev] !== undefined) {
+              anchorIdx = anchors[prev];
+              break;
+            }
+            if (next < anchors.length && anchors[next] !== null && anchors[next] !== undefined) {
+              anchorIdx = anchors[next];
+              break;
+            }
+          }
+        }
+        if (anchorIdx !== null && anchorIdx !== undefined) {
+          const anchor = container.querySelector(
+            `[data-ll-html-anchor="${anchorIdx}"]`
+          ) as HTMLElement | null;
+          if (anchor) {
+            scrollSentenceIntoView(
+              container,
+              anchor,
+              reader.settings.center_spoken_sentence,
+              behavior
+            );
+            return;
+          }
+        }
+      }
       const sentence = sentenceRefs.current[idx];
       if (!sentence) {
         return;
@@ -968,8 +1200,11 @@ export const ReaderShell = memo(function ReaderShell({
       reader.highlighted_sentence_idx,
       reader.settings.auto_scroll_tts,
       reader.settings.center_spoken_sentence,
+      reader.pretty_kind,
       reader.sentence_anchor_map,
       reader.reading_markdown_page,
+      reader.reading_html_page,
+      reader.sentences.length,
       reader.text_only_mode
     ]
   );
@@ -977,6 +1212,34 @@ export const ReaderShell = memo(function ReaderShell({
   const jumpToHighlightedSentence = useCallback(() => {
     alignHighlightedSentence("smooth", true);
   }, [alignHighlightedSentence]);
+
+  const handlePrettyContentClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    const anchor = target?.closest("a");
+    if (!anchor) {
+      return;
+    }
+    const href = (anchor.getAttribute("href") ?? "").trim();
+    if (!href.startsWith("#")) {
+      return;
+    }
+    event.preventDefault();
+    const container = sentenceScrollRef.current;
+    if (!container) {
+      return;
+    }
+    const id = href.slice(1);
+    if (!id) {
+      return;
+    }
+    const escapedId =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(id) : id;
+    const element = container.querySelector(`#${escapedId}`) as HTMLElement | null;
+    if (!element) {
+      return;
+    }
+    scrollSentenceIntoView(container, element, false, "smooth");
+  }, []);
 
   useEffect(() => {
     const idx = reader.highlighted_sentence_idx;
@@ -1171,14 +1434,24 @@ export const ReaderShell = memo(function ReaderShell({
   const hasHighlightSentence = reader.highlighted_sentence_idx !== null;
   const textModeLabel = reader.text_only_mode ? "Pretty Text" : "Text-only";
   const isPrettyTextMode = !reader.text_only_mode;
-  const markdownUnavailable = isPrettyTextMode && !reader.reading_markdown_page;
-  const showSentenceList = reader.text_only_mode || markdownUnavailable;
+  const hasPrettyMarkdown =
+    isPrettyTextMode && reader.pretty_kind === "markdown" && Boolean(reader.reading_markdown_page);
+  const hasPrettyHtml =
+    isPrettyTextMode && reader.pretty_kind === "html" && Boolean(reader.reading_html_page);
+  const prettyUnavailable = isPrettyTextMode && !hasPrettyMarkdown && !hasPrettyHtml;
+  const showSentenceList = reader.text_only_mode || prettyUnavailable;
   const renderedMarkdownHtml = useMemo(() => {
-    if (!isPrettyTextMode || !reader.reading_markdown_page) {
+    if (!hasPrettyMarkdown || !reader.reading_markdown_page) {
       return "";
     }
     return renderMarkdownToHtml(reader.reading_markdown_page, readerImageCandidates);
-  }, [isPrettyTextMode, reader.reading_markdown_page, readerImageCandidates]);
+  }, [hasPrettyMarkdown, reader.reading_markdown_page, readerImageCandidates]);
+  const renderedNativeHtml = useMemo(() => {
+    if (!hasPrettyHtml || !reader.reading_html_page) {
+      return "";
+    }
+    return renderNativeHtml(reader.reading_html_page, readerImageCandidates);
+  }, [hasPrettyHtml, reader.reading_html_page, readerImageCandidates]);
   const themeLabel = reader.settings.theme === "night" ? "Day" : "Night";
   const themeIcon =
     reader.settings.theme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />;
@@ -1427,7 +1700,28 @@ export const ReaderShell = memo(function ReaderShell({
                 }}
               >
                 <Stack spacing={0.75}>
-                  {isPrettyTextMode && reader.reading_markdown_page ? (
+                  {hasPrettyHtml ? (
+                    <div
+                      style={{
+                        maxWidth: "72ch",
+                        marginInline: "auto",
+                        padding: "10px 12px",
+                        border: "1px solid rgba(148, 163, 184, 0.36)",
+                        borderRadius: 12,
+                        background: "rgba(255, 255, 255, 0.82)",
+                        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.06)",
+                        color: "#1f2937"
+                      }}
+                    >
+                      <div
+                        className="reader-markdown-content"
+                        data-testid="reader-pretty-native-html"
+                        onClick={handlePrettyContentClick}
+                        dangerouslySetInnerHTML={{ __html: renderedNativeHtml }}
+                      />
+                    </div>
+                  ) : null}
+                  {hasPrettyMarkdown ? (
                     <div
                       style={{
                         maxWidth: "72ch",
@@ -1443,17 +1737,18 @@ export const ReaderShell = memo(function ReaderShell({
                       <div
                         className="reader-markdown-content"
                         data-testid="reader-pretty-markdown"
+                        onClick={handlePrettyContentClick}
                         dangerouslySetInnerHTML={{ __html: renderedMarkdownHtml }}
                       />
                     </div>
                   ) : null}
-                  {markdownUnavailable ? (
+                  {prettyUnavailable ? (
                     <Typography
                       variant="caption"
                       color="text.secondary"
                       data-testid="reader-pretty-markdown-fallback"
                     >
-                      Markdown view unavailable for this source. Showing text fallback.
+                      Pretty view unavailable for this source. Showing text fallback.
                     </Typography>
                   ) : null}
                   {showSentenceList

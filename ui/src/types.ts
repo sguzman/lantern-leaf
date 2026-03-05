@@ -12,6 +12,7 @@ export type {
   PdfTranscriptionEvent,
   ReaderSettingsPatch,
   ReaderSettingsView,
+  PrettyKind,
   ReaderSnapshot,
   ReaderStateEvent,
   ReaderStats,

@@ -132,9 +132,11 @@ pub struct ReaderSnapshot {
     pub total_pages: usize,
     pub text_only_mode: bool,
     pub has_structured_markdown: bool,
+    pub pretty_kind: PrettyKind,
     pub images: Vec<String>,
     pub tts_text_page: String,
     pub reading_markdown_page: Option<String>,
+    pub reading_html_page: Option<String>,
     pub page_text: String,
     pub sentences: Vec<String>,
     pub sentence_anchor_map: Vec<Option<usize>>,
@@ -146,6 +148,15 @@ pub struct ReaderSnapshot {
     pub tts: ReaderTtsView,
     pub stats: ReaderStats,
     pub panels: PanelState,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PrettyKind {
+    None,
+    Markdown,
+    Html,
 }
 
 #[derive(Debug, Clone)]
@@ -213,6 +224,7 @@ pub struct ReaderSession {
     source_name: String,
     tts_text: String,
     reading_markdown: Option<String>,
+    reading_html: Option<String>,
     has_structured_markdown: bool,
     images: Vec<SessionImage>,
     pub config: config::AppConfig,
@@ -295,6 +307,7 @@ impl ReaderSession {
             );
         }
         let reading_markdown = loaded.reading_markdown;
+        let reading_html = loaded.reading_html;
         let has_structured_markdown = loaded.has_structured_markdown;
 
         let mut session = Self {
@@ -302,6 +315,7 @@ impl ReaderSession {
             source_name,
             tts_text: loaded.tts_text,
             reading_markdown,
+            reading_html,
             has_structured_markdown,
             images: loaded
                 .images
@@ -379,6 +393,11 @@ impl ReaderSession {
     ) -> ReaderSnapshot {
         let sentences = self.current_sentences(normalizer);
         let sentence_anchor_map = self.current_sentence_anchor_map();
+        let anchor_hits = sentence_anchor_map
+            .iter()
+            .filter(|value| value.is_some())
+            .count();
+        let anchor_missing = sentence_anchor_map.len().saturating_sub(anchor_hits);
         let highlighted_sentence_idx = self.current_highlight_idx();
         let stats = self.stats(normalizer);
         let tts = self.tts_view(normalizer, stats.tts_progress_pct);
@@ -392,6 +411,30 @@ impl ReaderSession {
             .get(self.current_page)
             .cloned()
             .filter(|value| !value.trim().is_empty());
+        let reading_html_page = self
+            .reading_html
+            .as_ref()
+            .cloned()
+            .filter(|value| !value.trim().is_empty());
+        let pretty_kind = if reading_html_page.is_some() {
+            PrettyKind::Html
+        } else if reading_markdown_page.is_some() {
+            PrettyKind::Markdown
+        } else {
+            PrettyKind::None
+        };
+        tracing::debug!(
+            path = %self.source_path.display(),
+            page = self.current_page + 1,
+            total_pages = self.pages.len(),
+            text_only = self.text_only_mode,
+            pretty_kind = ?pretty_kind,
+            anchor_hits,
+            anchor_missing,
+            has_markdown = self.reading_markdown.is_some(),
+            has_html = self.reading_html.is_some(),
+            "Prepared reader snapshot payload"
+        );
         ReaderSnapshot {
             source_path: self.source_path_str(),
             source_name: self.source_name.clone(),
@@ -399,9 +442,11 @@ impl ReaderSession {
             total_pages: self.pages.len(),
             text_only_mode: self.text_only_mode,
             has_structured_markdown: self.has_structured_markdown,
+            pretty_kind,
             images: self.current_page_images(),
             tts_text_page: tts_text_page.clone(),
             reading_markdown_page,
+            reading_html_page,
             page_text: tts_text_page,
             sentences,
             sentence_anchor_map,
@@ -897,6 +942,18 @@ impl ReaderSession {
     ) -> normalizer::PageNormalization {
         let needs_refresh = self.current_plan_page != Some(self.current_page);
         if needs_refresh {
+            let page_text_chars = self
+                .pages
+                .get(self.current_page)
+                .map(|value| value.len())
+                .unwrap_or(0);
+            tracing::trace!(
+                path = %self.source_path.display(),
+                page = self.current_page + 1,
+                page_text_chars,
+                source = "tts_text",
+                "Building normalization/TTS plan from canonical plain text page"
+            );
             let display = self
                 .raw_page_sentences
                 .get(self.current_page)
@@ -1024,21 +1081,54 @@ impl ReaderSession {
             return cached;
         }
         let Some(markdown_page) = self.markdown_pages.get(page_idx) else {
+            if let Some(reading_html) = self.reading_html.as_ref() {
+                let anchor_count = count_html_anchors(reading_html);
+                if anchor_count == 0 {
+                    tracing::debug!(
+                        path = %self.source_path.display(),
+                        page = page_idx + 1,
+                        sentence_count,
+                        "Sentence-anchor map fallback: no HTML anchors detected"
+                    );
+                    return (0..sentence_count).map(Some).collect();
+                }
+                tracing::debug!(
+                    path = %self.source_path.display(),
+                    page = page_idx + 1,
+                    sentence_count,
+                    anchor_count,
+                    source = "html",
+                    "Built sentence-anchor map from HTML anchors"
+                );
+                return proportional_anchor_map(sentence_count, anchor_count);
+            }
+            tracing::debug!(
+                path = %self.source_path.display(),
+                page = page_idx + 1,
+                sentence_count,
+                "Sentence-anchor map fallback: no markdown/html pretty payload"
+            );
             return (0..sentence_count).map(Some).collect();
         };
         let anchor_count = count_markdown_anchors(markdown_page);
         if anchor_count == 0 {
+            tracing::debug!(
+                path = %self.source_path.display(),
+                page = page_idx + 1,
+                sentence_count,
+                "Sentence-anchor map fallback: no markdown anchors detected"
+            );
             return (0..sentence_count).map(Some).collect();
         }
-        if sentence_count == 1 {
-            return vec![Some(0)];
-        }
-        (0..sentence_count)
-            .map(|idx| {
-                let mapped = (idx.saturating_mul(anchor_count)) / sentence_count;
-                Some(mapped.min(anchor_count.saturating_sub(1)))
-            })
-            .collect()
+        tracing::debug!(
+            path = %self.source_path.display(),
+            page = page_idx + 1,
+            sentence_count,
+            anchor_count,
+            source = "markdown",
+            "Built sentence-anchor map from markdown anchors"
+        );
+        proportional_anchor_map(sentence_count, anchor_count)
     }
 
     fn current_highlight_idx(&self) -> Option<usize> {
@@ -1427,6 +1517,46 @@ fn count_markdown_anchors(markdown: &str) -> usize {
         .count()
 }
 
+fn count_html_anchors(html: &str) -> usize {
+    const TAGS: [&str; 13] = [
+        "<section",
+        "<article",
+        "<h1",
+        "<h2",
+        "<h3",
+        "<h4",
+        "<h5",
+        "<h6",
+        "<p",
+        "<li",
+        "<blockquote",
+        "<pre",
+        "<img",
+    ];
+    let lower = html.to_ascii_lowercase();
+    TAGS.iter()
+        .map(|tag| lower.match_indices(tag).count())
+        .sum()
+}
+
+fn proportional_anchor_map(sentence_count: usize, anchor_count: usize) -> Vec<Option<usize>> {
+    if sentence_count == 0 {
+        return Vec::new();
+    }
+    if anchor_count == 0 {
+        return (0..sentence_count).map(Some).collect();
+    }
+    if sentence_count == 1 {
+        return vec![Some(0)];
+    }
+    (0..sentence_count)
+        .map(|idx| {
+            let mapped = (idx.saturating_mul(anchor_count)) / sentence_count;
+            Some(mapped.min(anchor_count.saturating_sub(1)))
+        })
+        .collect()
+}
+
 pub fn load_session_for_source(
     source_path: PathBuf,
     base_config: &config::AppConfig,
@@ -1509,6 +1639,7 @@ mod tests {
             source_name: "test.epub".to_string(),
             tts_text: pages.join("\n\n"),
             reading_markdown: None,
+            reading_html: None,
             has_structured_markdown: false,
             images: Vec::new(),
             config: config::AppConfig::default(),

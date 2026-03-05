@@ -103,9 +103,11 @@ const mockReaderSnapshot = (): ReaderSnapshot => ({
   total_pages: MOCK_PAGES.length,
   text_only_mode: false,
   has_structured_markdown: false,
+  pretty_kind: "none",
   images: [],
   tts_text_page: MOCK_PAGES[0].text,
   reading_markdown_page: null,
+  reading_html_page: null,
   page_text: MOCK_PAGES[0].text,
   sentences: MOCK_PAGES[0].sentences,
   sentence_anchor_map: [0],
@@ -229,6 +231,8 @@ function applyMockPage(reader: ReaderSnapshot, page: number): void {
   reader.total_pages = MOCK_PAGES.length;
   reader.tts_text_page = pageData.text;
   reader.reading_markdown_page = null;
+  reader.reading_html_page = null;
+  reader.pretty_kind = "none";
   reader.page_text = pageData.text;
   reader.sentences = pageData.sentences;
   reader.sentence_anchor_map = pageData.sentences.map((_, idx) => idx);

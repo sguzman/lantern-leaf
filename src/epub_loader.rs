@@ -47,6 +47,7 @@ pub struct BookImage {
 pub struct LoadedBook {
     pub tts_text: String,
     pub reading_markdown: Option<String>,
+    pub reading_html: Option<String>,
     pub has_structured_markdown: bool,
     pub images: Vec<BookImage>,
 }
@@ -62,12 +63,14 @@ pub fn load_book_content_with_cancel(
     cancel: Option<&CancellationToken>,
 ) -> Result<LoadedBook> {
     let start = Instant::now();
+    let source_type = source_type_label(path);
     ensure_not_cancelled(cancel, "load_book_content_start")?;
     let content = load_source_content(path, cancel)?;
     crate::cache::persist_dual_view_artifacts(
         path,
         &content.tts_text,
         content.reading_markdown.as_deref(),
+        content.reading_html.as_deref(),
     );
     record_markdown_availability(path, content.has_structured_markdown);
     ensure_not_cancelled(cancel, "after_load_source_text")?;
@@ -80,8 +83,17 @@ pub fn load_book_content_with_cancel(
     };
     info!(
         path = %path.display(),
+        source_type,
+        pretty_kind = if content.reading_html.is_some() {
+            "html"
+        } else if content.reading_markdown.is_some() {
+            "markdown"
+        } else {
+            "none"
+        },
         has_structured_markdown = content.has_structured_markdown,
         markdown_chars = content.reading_markdown.as_ref().map(|v| v.len()).unwrap_or(0),
+        html_chars = content.reading_html.as_ref().map(|v| v.len()).unwrap_or(0),
         tts_chars = content.tts_text.len(),
         image_count = images.len(),
         elapsed_ms = start.elapsed().as_millis(),
@@ -90,6 +102,7 @@ pub fn load_book_content_with_cancel(
     Ok(LoadedBook {
         tts_text: content.tts_text,
         reading_markdown: content.reading_markdown,
+        reading_html: content.reading_html,
         has_structured_markdown: content.has_structured_markdown,
         images,
     })
@@ -99,6 +112,7 @@ pub fn load_book_content_with_cancel(
 struct SourceContent {
     tts_text: String,
     reading_markdown: Option<String>,
+    reading_html: Option<String>,
     has_structured_markdown: bool,
 }
 
@@ -121,12 +135,41 @@ fn load_source_content(path: &Path, cancel: Option<&CancellationToken>) -> Resul
         return Ok(SourceContent {
             tts_text,
             reading_markdown: None,
+            reading_html: None,
             has_structured_markdown: false,
         });
     }
 
     if is_pdf(path) {
         return load_pdf_with_quack_check(path, cancel);
+    }
+
+    if is_native_html_source(path) {
+        let tts_text = load_with_pandoc(path, "plain", cancel)?;
+        let html = load_native_pretty_html(path, cancel)?;
+        let reading_html = if html.trim().is_empty() {
+            None
+        } else {
+            Some(html)
+        };
+        let has_pretty = reading_html
+            .as_deref()
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false);
+        let result = SourceContent {
+            tts_text,
+            reading_markdown: None,
+            reading_html,
+            has_structured_markdown: has_pretty,
+        };
+        info!(
+            path = %path.display(),
+            stage = "native_html_dual_convert",
+            elapsed_ms = start.elapsed().as_millis(),
+            has_structured_markdown = result.has_structured_markdown,
+            "Completed source conversion stage"
+        );
+        return Ok(result);
     }
 
     if is_pandoc_dual_source(path) {
@@ -137,10 +180,12 @@ fn load_source_content(path: &Path, cancel: Option<&CancellationToken>) -> Resul
         } else {
             Some(markdown)
         };
+        let has_pretty = reading_markdown.is_some();
         let result = SourceContent {
             tts_text,
-            has_structured_markdown: reading_markdown.is_some(),
             reading_markdown,
+            reading_html: None,
+            has_structured_markdown: has_pretty,
         };
         info!(
             path = %path.display(),
@@ -160,6 +205,7 @@ fn load_source_content(path: &Path, cancel: Option<&CancellationToken>) -> Resul
         return Ok(SourceContent {
             tts_text,
             reading_markdown: Some(data),
+            reading_html: None,
             has_structured_markdown: true,
         });
     }
@@ -168,6 +214,24 @@ fn load_source_content(path: &Path, cancel: Option<&CancellationToken>) -> Resul
         "Unsupported source format for {}. Supported source types are .txt, .md, .markdown, .pdf, .html, .doc, .docx, and .epub.",
         path.display(),
     );
+}
+
+fn source_type_label(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("txt") => "txt",
+        Some("md") | Some("markdown") => "markdown",
+        Some("pdf") => "pdf",
+        Some("epub") => "epub",
+        Some("html") | Some("htm") => "html",
+        Some("doc") => "doc",
+        Some("docx") => "docx",
+        _ => "unknown",
+    }
 }
 
 fn markdown_to_plain_text(input: &str) -> String {
@@ -223,11 +287,16 @@ fn is_pandoc_dual_source(path: &Path) -> bool {
             .and_then(|ext| ext.to_str())
             .map(|ext| ext.to_ascii_lowercase()),
         Some(ext)
-            if ext == "epub"
-                || ext == "html"
-                || ext == "htm"
-                || ext == "doc"
-                || ext == "docx"
+            if ext == "doc" || ext == "docx"
+    )
+}
+
+fn is_native_html_source(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase()),
+        Some(ext) if ext == "epub" || ext == "html" || ext == "htm"
     )
 }
 
@@ -266,6 +335,7 @@ fn load_pdf_with_quack_check(
         return Ok(SourceContent {
             tts_text,
             reading_markdown: None,
+            reading_html: None,
             has_structured_markdown: false,
         });
     }
@@ -299,6 +369,7 @@ fn load_pdf_with_quack_check(
     );
     Ok(SourceContent {
         tts_text,
+        reading_html: None,
         has_structured_markdown: reading_markdown.is_some(),
         reading_markdown,
     })
@@ -317,8 +388,53 @@ fn resolve_pdf_dual_view_content(transcript_text: &str, markdown: &str) -> Sourc
     };
     SourceContent {
         tts_text,
+        reading_html: None,
         has_structured_markdown: reading_markdown.is_some(),
         reading_markdown,
+    }
+}
+
+fn load_native_pretty_html(path: &Path, cancel: Option<&CancellationToken>) -> Result<String> {
+    if is_epub(path) {
+        return load_epub_native_html(path, cancel);
+    }
+    ensure_not_cancelled(cancel, "before_native_html_read")?;
+    let html = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read HTML source at {}", path.display()))?;
+    ensure_not_cancelled(cancel, "after_native_html_read")?;
+    if html.trim().is_empty() {
+        Ok("<p>No structured HTML content found in this file.</p>".to_string())
+    } else {
+        Ok(html)
+    }
+}
+
+fn load_epub_native_html(path: &Path, cancel: Option<&CancellationToken>) -> Result<String> {
+    ensure_not_cancelled(cancel, "before_epub_native_html_open")?;
+    let mut doc =
+        EpubDoc::new(path).with_context(|| format!("Failed to open EPUB at {}", path.display()))?;
+    let mut sections = Vec::new();
+    let mut chapter_idx = 0usize;
+    loop {
+        ensure_not_cancelled(cancel, "during_epub_native_html_loop")?;
+        let Some((chapter_html, _mime)) = doc.get_current_str() else {
+            break;
+        };
+        let trimmed = chapter_html.trim();
+        if !trimmed.is_empty() {
+            sections.push(format!(
+                "<section data-ll-epub-chapter=\"{chapter_idx}\">{trimmed}</section>"
+            ));
+            chapter_idx = chapter_idx.saturating_add(1);
+        }
+        if !doc.go_next() {
+            break;
+        }
+    }
+    if sections.is_empty() {
+        Ok("<p>No structured HTML content found in this EPUB.</p>".to_string())
+    } else {
+        Ok(sections.join("\n"))
     }
 }
 
@@ -479,12 +595,35 @@ fn ensure_not_cancelled(cancel: Option<&CancellationToken>, stage: &'static str)
 }
 
 fn collect_images(path: &Path) -> Result<Vec<BookImage>> {
+    let start = Instant::now();
     if is_markdown(path) {
-        return collect_markdown_images(path);
+        let images = collect_markdown_images(path)?;
+        info!(
+            path = %path.display(),
+            source_type = "markdown",
+            image_count = images.len(),
+            elapsed_ms = start.elapsed().as_millis(),
+            "Image extraction completed"
+        );
+        return Ok(images);
     }
     if is_epub(path) {
-        return collect_epub_images(path);
+        let images = collect_epub_images(path)?;
+        info!(
+            path = %path.display(),
+            source_type = "epub",
+            image_count = images.len(),
+            elapsed_ms = start.elapsed().as_millis(),
+            "Image extraction completed"
+        );
+        return Ok(images);
     }
+    info!(
+        path = %path.display(),
+        source_type = source_type_label(path),
+        elapsed_ms = start.elapsed().as_millis(),
+        "Image extraction skipped for source type"
+    );
     Ok(Vec::new())
 }
 

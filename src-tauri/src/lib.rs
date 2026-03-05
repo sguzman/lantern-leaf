@@ -732,6 +732,7 @@ pub fn export_ts_bindings(out_dir: &Path) -> Result<(), String> {
     export_single_type::<session::ReaderSettingsPatch>(out_dir)?;
     export_single_type::<session::ReaderStats>(out_dir)?;
     export_single_type::<session::ReaderSnapshot>(out_dir)?;
+    export_single_type::<session::PrettyKind>(out_dir)?;
     export_single_type::<session::TtsPlaybackState>(out_dir)?;
     export_single_type::<config::ThemeMode>(out_dir)?;
     export_single_type::<config::FontFamily>(out_dir)?;
@@ -759,6 +760,7 @@ export type { ReaderTtsView } from "./ReaderTtsView";
 export type { ReaderSettingsPatch } from "./ReaderSettingsPatch";
 export type { ReaderStats } from "./ReaderStats";
 export type { ReaderSnapshot } from "./ReaderSnapshot";
+export type { PrettyKind } from "./PrettyKind";
 export type { TtsPlaybackState } from "./TtsPlaybackState";
 export type { ThemeMode } from "./ThemeMode";
 export type { FontFamily } from "./FontFamily";
@@ -3037,9 +3039,11 @@ mod tests {
                 total_pages: 1,
                 text_only_mode: false,
                 has_structured_markdown: false,
+                pretty_kind: session::PrettyKind::None,
                 images: Vec::new(),
                 tts_text_page: "hello".to_string(),
                 reading_markdown_page: None,
+                reading_html_page: None,
                 page_text: "hello".to_string(),
                 sentences: vec!["hello".to_string()],
                 sentence_anchor_map: vec![Some(0)],
