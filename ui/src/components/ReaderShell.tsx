@@ -910,6 +910,29 @@ export const ReaderShell = memo(function ReaderShell({
 
   const searchMatchSet = useMemo(() => new Set(reader.search_matches), [reader.search_matches]);
 
+  const resolvePrettyAnchorIdx = useCallback(
+    (idx: number): number | null => {
+      const anchors = reader.sentence_anchor_map;
+      let anchorIdx = anchors[idx] ?? null;
+      if (anchorIdx === null || anchorIdx === undefined) {
+        for (let offset = 1; offset < anchors.length; offset += 1) {
+          const prev = idx - offset;
+          const next = idx + offset;
+          if (prev >= 0 && anchors[prev] !== null && anchors[prev] !== undefined) {
+            anchorIdx = anchors[prev];
+            break;
+          }
+          if (next < anchors.length && anchors[next] !== null && anchors[next] !== undefined) {
+            anchorIdx = anchors[next];
+            break;
+          }
+        }
+      }
+      return anchorIdx ?? null;
+    },
+    [reader.sentence_anchor_map]
+  );
+
   const alignHighlightedSentence = useCallback(
     (behavior: ScrollBehavior, force = false) => {
       const idx = reader.highlighted_sentence_idx;
@@ -924,22 +947,7 @@ export const ReaderShell = memo(function ReaderShell({
         return;
       }
       if (!reader.text_only_mode && reader.pretty_kind === "markdown" && reader.reading_markdown_page) {
-        const anchors = reader.sentence_anchor_map;
-        let anchorIdx = anchors[idx] ?? null;
-        if (anchorIdx === null || anchorIdx === undefined) {
-          for (let offset = 1; offset < anchors.length; offset += 1) {
-            const prev = idx - offset;
-            const next = idx + offset;
-            if (prev >= 0 && anchors[prev] !== null && anchors[prev] !== undefined) {
-              anchorIdx = anchors[prev];
-              break;
-            }
-            if (next < anchors.length && anchors[next] !== null && anchors[next] !== undefined) {
-              anchorIdx = anchors[next];
-              break;
-            }
-          }
-        }
+        const anchorIdx = resolvePrettyAnchorIdx(idx);
         if (anchorIdx !== null && anchorIdx !== undefined) {
           const anchor = container.querySelector(
             `[data-ll-md-anchor="${anchorIdx}"]`
@@ -956,22 +964,7 @@ export const ReaderShell = memo(function ReaderShell({
         }
       }
       if (!reader.text_only_mode && reader.pretty_kind === "html" && reader.reading_html_page) {
-        const anchors = reader.sentence_anchor_map;
-        let anchorIdx = anchors[idx] ?? null;
-        if (anchorIdx === null || anchorIdx === undefined) {
-          for (let offset = 1; offset < anchors.length; offset += 1) {
-            const prev = idx - offset;
-            const next = idx + offset;
-            if (prev >= 0 && anchors[prev] !== null && anchors[prev] !== undefined) {
-              anchorIdx = anchors[prev];
-              break;
-            }
-            if (next < anchors.length && anchors[next] !== null && anchors[next] !== undefined) {
-              anchorIdx = anchors[next];
-              break;
-            }
-          }
-        }
+        const anchorIdx = resolvePrettyAnchorIdx(idx);
         if (anchorIdx !== null && anchorIdx !== undefined) {
           const anchor = container.querySelector(
             `[data-ll-html-anchor="${anchorIdx}"]`
@@ -1003,7 +996,7 @@ export const ReaderShell = memo(function ReaderShell({
       reader.settings.auto_scroll_tts,
       reader.settings.center_spoken_sentence,
       reader.pretty_kind,
-      reader.sentence_anchor_map,
+      resolvePrettyAnchorIdx,
       reader.reading_markdown_page,
       reader.reading_html_page,
       reader.sentences.length,
@@ -1114,6 +1107,37 @@ export const ReaderShell = memo(function ReaderShell({
     reader.settings.margin_vertical,
     reader.settings.word_spacing,
     reader.settings.letter_spacing
+  ]);
+
+  useEffect(() => {
+    if (reader.text_only_mode) {
+      return;
+    }
+    const idx = reader.highlighted_sentence_idx;
+    const container = sentenceScrollRef.current;
+    if (idx === null || idx === undefined || !container) {
+      return;
+    }
+    container.querySelectorAll(".reader-pretty-highlight").forEach((node) => {
+      node.classList.remove("reader-pretty-highlight");
+    });
+    const anchorIdx = resolvePrettyAnchorIdx(idx);
+    if (anchorIdx === null || anchorIdx === undefined) {
+      return;
+    }
+    const selector =
+      reader.pretty_kind === "html"
+        ? `[data-ll-html-anchor="${anchorIdx}"]`
+        : `[data-ll-md-anchor="${anchorIdx}"]`;
+    const target = container.querySelector(selector) as HTMLElement | null;
+    if (target) {
+      target.classList.add("reader-pretty-highlight");
+    }
+  }, [
+    reader.highlighted_sentence_idx,
+    reader.pretty_kind,
+    reader.text_only_mode,
+    resolvePrettyAnchorIdx
   ]);
 
   const panelTitle = useMemo(() => {
@@ -1280,11 +1304,14 @@ export const ReaderShell = memo(function ReaderShell({
     reader.settings.theme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />;
 
   useEffect(() => {
+    if (!reader.panels.show_stats) {
+      return;
+    }
     const tick = window.setInterval(() => {
       setSessionNowMs(Date.now());
     }, 1000);
     return () => window.clearInterval(tick);
-  }, []);
+  }, [reader.panels.show_stats]);
 
   useEffect(() => {
     const now = Date.now();

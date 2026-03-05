@@ -1142,7 +1142,10 @@ impl ReaderSession {
         if sentence_count == 0 {
             return Vec::new();
         }
-        if let Some(cached) = crate::cache::load_sentence_anchor_map(&self.source_path, page_idx)
+        let has_native_html = self.config.native_html_pretty_enabled && self.reading_html.is_some();
+        if !has_native_html
+            && let Some(cached) =
+                crate::cache::load_sentence_anchor_map(&self.source_path, page_idx)
             && cached.len() == sentence_count
         {
             return cached;
@@ -1169,7 +1172,12 @@ impl ReaderSession {
                     source = "html",
                     "Built sentence-anchor map from HTML anchors"
                 );
-                return proportional_anchor_map(sentence_count, anchor_count);
+                return proportional_html_anchor_map(
+                    &self.page_sentence_counts,
+                    page_idx,
+                    sentence_count,
+                    anchor_count,
+                );
             }
             tracing::debug!(
                 path = %self.source_path.display(),
@@ -1626,6 +1634,32 @@ fn proportional_anchor_map(sentence_count: usize, anchor_count: usize) -> Vec<Op
         .collect()
 }
 
+fn proportional_html_anchor_map(
+    page_sentence_counts: &[usize],
+    page_idx: usize,
+    sentence_count: usize,
+    anchor_count: usize,
+) -> Vec<Option<usize>> {
+    if sentence_count == 0 {
+        return Vec::new();
+    }
+    if anchor_count == 0 {
+        return (0..sentence_count).map(Some).collect();
+    }
+    let total_sentences: usize = page_sentence_counts.iter().sum();
+    if total_sentences == 0 {
+        return proportional_anchor_map(sentence_count, anchor_count);
+    }
+    let global_page_start: usize = page_sentence_counts.iter().take(page_idx).sum();
+    (0..sentence_count)
+        .map(|local_idx| {
+            let global_idx = global_page_start.saturating_add(local_idx);
+            let mapped = (global_idx.saturating_mul(anchor_count)) / total_sentences;
+            Some(mapped.min(anchor_count.saturating_sub(1)))
+        })
+        .collect()
+}
+
 pub fn load_session_for_source(
     source_path: PathBuf,
     base_config: &config::AppConfig,
@@ -1964,6 +1998,17 @@ mod tests {
     fn proportional_anchor_map_spreads_sentences_across_anchors() {
         let map = proportional_anchor_map(5, 3);
         assert_eq!(map, vec![Some(0), Some(0), Some(1), Some(1), Some(2)]);
+    }
+
+    #[test]
+    fn proportional_html_anchor_map_uses_global_sentence_position() {
+        let page_sentence_counts = vec![2, 2, 2];
+        let page1 = proportional_html_anchor_map(&page_sentence_counts, 0, 2, 6);
+        let page2 = proportional_html_anchor_map(&page_sentence_counts, 1, 2, 6);
+        let page3 = proportional_html_anchor_map(&page_sentence_counts, 2, 2, 6);
+        assert_eq!(page1, vec![Some(0), Some(1)]);
+        assert_eq!(page2, vec![Some(2), Some(3)]);
+        assert_eq!(page3, vec![Some(4), Some(5)]);
     }
 
     #[test]

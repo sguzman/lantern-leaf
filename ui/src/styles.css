@@ -79,6 +79,13 @@ body {
   height: auto;
 }
 
+.reader-native-html-content .reader-pretty-highlight,
+.reader-markdown-content .reader-pretty-highlight {
+  background: var(--reader-highlight-bg);
+  outline: 1px solid var(--reader-highlight-border);
+  border-radius: 0.2rem;
+}
+
 .reader-md-missing-image {
   color: #9a3412;
   font-style: italic;

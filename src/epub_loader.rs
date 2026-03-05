@@ -721,6 +721,8 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
 
     let mut extracted = Vec::new();
     let mut seen = HashSet::new();
+    let mut image_by_hash: std::collections::HashMap<String, ExtractedImage> =
+        std::collections::HashMap::new();
     let mut path_lookup: std::collections::HashMap<String, ExtractedImage> =
         std::collections::HashMap::new();
     let mut basename_lookup: std::collections::HashMap<String, ExtractedImage> =
@@ -732,40 +734,46 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
         };
 
         let image_hash = short_hash(&bytes);
-        if !seen.insert(image_hash.clone()) {
+        let image = if seen.insert(image_hash.clone()) {
+            let extension = resource_path
+                .extension()
+                .and_then(|s| s.to_str())
+                .filter(|ext| !ext.is_empty())
+                .map(|ext| ext.to_ascii_lowercase())
+                .or_else(|| extension_from_mime(&mime).map(str::to_string))
+                .unwrap_or_else(|| "img".to_string());
+            let source_name = resource_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(sanitize_file_component)
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "image".to_string());
+            let file_name = format!("img-{idx:04}-{image_hash}-{source_name}.{extension}");
+            let output = image_dir.join(file_name);
+
+            if !output.exists() {
+                fs::write(&output, &bytes).with_context(|| {
+                    format!("Failed to write extracted image {}", output.display())
+                })?;
+            }
+
+            let label = resource_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("image")
+                .to_string();
+
+            let extracted_image = ExtractedImage {
+                output: output.clone(),
+                label: label.clone(),
+            };
+            image_by_hash.insert(image_hash.clone(), extracted_image.clone());
+            extracted.push(extracted_image.clone());
+            extracted_image
+        } else if let Some(existing) = image_by_hash.get(&image_hash).cloned() {
+            existing
+        } else {
             continue;
-        }
-
-        let extension = resource_path
-            .extension()
-            .and_then(|s| s.to_str())
-            .filter(|ext| !ext.is_empty())
-            .map(|ext| ext.to_ascii_lowercase())
-            .or_else(|| extension_from_mime(&mime).map(str::to_string))
-            .unwrap_or_else(|| "img".to_string());
-        let source_name = resource_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(sanitize_file_component)
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "image".to_string());
-        let file_name = format!("img-{idx:04}-{image_hash}-{source_name}.{extension}");
-        let output = image_dir.join(file_name);
-
-        if !output.exists() {
-            fs::write(&output, &bytes)
-                .with_context(|| format!("Failed to write extracted image {}", output.display()))?;
-        }
-
-        let label = resource_path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("image")
-            .to_string();
-
-        let image = ExtractedImage {
-            output: output.clone(),
-            label: label.clone(),
         };
 
         let normalized_key = normalize_epub_path_key(resource_path.to_string_lossy().as_ref());
@@ -776,8 +784,6 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
                 .entry(base_key)
                 .or_insert_with(|| image.clone());
         }
-
-        extracted.push(image);
     }
 
     if extracted.is_empty() {
