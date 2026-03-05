@@ -19,13 +19,14 @@ import {
   TextField,
   Typography
 } from "@mui/material";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   computeVirtualWindow,
   filterAndSortCalibreBooks,
   type CalibreSort
 } from "./calibreList";
+import { backendApi } from "../api/tauri";
 import type {
   BootstrapState,
   CalibreBook,
@@ -110,6 +111,9 @@ export function StarterShell({
   const [recentsScrollTop, setRecentsScrollTop] = useState(0);
   const [calibreScrollTop, setCalibreScrollTop] = useState(0);
   const [logLevelValue, setLogLevelValue] = useState(runtimeLogLevel);
+  const [calibreThumbOverrides, setCalibreThumbOverrides] = useState<Record<number, string>>({});
+  const calibreThumbInFlightRef = useRef<Set<number>>(new Set());
+  const calibreThumbFailedRef = useRef<Set<number>>(new Set());
 
   const recentsRowHeight = 132;
   const recentsOverscan = 8;
@@ -199,6 +203,64 @@ export function StarterShell({
   useEffect(() => {
     setLogLevelValue(runtimeLogLevel);
   }, [runtimeLogLevel]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const candidates = virtualWindow.items.filter((book) => {
+      if (book.cover_thumbnail) {
+        return false;
+      }
+      if (calibreThumbOverrides[book.id]) {
+        return false;
+      }
+      if (calibreThumbInFlightRef.current.has(book.id)) {
+        return false;
+      }
+      if (calibreThumbFailedRef.current.has(book.id)) {
+        return false;
+      }
+      return true;
+    });
+    if (candidates.length === 0) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const run = async (): Promise<void> => {
+      for (const book of candidates.slice(0, 18)) {
+        calibreThumbInFlightRef.current.add(book.id);
+        try {
+          const thumbnail = await backendApi.calibreEnsureThumbnail(book.id);
+          if (!thumbnail) {
+            calibreThumbFailedRef.current.add(book.id);
+            continue;
+          }
+          if (cancelled) {
+            continue;
+          }
+          setCalibreThumbOverrides((current) => {
+            if (current[book.id] === thumbnail) {
+              return current;
+            }
+            return {
+              ...current,
+              [book.id]: thumbnail
+            };
+          });
+        } catch {
+          calibreThumbFailedRef.current.add(book.id);
+        } finally {
+          calibreThumbInFlightRef.current.delete(book.id);
+        }
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [calibreThumbOverrides, virtualWindow.items]);
 
   const handleOpenPath = async () => {
     await onOpenPath(path);
@@ -614,7 +676,9 @@ export function StarterShell({
                       <div style={{ height: virtualWindow.topSpacerPx }} />
                     ) : null}
                     {virtualWindow.items.map((book) => {
-                      const calibreThumbnailSrc = toThumbnailSrc(book.cover_thumbnail);
+                      const calibreThumbnailSrc = toThumbnailSrc(
+                        calibreThumbOverrides[book.id] ?? book.cover_thumbnail
+                      );
                       return (
                       <div key={book.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
                         <div className="flex min-w-0 items-center gap-2.5">

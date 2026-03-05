@@ -268,9 +268,33 @@ function imageBaseName(raw: string): string {
   return parts[parts.length - 1] ?? normalized;
 }
 
+function parseReferenceDefinitions(markdown: string): {
+  body: string;
+  refs: Map<string, string>;
+} {
+  const refs = new Map<string, string>();
+  const kept: string[] = [];
+  const lines = markdown.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  for (const line of lines) {
+    const match = line.match(/^\s*\[([^\]]+)\]:\s*(\S+)(?:\s+["'(].*["')])?\s*$/);
+    if (!match) {
+      kept.push(line);
+      continue;
+    }
+    const key = match[1].trim().toLowerCase();
+    const target = String(match[2] ?? "").trim().replace(/^<|>$/g, "");
+    if (key && target) {
+      refs.set(key, target);
+    }
+  }
+  return { body: kept.join("\n"), refs };
+}
+
 function renderInlineMarkdown(
   raw: string,
-  resolveImageTarget: (target: string) => string | null
+  refs: Map<string, string>,
+  resolveImageTarget: (target: string) => string | null,
+  resolveLinkTarget: (target: string) => string | null
 ): string {
   let html = escapeHtml(raw);
   html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_match, alt, target) => {
@@ -280,10 +304,39 @@ function renderInlineMarkdown(
     }
     return `<img src="${escapeHtml(resolved)}" alt="${escapeHtml(String(alt ?? "").trim())}" loading="lazy" />`;
   });
+  html = html.replace(/!\[([^\]]*)\]\[([^\]]*)\]/g, (_match, alt, ref) => {
+    const key = String(ref ?? "").trim().toLowerCase() || String(alt ?? "").trim().toLowerCase();
+    const target = refs.get(key);
+    const resolved = target ? resolveImageTarget(target) : null;
+    if (!resolved) {
+      return `<span class="reader-md-missing-image">[image: ${escapeHtml(String(alt ?? "").trim() || "missing")}]</span>`;
+    }
+    return `<img src="${escapeHtml(resolved)}" alt="${escapeHtml(String(alt ?? "").trim())}" loading="lazy" />`;
+  });
   html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
   html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, text, target) => {
+    const resolved = resolveLinkTarget(String(target ?? ""));
+    if (!resolved) {
+      return escapeHtml(String(text ?? ""));
+    }
+    return `<a href="${escapeHtml(resolved)}" target="_blank" rel="noreferrer">${escapeHtml(
+      String(text ?? "")
+    )}</a>`;
+  });
+  html = html.replace(/\[([^\]]+)\]\[([^\]]*)\]/g, (_match, text, ref) => {
+    const rawText = String(text ?? "");
+    const key = String(ref ?? "").trim().toLowerCase() || rawText.trim().toLowerCase();
+    const target = refs.get(key);
+    const resolved = target ? resolveLinkTarget(target) : null;
+    if (!resolved) {
+      return escapeHtml(rawText);
+    }
+    return `<a href="${escapeHtml(resolved)}" target="_blank" rel="noreferrer">${escapeHtml(
+      rawText
+    )}</a>`;
+  });
   return html;
 }
 
@@ -291,7 +344,8 @@ function renderMarkdownToHtml(
   markdown: string,
   imageCandidates: Array<{ rawPath: string; src: string }>
 ): string {
-  const lines = markdown.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const { body, refs } = parseReferenceDefinitions(markdown);
+  const lines = body.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   const out: string[] = [];
   let listBuffer: string[] = [];
   let anchorIndex = 0;
@@ -332,6 +386,22 @@ function renderMarkdownToHtml(
     }
     return null;
   };
+  const resolveLinkTarget = (target: string): string | null => {
+    const raw = String(target ?? "").trim().replace(/^<|>$/g, "");
+    if (!raw) {
+      return null;
+    }
+    if (
+      raw.startsWith("http://") ||
+      raw.startsWith("https://") ||
+      raw.startsWith("data:") ||
+      raw.startsWith("asset:") ||
+      raw.startsWith("#")
+    ) {
+      return raw;
+    }
+    return resolveImageTarget(raw) ?? raw;
+  };
 
   const nextAnchor = (): string => {
     const current = anchorIndex;
@@ -359,7 +429,9 @@ function renderMarkdownToHtml(
       out.push(
         `<h1${nextAnchor()}>${renderInlineMarkdown(
           trimmed.slice(2).trim(),
-          resolveImageTarget
+          refs,
+          resolveImageTarget,
+          resolveLinkTarget
         )}</h1>`
       );
       continue;
@@ -369,7 +441,9 @@ function renderMarkdownToHtml(
       out.push(
         `<h2${nextAnchor()}>${renderInlineMarkdown(
           trimmed.slice(3).trim(),
-          resolveImageTarget
+          refs,
+          resolveImageTarget,
+          resolveLinkTarget
         )}</h2>`
       );
       continue;
@@ -379,7 +453,9 @@ function renderMarkdownToHtml(
       out.push(
         `<h3${nextAnchor()}>${renderInlineMarkdown(
           trimmed.slice(4).trim(),
-          resolveImageTarget
+          refs,
+          resolveImageTarget,
+          resolveLinkTarget
         )}</h3>`
       );
       continue;
@@ -388,13 +464,22 @@ function renderMarkdownToHtml(
       listBuffer.push(
         `<li${nextAnchor()}>${renderInlineMarkdown(
           trimmed.slice(2).trim(),
-          resolveImageTarget
+          refs,
+          resolveImageTarget,
+          resolveLinkTarget
         )}</li>`
       );
       continue;
     }
     flushList();
-    out.push(`<p${nextAnchor()}>${renderInlineMarkdown(trimmed, resolveImageTarget)}</p>`);
+    out.push(
+      `<p${nextAnchor()}>${renderInlineMarkdown(
+        trimmed,
+        refs,
+        resolveImageTarget,
+        resolveLinkTarget
+      )}</p>`
+    );
   }
 
   flushList();

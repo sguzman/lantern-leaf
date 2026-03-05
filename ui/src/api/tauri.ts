@@ -460,6 +460,10 @@ async function mockCalibreOpenBook(): Promise<OpenSourceResult> {
   return mockOpenWithPath(".cache/calibre-downloads/mock.epub");
 }
 
+async function mockCalibreEnsureThumbnail(): Promise<string | null> {
+  return null;
+}
+
 async function mockPanelToggleSettings(): Promise<SessionState> {
   mockState.session.panels.show_settings = !mockState.session.panels.show_settings;
   if (mockState.session.panels.show_settings) {
@@ -618,6 +622,7 @@ export interface BackendApi {
   calibreLoadCachedBooks: () => Promise<CalibreBook[]>;
   calibreLoadBooks: (forceRefresh?: boolean) => Promise<CalibreBook[]>;
   calibreOpenBook: (bookId: number) => Promise<OpenSourceResult>;
+  calibreEnsureThumbnail: (bookId: number) => Promise<string | null>;
   onSourceOpen: (handler: (event: SourceOpenEvent) => void) => Promise<UnlistenFn>;
   onCalibreLoad: (handler: (event: CalibreLoadEvent) => void) => Promise<UnlistenFn>;
   onSessionState: (handler: (event: SessionStateEvent) => void) => Promise<UnlistenFn>;
@@ -673,6 +678,8 @@ function createTauriBackendApi(): BackendApi {
     calibreLoadBooks: (forceRefresh) =>
       invokeCommand<CalibreBook[]>("calibre_load_books", { forceRefresh }),
     calibreOpenBook: (bookId) => invokeCommand<OpenSourceResult>("calibre_open_book", { bookId }),
+    calibreEnsureThumbnail: (bookId) =>
+      invokeCommand<string | null>("calibre_ensure_thumbnail", { bookId }),
     onSourceOpen: async (handler) => {
       return listen<SourceOpenEvent>("source-open", (event) => handler(event.payload));
     },
@@ -738,6 +745,7 @@ function createMockBackendApi(): BackendApi {
     calibreLoadCachedBooks: mockCalibreLoadBooks,
     calibreLoadBooks: mockCalibreLoadBooks,
     calibreOpenBook: mockCalibreOpenBook,
+    calibreEnsureThumbnail: mockCalibreEnsureThumbnail,
     onSourceOpen: mockOnSourceOpen,
     onCalibreLoad: mockOnCalibreLoad,
     onSessionState: mockOnSessionState,

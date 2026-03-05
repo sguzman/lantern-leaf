@@ -2590,6 +2590,59 @@ async fn calibre_open_book(
     open_resolved_source(&app, &state, path).await
 }
 
+#[tauri::command]
+async fn calibre_ensure_thumbnail(
+    state: State<'_, Mutex<BackendState>>,
+    book_id: u64,
+) -> Result<Option<String>, BridgeError> {
+    let (calibre_config, mut book) = {
+        let guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        let book = guard
+            .calibre_books
+            .iter()
+            .find(|book| book.id == book_id)
+            .cloned()
+            .ok_or_else(|| {
+                bridge_error("not_found", format!("Unknown calibre book id={book_id}"))
+            })?;
+        (guard.calibre_config.clone(), book)
+    };
+
+    let thumbnail_path = tauri::async_runtime::spawn_blocking(move || {
+        let _ = calibre::ensure_thumbnail_for_book(&calibre_config, &mut book, true);
+        book.cover_thumbnail
+    })
+    .await
+    .map_err(|err| {
+        bridge_error(
+            "task_join_error",
+            format!("Failed to join calibre-thumbnail task: {err}"),
+        )
+    })?;
+
+    let mut guard = state
+        .lock()
+        .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+    if let Some(cached_book) = guard
+        .calibre_books
+        .iter_mut()
+        .find(|book| book.id == book_id)
+    {
+        cached_book.cover_thumbnail = thumbnail_path.clone();
+    }
+    let data_url = thumbnail_path
+        .as_deref()
+        .and_then(thumbnail_path_to_data_url);
+    info!(
+        book_id,
+        has_thumbnail = data_url.is_some(),
+        "Ensured calibre thumbnail on demand"
+    );
+    Ok(data_url)
+}
+
 #[cfg(target_os = "linux")]
 fn configure_linux_display_backend() {
     let wayland_display = std::env::var("WAYLAND_DISPLAY").ok();
@@ -2698,7 +2751,8 @@ macro_rules! bridge_command_idents {
             logging_set_level,
             calibre_load_cached_books,
             calibre_load_books,
-            calibre_open_book
+            calibre_open_book,
+            calibre_ensure_thumbnail
         )
     };
 }
@@ -2812,11 +2866,11 @@ mod tests {
 
     #[test]
     fn bridge_command_surface_remains_stable() {
-        assert_eq!(BRIDGE_COMMAND_NAMES.len(), 39);
+        assert_eq!(BRIDGE_COMMAND_NAMES.len(), 40);
         assert_eq!(BRIDGE_COMMAND_NAMES[0], "session_get_bootstrap");
         assert_eq!(
             BRIDGE_COMMAND_NAMES[BRIDGE_COMMAND_NAMES.len() - 1],
-            "calibre_open_book"
+            "calibre_ensure_thumbnail"
         );
         assert!(BRIDGE_COMMAND_NAMES.contains(&"source_open_path"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"session_toggle_theme"));
@@ -2825,6 +2879,7 @@ mod tests {
         assert!(BRIDGE_COMMAND_NAMES.contains(&"reader_tts_play"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"reader_tts_repeat_sentence"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"reader_tts_precompute_page"));
+        assert!(BRIDGE_COMMAND_NAMES.contains(&"calibre_open_book"));
     }
 
     #[test]

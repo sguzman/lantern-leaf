@@ -460,6 +460,27 @@ pub fn materialize_book_path(config: &CalibreConfig, book: &CalibreBook) -> Resu
     ))
 }
 
+pub fn ensure_thumbnail_for_book(
+    config: &CalibreConfig,
+    book: &mut CalibreBook,
+    allow_remote_fetch: bool,
+) -> bool {
+    let before = book.cover_thumbnail.clone();
+    let deadline = Instant::now() + THUMB_FETCH_TIMEOUT.saturating_mul(6);
+    let next = ensure_book_thumbnail(
+        config,
+        book.id,
+        book.path.as_deref(),
+        deadline,
+        allow_remote_fetch,
+    );
+    if next != before {
+        book.cover_thumbnail = next;
+        return true;
+    }
+    false
+}
+
 fn fetch_books(
     config: &CalibreConfig,
     cancel: Option<&CancellationToken>,

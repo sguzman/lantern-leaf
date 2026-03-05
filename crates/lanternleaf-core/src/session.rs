@@ -237,7 +237,6 @@ pub struct ReaderSession {
 #[derive(Debug, Clone)]
 struct SessionImage {
     path: String,
-    char_offset: usize,
 }
 
 struct MappingTelemetry {
@@ -311,7 +310,6 @@ impl ReaderSession {
                     let path = fs::canonicalize(&image.path).unwrap_or(image.path);
                     SessionImage {
                         path: path.to_string_lossy().to_string(),
-                        char_offset: image.char_offset,
                     }
                 })
                 .collect(),
@@ -1061,34 +1059,12 @@ impl ReaderSession {
     }
 
     fn current_page_images(&self) -> Vec<String> {
-        if self.images.is_empty() || self.pages.is_empty() {
+        if self.images.is_empty() {
             return Vec::new();
         }
-
-        let mut page_start = 0usize;
-        for idx in 0..self.current_page {
-            page_start =
-                page_start.saturating_add(self.pages.get(idx).map(|p| p.len()).unwrap_or(0));
-        }
-        let page_len = self
-            .pages
-            .get(self.current_page)
-            .map(|page| page.len())
-            .unwrap_or(0);
-        let page_end = page_start.saturating_add(page_len);
-        let is_last_page = self.current_page + 1 >= self.pages.len();
-
-        self.images
-            .iter()
-            .filter(|image| {
-                if is_last_page {
-                    image.char_offset >= page_start && image.char_offset <= page_end
-                } else {
-                    image.char_offset >= page_start && image.char_offset < page_end
-                }
-            })
-            .map(|image| image.path.clone())
-            .collect()
+        // Expose all extracted images so pretty view can resolve markdown/image
+        // references even when page char-offset mapping is imperfect.
+        self.images.iter().map(|image| image.path.clone()).collect()
     }
 
     fn tts_view(
