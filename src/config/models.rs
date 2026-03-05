@@ -120,8 +120,8 @@ impl Default for AppConfig {
             show_tts: crate::config::defaults::default_show_tts(),
             show_settings: crate::config::defaults::default_show_settings(),
             show_stats: crate::config::defaults::default_show_stats(),
-            dual_view_pipeline_enabled:
-                crate::config::defaults::default_dual_view_pipeline_enabled(),
+            dual_view_pipeline_enabled: crate::config::defaults::default_dual_view_pipeline_enabled(
+            ),
             day_highlight: crate::config::defaults::default_day_highlight(),
             night_highlight: crate::config::defaults::default_night_highlight(),
             log_level: crate::config::defaults::default_log_level(),

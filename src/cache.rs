@@ -315,7 +315,9 @@ pub fn persist_dual_view_artifacts(
 
 pub fn persist_sentence_anchor_map(source_path: &Path, page: usize, anchors: &[Option<usize>]) {
     ensure_content_layout(source_path);
-    let map_dir = hash_dir(source_path).join("content").join("sentence-anchor-map");
+    let map_dir = hash_dir(source_path)
+        .join("content")
+        .join("sentence-anchor-map");
     if fs::create_dir_all(&map_dir).is_err() {
         return;
     }
@@ -713,16 +715,14 @@ fn infer_recent_snippet(source_path: &Path, display_title: &str) -> String {
 
 fn infer_clipboard_recent_title(source_path: &Path) -> Option<String> {
     let contents = fs::read_to_string(source_path).ok()?;
-    let first_non_empty_line = contents
-        .lines()
-        .find_map(|line| {
-            let compact = line.split_whitespace().collect::<Vec<_>>().join(" ");
-            if compact.is_empty() {
-                None
-            } else {
-                Some(compact)
-            }
-        })?;
+    let first_non_empty_line = contents.lines().find_map(|line| {
+        let compact = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        if compact.is_empty() {
+            None
+        } else {
+            Some(compact)
+        }
+    })?;
     const MAX_TITLE_CHARS: usize = 96;
     let char_count = first_non_empty_line.chars().count();
     if char_count <= MAX_TITLE_CHARS {
@@ -1098,7 +1098,11 @@ sentence_text = "legacy bookmark entry"
             fs::read_to_string(&tts_path).expect("read tts artifact"),
             "tts text payload"
         );
-        assert!(fs::read_to_string(&markdown_path).expect("read markdown artifact").contains("Heading"));
+        assert!(
+            fs::read_to_string(&markdown_path)
+                .expect("read markdown artifact")
+                .contains("Heading")
+        );
 
         let anchors = vec![Some(0), Some(1), None, Some(3)];
         persist_sentence_anchor_map(&source, 2, &anchors);

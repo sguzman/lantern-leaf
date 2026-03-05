@@ -16,8 +16,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::UNIX_EPOCH;
 use std::time::Instant;
+use std::time::UNIX_EPOCH;
 use tracing::{info, warn};
 
 static RE_MARKDOWN_IMAGE: Lazy<Regex> =
@@ -131,7 +131,7 @@ fn load_source_content(path: &Path, cancel: Option<&CancellationToken>) -> Resul
 
     if is_pandoc_dual_source(path) {
         let tts_text = load_with_pandoc(path, "plain", cancel)?;
-        let markdown = load_with_pandoc(path, "gfm", cancel)?;
+        let markdown = load_with_pandoc(path, "gfm-raw_html-raw_attribute", cancel)?;
         let reading_markdown = if markdown.trim().is_empty() {
             None
         } else {
@@ -240,7 +240,10 @@ fn is_pdf(path: &Path) -> bool {
     )
 }
 
-fn load_pdf_with_quack_check(path: &Path, cancel: Option<&CancellationToken>) -> Result<SourceContent> {
+fn load_pdf_with_quack_check(
+    path: &Path,
+    cancel: Option<&CancellationToken>,
+) -> Result<SourceContent> {
     let start = Instant::now();
     ensure_not_cancelled(cancel, "before_pdf_quack_check")?;
     let config_path = quack_check_config_path()?;
@@ -369,7 +372,11 @@ fn flush_pdf_paragraph(out: &mut String, paragraph: &mut String) {
     paragraph.clear();
 }
 
-fn load_with_pandoc(path: &Path, target: &str, cancel: Option<&CancellationToken>) -> Result<String> {
+fn load_with_pandoc(
+    path: &Path,
+    target: &str,
+    cancel: Option<&CancellationToken>,
+) -> Result<String> {
     let start = Instant::now();
     ensure_not_cancelled(cancel, "before_pandoc")?;
     info!(
@@ -884,12 +891,26 @@ fn try_read_pandoc_cache(
         return Ok(None);
     }
 
-    let text = fs::read_to_string(&text_path).with_context(|| {
-        format!(
-            "Failed to read pandoc cache text at {}",
-            text_path.display()
-        )
-    })?;
+    let text = match fs::read_to_string(&text_path) {
+        Ok(value) => value,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            info!(
+                path = %path.display(),
+                target,
+                cache_text_path = %text_path.display(),
+                "Pandoc cache metadata exists but text payload is missing; treating as cache miss"
+            );
+            return Ok(None);
+        }
+        Err(err) => {
+            return Err(err).with_context(|| {
+                format!(
+                    "Failed to read pandoc cache text at {}",
+                    text_path.display()
+                )
+            });
+        }
+    };
     Ok(Some(text))
 }
 
@@ -1132,7 +1153,8 @@ mod tests {
 
     #[test]
     fn resolve_pdf_content_marks_markdown_only_when_present() {
-        let structured = resolve_pdf_dual_view_content("Line one.\nLine two.", "# Heading\n\nLine one.");
+        let structured =
+            resolve_pdf_dual_view_content("Line one.\nLine two.", "# Heading\n\nLine one.");
         assert!(structured.has_structured_markdown);
         assert!(structured.reading_markdown.is_some());
         assert!(structured.tts_text.contains("Line one."));

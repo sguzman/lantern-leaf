@@ -622,8 +622,7 @@ mod tests {
 
     #[test]
     fn does_not_split_at_filename_extension_dot() {
-        let text =
-            "Open cat.txt and dog.html before reading book.epub or paper.pdf with notes.md. Next sentence.";
+        let text = "Open cat.txt and dog.html before reading book.epub or paper.pdf with notes.md. Next sentence.";
         let sentences = split_sentences(text);
         assert_eq!(sentences.len(), 2);
         assert!(sentences[0].contains("cat.txt"));

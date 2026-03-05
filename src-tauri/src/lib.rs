@@ -1883,10 +1883,17 @@ async fn source_open_clipboard(
 ) -> Result<OpenSourceResult, BridgeError> {
     info!("Opening source from system clipboard");
     let app_for_read = app.clone();
-    let text = tauri::async_runtime::spawn_blocking(move || read_clipboard_text_with_fallback(&app_for_read))
-        .await
-        .map_err(|err| bridge_error("clipboard_error", format!("Clipboard worker task failed: {err}")))?
-        .map_err(|err| bridge_error("clipboard_error", err))?;
+    let text = tauri::async_runtime::spawn_blocking(move || {
+        read_clipboard_text_with_fallback(&app_for_read)
+    })
+    .await
+    .map_err(|err| {
+        bridge_error(
+            "clipboard_error",
+            format!("Clipboard worker task failed: {err}"),
+        )
+    })?
+    .map_err(|err| bridge_error("clipboard_error", err))?;
     let trimmed = text.trim().to_string();
     if trimmed.is_empty() {
         warn!("Clipboard read succeeded but text was empty");
@@ -1900,7 +1907,10 @@ async fn source_open_clipboard(
 fn read_clipboard_text_with_fallback(app: &tauri::AppHandle) -> Result<String, String> {
     match app.clipboard().read_text() {
         Ok(text) => {
-            tracing::debug!(chars = text.chars().count(), "Read clipboard text via tauri plugin");
+            tracing::debug!(
+                chars = text.chars().count(),
+                "Read clipboard text via tauri plugin"
+            );
             Ok(text)
         }
         Err(primary_err) => {
@@ -1960,7 +1970,8 @@ fn run_clipboard_command(bin: &str, args: &[&str]) -> Result<Option<String>, Str
         }
         return Err(format!("exit status {} stderr='{stderr}'", output.status));
     }
-    let text = String::from_utf8(output.stdout).map_err(|err| format!("utf8 decode failed: {err}"))?;
+    let text =
+        String::from_utf8(output.stdout).map_err(|err| format!("utf8 decode failed: {err}"))?;
     let trimmed = text.trim().to_string();
     if trimmed.is_empty() {
         Ok(None)

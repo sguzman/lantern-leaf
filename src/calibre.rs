@@ -264,7 +264,25 @@ pub fn load_cached_books(config: &CalibreConfig) -> Result<Vec<CalibreBook>> {
     }
 
     let signature = cache_signature(config);
-    Ok(try_load_cache(config, &signature, false, false)?.unwrap_or_default())
+    let mut cached = match try_load_cache(config, &signature, false, false)? {
+        Some(books) => books,
+        None => return Ok(Vec::new()),
+    };
+    let changed = hydrate_book_thumbnails(
+        config,
+        &mut cached,
+        THUMB_PREFETCH_LIMIT,
+        THUMB_PREFETCH_BUDGET,
+        None,
+    );
+    if changed {
+        info!(
+            book_count = cached.len(),
+            "Cached calibre books gained thumbnail updates; rewriting cache"
+        );
+        let _ = write_cache(&signature, &cached);
+    }
+    Ok(cached)
 }
 
 pub fn load_books_with_cancel(
