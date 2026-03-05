@@ -15,7 +15,9 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::UNIX_EPOCH;
+use std::time::Instant;
 use tracing::{debug, info, warn};
 
 static RE_MARKDOWN_IMAGE: Lazy<Regex> =
@@ -29,6 +31,10 @@ const PANDOC_PIPELINE_REV: &str = "pandoc-clean-v1";
 const QUACK_CHECK_CONFIG_REL_PATH: &str = "conf/quack-check.toml";
 const QUACK_CHECK_PIPELINE_REV: &str = "quack-check-pdf-v2";
 const QUACK_CHECK_TEXT_FILENAME_DEFAULT: &str = "transcript.txt";
+const AVAILABILITY_LOG_EVERY: u64 = 20;
+
+static LOAD_COUNT_TOTAL: AtomicU64 = AtomicU64::new(0);
+static LOAD_COUNT_WITH_MARKDOWN: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
 pub struct BookImage {
@@ -55,8 +61,15 @@ pub fn load_book_content_with_cancel(
     path: &Path,
     cancel: Option<&CancellationToken>,
 ) -> Result<LoadedBook> {
+    let start = Instant::now();
     ensure_not_cancelled(cancel, "load_book_content_start")?;
     let content = load_source_content(path, cancel)?;
+    crate::cache::persist_dual_view_artifacts(
+        path,
+        &content.tts_text,
+        content.reading_markdown.as_deref(),
+    );
+    record_markdown_availability(path, content.has_structured_markdown);
     ensure_not_cancelled(cancel, "after_load_source_text")?;
     let images = match collect_images(path) {
         Ok(images) => images,
@@ -71,6 +84,7 @@ pub fn load_book_content_with_cancel(
         markdown_chars = content.reading_markdown.as_ref().map(|v| v.len()).unwrap_or(0),
         tts_chars = content.tts_text.len(),
         image_count = images.len(),
+        elapsed_ms = start.elapsed().as_millis(),
         "Source load complete"
     );
     Ok(LoadedBook {
@@ -89,6 +103,7 @@ struct SourceContent {
 }
 
 fn load_source_content(path: &Path, cancel: Option<&CancellationToken>) -> Result<SourceContent> {
+    let start = Instant::now();
     ensure_not_cancelled(cancel, "load_source_text_start")?;
     if is_text_file(path) {
         info!(path = %path.display(), "Loading plain text content");
@@ -133,11 +148,19 @@ fn load_source_content(path: &Path, cancel: Option<&CancellationToken>) -> Resul
                     None
                 }
             };
-            return Ok(SourceContent {
+            let result = SourceContent {
                 tts_text,
                 has_structured_markdown: reading_markdown.is_some(),
                 reading_markdown,
-            });
+            };
+            info!(
+                path = %path.display(),
+                stage = "pandoc_dual_convert",
+                elapsed_ms = start.elapsed().as_millis(),
+                has_structured_markdown = result.has_structured_markdown,
+                "Completed source conversion stage"
+            );
+            return Ok(result);
         }
         Err(err) => {
             warn!(
@@ -234,11 +257,19 @@ fn load_source_content(path: &Path, cancel: Option<&CancellationToken>) -> Resul
         markdown_chars = reading_markdown.as_ref().map(|v| v.len()).unwrap_or(0),
         "Finished loading EPUB content"
     );
-    Ok(SourceContent {
+    let result = SourceContent {
         tts_text,
         has_structured_markdown: reading_markdown.is_some(),
         reading_markdown,
-    })
+    };
+    info!(
+        path = %path.display(),
+        stage = "epub_fallback_convert",
+        elapsed_ms = start.elapsed().as_millis(),
+        has_structured_markdown = result.has_structured_markdown,
+        "Completed source conversion stage"
+    );
+    Ok(result)
 }
 
 fn markdown_to_plain_text(input: &str) -> String {
@@ -298,6 +329,7 @@ fn is_pdf(path: &Path) -> bool {
 }
 
 fn load_pdf_with_quack_check(path: &Path, cancel: Option<&CancellationToken>) -> Result<SourceContent> {
+    let start = Instant::now();
     ensure_not_cancelled(cancel, "before_pdf_quack_check")?;
     let config_path = quack_check_config_path()?;
     let config_sha256 = hash_file(&config_path).with_context(|| {
@@ -336,17 +368,9 @@ fn load_pdf_with_quack_check(path: &Path, cancel: Option<&CancellationToken>) ->
             path.display()
         )
     })?;
-    let tts_text = if run.text.trim().is_empty() {
-        "No textual content found in this file.".to_string()
-    } else {
-        normalize_pdf_text_for_reader(&run.text)
-    };
-    let reading_markdown = run
-        .markdown
-        .trim()
-        .is_empty()
-        .then(|| None)
-        .unwrap_or_else(|| Some(run.markdown));
+    let resolved = resolve_pdf_dual_view_content(&run.text, &run.markdown);
+    let tts_text = resolved.tts_text;
+    let reading_markdown = resolved.reading_markdown;
 
     write_pdf_cache(path, &signature, &tts_text)?;
     info!(
@@ -355,6 +379,7 @@ fn load_pdf_with_quack_check(path: &Path, cancel: Option<&CancellationToken>) ->
         markdown_chars = reading_markdown.as_ref().map(|v| v.len()).unwrap_or(0),
         job_id = %run.job_id,
         job_dir = %run.job_dir.display(),
+        elapsed_ms = start.elapsed().as_millis(),
         "Finished quack-check PDF transcription"
     );
     Ok(SourceContent {
@@ -362,6 +387,24 @@ fn load_pdf_with_quack_check(path: &Path, cancel: Option<&CancellationToken>) ->
         has_structured_markdown: reading_markdown.is_some(),
         reading_markdown,
     })
+}
+
+fn resolve_pdf_dual_view_content(transcript_text: &str, markdown: &str) -> SourceContent {
+    let tts_text = if transcript_text.trim().is_empty() {
+        "No textual content found in this file.".to_string()
+    } else {
+        normalize_pdf_text_for_reader(transcript_text)
+    };
+    let reading_markdown = if markdown.trim().is_empty() {
+        None
+    } else {
+        Some(markdown.to_string())
+    };
+    SourceContent {
+        tts_text,
+        has_structured_markdown: reading_markdown.is_some(),
+        reading_markdown,
+    }
 }
 
 fn normalize_pdf_text_for_reader(input: &str) -> String {
@@ -415,6 +458,7 @@ fn flush_pdf_paragraph(out: &mut String, paragraph: &mut String) {
 }
 
 fn load_with_pandoc(path: &Path, target: &str, cancel: Option<&CancellationToken>) -> Result<String> {
+    let start = Instant::now();
     ensure_not_cancelled(cancel, "before_pandoc")?;
     info!(
         path = %path.display(),
@@ -474,9 +518,38 @@ fn load_with_pandoc(path: &Path, target: &str, cancel: Option<&CancellationToken
         path = %path.display(),
         target,
         total_chars = text.len(),
+        elapsed_ms = start.elapsed().as_millis(),
         "Finished pandoc conversion"
     );
     Ok(text)
+}
+
+fn record_markdown_availability(path: &Path, has_structured_markdown: bool) {
+    let total = LOAD_COUNT_TOTAL.fetch_add(1, Ordering::Relaxed) + 1;
+    let with_markdown = if has_structured_markdown {
+        LOAD_COUNT_WITH_MARKDOWN.fetch_add(1, Ordering::Relaxed) + 1
+    } else {
+        LOAD_COUNT_WITH_MARKDOWN.load(Ordering::Relaxed)
+    };
+    if total % AVAILABILITY_LOG_EVERY == 0 {
+        let ext = path
+            .extension()
+            .and_then(|v| v.to_str())
+            .unwrap_or("<none>")
+            .to_ascii_lowercase();
+        let availability_pct = if total == 0 {
+            0.0
+        } else {
+            (with_markdown as f64 / total as f64) * 100.0
+        };
+        info!(
+            total_sources = total,
+            sources_with_markdown = with_markdown,
+            availability_pct = (availability_pct * 100.0).round() / 100.0,
+            latest_source_ext = %ext,
+            "Markdown availability summary"
+        );
+    }
 }
 
 fn ensure_not_cancelled(cancel: Option<&CancellationToken>, stage: &'static str) -> Result<()> {
@@ -1116,6 +1189,46 @@ mod tests {
         );
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn markdown_source_emits_markdown_and_tts_text() {
+        let path = unique_temp_file("markdown_contract", "md");
+        fs::write(&path, "# Title\n\nThis is **markdown** content.").expect("write md fixture");
+
+        let loaded = load_book_content(&path).expect("markdown should load");
+        assert!(loaded.has_structured_markdown);
+        assert!(loaded.reading_markdown.is_some());
+        assert!(loaded.tts_text.contains("Title"));
+        assert!(loaded.tts_text.contains("markdown"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn text_source_falls_back_without_markdown() {
+        let path = unique_temp_file("text_contract", "txt");
+        fs::write(&path, "plain text source").expect("write txt fixture");
+
+        let loaded = load_book_content(&path).expect("text should load");
+        assert!(!loaded.has_structured_markdown);
+        assert!(loaded.reading_markdown.is_none());
+        assert_eq!(loaded.tts_text, "plain text source");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn resolve_pdf_content_marks_markdown_only_when_present() {
+        let structured = resolve_pdf_dual_view_content("Line one.\nLine two.", "# Heading\n\nLine one.");
+        assert!(structured.has_structured_markdown);
+        assert!(structured.reading_markdown.is_some());
+        assert!(structured.tts_text.contains("Line one."));
+
+        let scan_fallback = resolve_pdf_dual_view_content("Scanned OCR text", "   ");
+        assert!(!scan_fallback.has_structured_markdown);
+        assert!(scan_fallback.reading_markdown.is_none());
+        assert!(scan_fallback.tts_text.contains("Scanned OCR text"));
     }
 
     #[test]

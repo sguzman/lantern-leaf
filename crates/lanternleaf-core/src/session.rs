@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::OnceLock;
 use ts_rs::TS;
 
 const BASE_WPM: f64 = 170.0;
@@ -218,6 +219,7 @@ pub struct ReaderSession {
     pages: Vec<String>,
     markdown_pages: Vec<String>,
     raw_page_sentences: Vec<Vec<String>>,
+    sentence_anchor_maps: Vec<Vec<Option<usize>>>,
     page_word_counts: Vec<usize>,
     page_sentence_counts: Vec<usize>,
     pub current_page: usize,
@@ -236,6 +238,20 @@ pub struct ReaderSession {
 struct SessionImage {
     path: String,
     char_offset: usize,
+}
+
+struct MappingTelemetry {
+    lookups: AtomicUsize,
+    fallbacks: AtomicUsize,
+}
+
+static MAPPING_TELEMETRY: OnceLock<MappingTelemetry> = OnceLock::new();
+
+fn mapping_telemetry() -> &'static MappingTelemetry {
+    MAPPING_TELEMETRY.get_or_init(|| MappingTelemetry {
+        lookups: AtomicUsize::new(0),
+        fallbacks: AtomicUsize::new(0),
+    })
 }
 
 impl ReaderSession {
@@ -273,12 +289,21 @@ impl ReaderSession {
             pagination::MAX_LINES_PER_PAGE,
         );
 
+        if !config.dual_view_pipeline_enabled {
+            tracing::warn!(
+                path = %source_path.display(),
+                "Config field dual_view_pipeline_enabled=false is deprecated; dual view pipeline is now always enabled"
+            );
+        }
+        let reading_markdown = loaded.reading_markdown;
+        let has_structured_markdown = loaded.has_structured_markdown;
+
         let mut session = Self {
             source_path,
             source_name,
             tts_text: loaded.tts_text,
-            reading_markdown: loaded.reading_markdown,
-            has_structured_markdown: loaded.has_structured_markdown,
+            reading_markdown,
+            has_structured_markdown,
             images: loaded
                 .images
                 .into_iter()
@@ -294,6 +319,7 @@ impl ReaderSession {
             pages: Vec::new(),
             markdown_pages: Vec::new(),
             raw_page_sentences: Vec::new(),
+            sentence_anchor_maps: Vec::new(),
             page_word_counts: Vec::new(),
             page_sentence_counts: Vec::new(),
             current_page: 0,
@@ -354,11 +380,7 @@ impl ReaderSession {
         normalizer: &normalizer::TextNormalizer,
     ) -> ReaderSnapshot {
         let sentences = self.current_sentences(normalizer);
-        let sentence_anchor_map = sentences
-            .iter()
-            .enumerate()
-            .map(|(idx, _)| Some(idx))
-            .collect();
+        let sentence_anchor_map = self.current_sentence_anchor_map();
         let highlighted_sentence_idx = self.current_highlight_idx();
         let stats = self.stats(normalizer);
         let tts = self.tts_view(normalizer, stats.tts_progress_pct);
@@ -763,6 +785,17 @@ impl ReaderSession {
             .iter()
             .map(|page| text_utils::split_sentences(page))
             .collect();
+        self.sentence_anchor_maps = self
+            .raw_page_sentences
+            .iter()
+            .enumerate()
+            .map(|(page_idx, sentences)| {
+                self.build_sentence_anchor_map_for_page(page_idx, sentences.len())
+            })
+            .collect();
+        for (page_idx, map) in self.sentence_anchor_maps.iter().enumerate() {
+            crate::cache::persist_sentence_anchor_map(&self.source_path, page_idx, map);
+        }
         self.page_word_counts = self
             .pages
             .iter()
@@ -894,8 +927,11 @@ impl ReaderSession {
         if plan.display_to_audio.is_empty() {
             return None;
         }
+        let telemetry = mapping_telemetry();
+        telemetry.lookups.fetch_add(1, Ordering::Relaxed);
         let clamped = display_idx.min(plan.display_to_audio.len().saturating_sub(1));
-        plan.display_to_audio
+        let mapped = plan
+            .display_to_audio
             .iter()
             .skip(clamped)
             .find_map(|mapped| *mapped)
@@ -905,7 +941,18 @@ impl ReaderSession {
                     .take(clamped + 1)
                     .rev()
                     .find_map(|mapped| *mapped)
-            })
+            });
+        if mapped.is_none() {
+            let fallback = telemetry.fallbacks.fetch_add(1, Ordering::Relaxed) + 1;
+            if fallback % 32 == 0 {
+                tracing::warn!(
+                    fallback_events = fallback,
+                    lookups = telemetry.lookups.load(Ordering::Relaxed),
+                    "Display->audio mapping fallback frequency is elevated"
+                );
+            }
+        }
+        mapped
     }
 
     fn map_audio_to_display_idx(
@@ -914,7 +961,20 @@ impl ReaderSession {
         audio_idx: usize,
     ) -> Option<usize> {
         let plan = self.ensure_current_plan(normalizer);
-        plan.audio_to_display.get(audio_idx).copied()
+        let telemetry = mapping_telemetry();
+        telemetry.lookups.fetch_add(1, Ordering::Relaxed);
+        let mapped = plan.audio_to_display.get(audio_idx).copied();
+        if mapped.is_none() {
+            let fallback = telemetry.fallbacks.fetch_add(1, Ordering::Relaxed) + 1;
+            if fallback % 32 == 0 {
+                tracing::warn!(
+                    fallback_events = fallback,
+                    lookups = telemetry.lookups.load(Ordering::Relaxed),
+                    "Audio->display mapping fallback frequency is elevated"
+                );
+            }
+        }
+        mapped
     }
 
     fn current_sentences(&mut self, normalizer: &normalizer::TextNormalizer) -> Vec<String> {
@@ -925,6 +985,62 @@ impl ReaderSession {
             .get(self.current_page)
             .cloned()
             .unwrap_or_default()
+    }
+
+    fn current_sentence_anchor_map(&self) -> Vec<Option<usize>> {
+        if self.text_only_mode {
+            let count = self
+                .raw_page_sentences
+                .get(self.current_page)
+                .map(|v| v.len())
+                .unwrap_or(0);
+            return (0..count).map(Some).collect();
+        }
+        self.sentence_anchor_maps
+            .get(self.current_page)
+            .cloned()
+            .or_else(|| {
+                crate::cache::load_sentence_anchor_map(&self.source_path, self.current_page)
+            })
+            .unwrap_or_else(|| {
+                let count = self
+                    .raw_page_sentences
+                    .get(self.current_page)
+                    .map(|v| v.len())
+                    .unwrap_or(0);
+                (0..count).map(Some).collect()
+            })
+    }
+
+    fn build_sentence_anchor_map_for_page(
+        &self,
+        page_idx: usize,
+        sentence_count: usize,
+    ) -> Vec<Option<usize>> {
+        if sentence_count == 0 {
+            return Vec::new();
+        }
+        if let Some(cached) = crate::cache::load_sentence_anchor_map(&self.source_path, page_idx)
+            && cached.len() == sentence_count
+        {
+            return cached;
+        }
+        let Some(markdown_page) = self.markdown_pages.get(page_idx) else {
+            return (0..sentence_count).map(Some).collect();
+        };
+        let anchor_count = count_markdown_anchors(markdown_page);
+        if anchor_count == 0 {
+            return (0..sentence_count).map(Some).collect();
+        }
+        if sentence_count == 1 {
+            return vec![Some(0)];
+        }
+        (0..sentence_count)
+            .map(|idx| {
+                let mapped = (idx.saturating_mul(anchor_count)) / sentence_count;
+                Some(mapped.min(anchor_count.saturating_sub(1)))
+            })
+            .collect()
     }
 
     fn current_highlight_idx(&self) -> Option<usize> {
@@ -1317,6 +1433,24 @@ impl ReaderSession {
     }
 }
 
+fn count_markdown_anchors(markdown: &str) -> usize {
+    markdown
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| {
+            line.starts_with('#')
+                || line.starts_with("- ")
+                || line.starts_with("* ")
+                || line
+                    .chars()
+                    .next()
+                    .map(|ch| ch.is_alphanumeric())
+                    .unwrap_or(false)
+        })
+        .count()
+}
+
 pub fn load_session_for_source(
     source_path: PathBuf,
     base_config: &config::AppConfig,
@@ -1405,6 +1539,7 @@ mod tests {
             pages,
             markdown_pages: Vec::new(),
             raw_page_sentences,
+            sentence_anchor_maps: Vec::new(),
             page_word_counts,
             page_sentence_counts,
             current_page: 0,
@@ -1622,5 +1757,24 @@ mod tests {
         assert!((event.snapshot.settings.pause_after_sentence - 0.06).abs() < f32::EPSILON);
         assert!((event.snapshot.settings.tts_speed - 2.5).abs() < f32::EPSILON);
         assert!((event.snapshot.settings.tts_volume - 1.3).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn tts_highlight_continuity_is_preserved_across_view_toggles() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = build_test_session(&[&["A.", "B.", "C."]]);
+        session.highlighted_display_idx = Some(2);
+
+        session.toggle_text_only(&normalizer);
+        assert_eq!(session.current_highlight_idx(), Some(2));
+
+        session.toggle_text_only(&normalizer);
+        assert_eq!(session.current_highlight_idx(), Some(2));
+    }
+
+    #[test]
+    fn markdown_anchor_count_detects_blocks() {
+        let markdown = "# Title\n\nParagraph one.\n\n- Item one\n- Item two\n\n## Next";
+        assert_eq!(count_markdown_anchors(markdown), 5);
     }
 }

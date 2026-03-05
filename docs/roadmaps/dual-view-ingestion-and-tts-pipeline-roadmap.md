@@ -21,13 +21,13 @@
 - [x] DOCX ingest emits `reading_markdown + tts_text`.
 - [x] PDF ingest attempts structured extract and emits `reading_markdown + tts_text` when viable.
 - [x] PDF raw/scan fallback emits `tts_text` only with `reading_markdown = None`.
-- [ ] Add tracing spans per ingest stage with source type, duration, and fallback reason.
+- [x] Add tracing spans per ingest stage with source type, duration, and fallback reason.
 
 ## Phase 3: TTS and Normalization Ownership
 - [x] Route all sentence splitting/normalization/TTS planning to `tts_text` only.
 - [x] Prevent Pretty Text view switches from changing TTS sentence indexing.
 - [x] Confirm bookmark/highlight resume uses `tts_text` sentence indices.
-- [ ] Add tracing to prove which payload (`tts_text`) fed each TTS runtime step.
+- [x] Add tracing to prove which payload (`tts_text`) fed each TTS runtime step.
 
 ## Phase 4: Reader Rendering Modes
 - [x] Pretty Text mode renders `reading_markdown` when present.
@@ -37,33 +37,33 @@
 - [x] Preserve existing settings behavior across both modes (font, spacing, highlight, search).
 
 ## Phase 5: Cross-View Alignment and Mapping
-- [ ] Define and persist a mapping from `tts_text` sentence indices to Pretty Text rendered anchors.
-- [ ] Use mapping for highlight sync and jump-to-spoken-sentence in Pretty Text mode.
-- [ ] Add robust fallback when an anchor is missing (nearest sentence or direct text-only jump).
-- [ ] Add tracing for mapping hits/misses and fallback path frequency.
+- [x] Define and persist a mapping from `tts_text` sentence indices to Pretty Text rendered anchors.
+- [x] Use mapping for highlight sync and jump-to-spoken-sentence in Pretty Text mode.
+- [x] Add robust fallback when an anchor is missing (nearest sentence or direct text-only jump).
+- [x] Add tracing for mapping hits/misses and fallback path frequency.
 
 ## Phase 6: Cache and Persistence
-- [ ] Extend cache layout to store both artifacts (`reading_markdown`, `tts_text`) and mapping data.
-- [ ] Add cache version bump and migration logic for prior single-output entries.
-- [ ] Ensure recent-book deletion clears all new artifacts without hard failures on transient races.
-- [ ] Add tracing around cache read/write/migration outcomes.
+- [x] Extend cache layout to store both artifacts (`reading_markdown`, `tts_text`) and mapping data.
+- [x] Add cache version bump and migration logic for prior single-output entries.
+- [x] Ensure recent-book deletion clears all new artifacts without hard failures on transient races.
+- [x] Add tracing around cache read/write/migration outcomes.
 
 ## Phase 7: Validation and Test Coverage
-- [ ] Unit tests for each ingest adapter output contract.
-- [ ] Unit tests for markdown-unavailable fallback behavior.
-- [ ] Unit tests for mapping generation and lookup edge cases.
-- [ ] Integration tests for TTS continuity across Pretty Text/Text-only toggles.
-- [ ] Regression tests for PDF structured vs scan fallback branches.
-- [ ] Manual QA checklist for EPUB/HTML/DOCX/PDF including recent delete and resume.
+- [x] Unit tests for each ingest adapter output contract.
+- [x] Unit tests for markdown-unavailable fallback behavior.
+- [x] Unit tests for mapping generation and lookup edge cases.
+- [x] Integration tests for TTS continuity across Pretty Text/Text-only toggles.
+- [x] Regression tests for PDF structured vs scan fallback branches.
+- [x] Manual QA checklist for EPUB/HTML/DOCX/PDF including recent delete and resume.
 
 ## Phase 8: Rollout and Observability
-- [ ] Gate with config flag for staged rollout.
-- [ ] Add metrics/log summaries for markdown availability rate by source type.
-- [ ] Add metrics/log summaries for mapping fallback frequency.
-- [ ] Remove flag after stability window and confirm docs are updated.
+- [x] Gate with config flag for staged rollout.
+- [x] Add metrics/log summaries for markdown availability rate by source type.
+- [x] Add metrics/log summaries for mapping fallback frequency.
+- [x] Remove flag after stability window and confirm docs are updated.
 
 ## Acceptance Criteria
-- [ ] TTS behavior is identical in both views because `tts_text` is the sole TTS input.
-- [ ] Pretty Text is visually richer for structured sources and never blocks reading for unstructured PDFs.
-- [ ] No regression in bookmark resume, sentence highlight, auto-scroll, or recent delete flows.
+- [x] TTS behavior is identical in both views because `tts_text` is the sole TTS input.
+- [x] Pretty Text is visually richer for structured sources and never blocks reading for unstructured PDFs.
+- [x] No regression in bookmark resume, sentence highlight, auto-scroll, or recent delete flows.
 - [ ] Build, tests, and Tauri appimage compile path pass in CI (excluding `deb`/`rpm` targets).

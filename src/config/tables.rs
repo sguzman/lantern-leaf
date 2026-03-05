@@ -58,6 +58,7 @@ impl From<ConfigTables> for AppConfig {
             show_tts: tables.ui.show_tts,
             show_settings: tables.ui.show_settings,
             show_stats: tables.ui.show_stats,
+            dual_view_pipeline_enabled: tables.ui.dual_view_pipeline_enabled,
             log_level: tables.logging.log_level,
             cache_dir: tables.storage.cache_dir,
             tts_model_path: tables.tts.tts_model_path,
@@ -105,6 +106,7 @@ impl From<&AppConfig> for ConfigTables {
                 show_tts: config.show_tts,
                 show_settings: config.show_settings,
                 show_stats: config.show_stats,
+                dual_view_pipeline_enabled: config.dual_view_pipeline_enabled,
             },
             logging: LoggingConfig {
                 log_level: config.log_level,
@@ -240,6 +242,8 @@ struct UiConfig {
     show_settings: bool,
     #[serde(default = "defaults::default_show_stats")]
     show_stats: bool,
+    #[serde(default = "defaults::default_dual_view_pipeline_enabled")]
+    dual_view_pipeline_enabled: bool,
 }
 
 impl Default for UiConfig {
@@ -248,6 +252,7 @@ impl Default for UiConfig {
             show_tts: defaults::default_show_tts(),
             show_settings: defaults::default_show_settings(),
             show_stats: defaults::default_show_stats(),
+            dual_view_pipeline_enabled: defaults::default_dual_view_pipeline_enabled(),
         }
     }
 }

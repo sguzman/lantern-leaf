@@ -913,6 +913,14 @@ fn build_tts_playback_plan(state: &mut BackendState) -> Option<TtsPlaybackPlan> 
     if audio_sentences.is_empty() {
         return None;
     }
+    tracing::debug!(
+        source = %reader.source_path.display(),
+        page = snapshot.current_page + 1,
+        start_idx,
+        sentence_count = audio_sentences.len(),
+        tts_payload_source = "tts_text",
+        "Built TTS playback plan from canonical tts_text payload"
+    );
     Some(TtsPlaybackPlan {
         source_path: reader.source_path.clone(),
         page: snapshot.current_page,

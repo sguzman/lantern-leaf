@@ -265,6 +265,12 @@ function renderMarkdownToHtml(markdown: string): string {
   const lines = markdown.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   const out: string[] = [];
   let listBuffer: string[] = [];
+  let anchorIndex = 0;
+  const nextAnchor = (): string => {
+    const current = anchorIndex;
+    anchorIndex += 1;
+    return ` data-ll-md-anchor="${current}"`;
+  };
 
   const flushList = (): void => {
     if (listBuffer.length === 0) {
@@ -283,25 +289,25 @@ function renderMarkdownToHtml(markdown: string): string {
     }
     if (trimmed.startsWith("# ")) {
       flushList();
-      out.push(`<h1>${renderInlineMarkdown(trimmed.slice(2).trim())}</h1>`);
+      out.push(`<h1${nextAnchor()}>${renderInlineMarkdown(trimmed.slice(2).trim())}</h1>`);
       continue;
     }
     if (trimmed.startsWith("## ")) {
       flushList();
-      out.push(`<h2>${renderInlineMarkdown(trimmed.slice(3).trim())}</h2>`);
+      out.push(`<h2${nextAnchor()}>${renderInlineMarkdown(trimmed.slice(3).trim())}</h2>`);
       continue;
     }
     if (trimmed.startsWith("### ")) {
       flushList();
-      out.push(`<h3>${renderInlineMarkdown(trimmed.slice(4).trim())}</h3>`);
+      out.push(`<h3${nextAnchor()}>${renderInlineMarkdown(trimmed.slice(4).trim())}</h3>`);
       continue;
     }
     if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-      listBuffer.push(`<li>${renderInlineMarkdown(trimmed.slice(2).trim())}</li>`);
+      listBuffer.push(`<li${nextAnchor()}>${renderInlineMarkdown(trimmed.slice(2).trim())}</li>`);
       continue;
     }
     flushList();
-    out.push(`<p>${renderInlineMarkdown(trimmed)}</p>`);
+    out.push(`<p${nextAnchor()}>${renderInlineMarkdown(trimmed)}</p>`);
   }
 
   flushList();
@@ -740,8 +746,43 @@ export const ReaderShell = memo(function ReaderShell({
         return;
       }
       const container = sentenceScrollRef.current;
+      if (!container) {
+        return;
+      }
+      if (!reader.text_only_mode && reader.reading_markdown_page) {
+        const anchors = reader.sentence_anchor_map;
+        let anchorIdx = anchors[idx] ?? null;
+        if (anchorIdx === null || anchorIdx === undefined) {
+          for (let offset = 1; offset < anchors.length; offset += 1) {
+            const prev = idx - offset;
+            const next = idx + offset;
+            if (prev >= 0 && anchors[prev] !== null && anchors[prev] !== undefined) {
+              anchorIdx = anchors[prev];
+              break;
+            }
+            if (next < anchors.length && anchors[next] !== null && anchors[next] !== undefined) {
+              anchorIdx = anchors[next];
+              break;
+            }
+          }
+        }
+        if (anchorIdx !== null && anchorIdx !== undefined) {
+          const anchor = container.querySelector(
+            `[data-ll-md-anchor="${anchorIdx}"]`
+          ) as HTMLElement | null;
+          if (anchor) {
+            scrollSentenceIntoView(
+              container,
+              anchor,
+              reader.settings.center_spoken_sentence,
+              behavior
+            );
+            return;
+          }
+        }
+      }
       const sentence = sentenceRefs.current[idx];
-      if (!container || !sentence) {
+      if (!sentence) {
         return;
       }
       scrollSentenceIntoView(
@@ -754,7 +795,10 @@ export const ReaderShell = memo(function ReaderShell({
     [
       reader.highlighted_sentence_idx,
       reader.settings.auto_scroll_tts,
-      reader.settings.center_spoken_sentence
+      reader.settings.center_spoken_sentence,
+      reader.sentence_anchor_map,
+      reader.reading_markdown_page,
+      reader.text_only_mode
     ]
   );
 
