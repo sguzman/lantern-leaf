@@ -156,10 +156,12 @@ export function renderNativePrettyHtml(
     const targetBaseName = imageBaseName(normalizedTarget);
     const matched = unusedImages.find((candidate) => {
       const candidateNormalized = normalizeImageTarget(candidate.rawPath);
+      const candidateBaseName = imageBaseName(candidateNormalized);
       return (
         candidateNormalized === normalizedTarget ||
         candidateNormalized.endsWith(`/${normalizedTarget}`) ||
-        imageBaseName(candidateNormalized) === targetBaseName
+        candidateBaseName === targetBaseName ||
+        candidateBaseName.endsWith(`-${targetBaseName}`)
       );
     });
     if (matched) {

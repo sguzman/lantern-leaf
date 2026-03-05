@@ -1077,6 +1077,9 @@ export const ReaderShell = memo(function ReaderShell({
     if (!reader.settings.auto_scroll_tts) {
       return;
     }
+    if (!reader.text_only_mode && reader.pretty_kind === "html") {
+      return;
+    }
     const container = sentenceScrollRef.current;
     if (!container) {
       return;
@@ -1102,6 +1105,8 @@ export const ReaderShell = memo(function ReaderShell({
     alignHighlightedSentence,
     reader.sentences.length,
     reader.settings.auto_scroll_tts,
+    reader.pretty_kind,
+    reader.text_only_mode,
     reader.settings.font_size,
     reader.settings.line_spacing,
     reader.settings.margin_horizontal,

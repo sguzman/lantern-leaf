@@ -743,7 +743,13 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
             .map(|ext| ext.to_ascii_lowercase())
             .or_else(|| extension_from_mime(&mime).map(str::to_string))
             .unwrap_or_else(|| "img".to_string());
-        let file_name = format!("img-{idx:04}-{image_hash}.{extension}");
+        let source_name = resource_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(sanitize_file_component)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "image".to_string());
+        let file_name = format!("img-{idx:04}-{image_hash}-{source_name}.{extension}");
         let output = image_dir.join(file_name);
 
         if !output.exists() {
@@ -931,6 +937,18 @@ fn short_hash(bytes: &[u8]) -> String {
     hasher.update(bytes);
     let full = format!("{:x}", hasher.finalize());
     full.chars().take(12).collect()
+}
+
+fn sanitize_file_component(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            out.push(ch.to_ascii_lowercase());
+        } else if ch.is_whitespace() || ch == '.' {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

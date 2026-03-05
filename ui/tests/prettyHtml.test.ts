@@ -14,12 +14,15 @@ describe("renderNativePrettyHtml", () => {
       </section>
     `;
     const out = renderNativePrettyHtml(html, [
-      { rawPath: "images/cover.jpg", src: "asset:/cache/images/cover.jpg" },
+      {
+        rawPath: "images/img-0001-aabbccddeeff-cover.jpg",
+        src: "asset:/cache/images/img-0001-aabbccddeeff-cover.jpg",
+      },
     ]);
     expect(out).toContain('data-ll-html-anchor="0"');
     expect(out).toContain('target="_blank"');
     expect(out).toContain('rel="noreferrer"');
-    expect(out).toContain('src="asset:/cache/images/cover.jpg"');
+    expect(out).toContain('src="asset:/cache/images/img-0001-aabbccddeeff-cover.jpg"');
     expect(out).not.toContain("<script");
     expect(out).not.toContain("onclick=");
     expect(out).toContain('style="color:red"');
