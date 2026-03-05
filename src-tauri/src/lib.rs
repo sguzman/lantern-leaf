@@ -2612,6 +2612,18 @@ async fn calibre_ensure_thumbnail(
 
     let thumbnail_path = tauri::async_runtime::spawn_blocking(move || {
         let _ = calibre::ensure_thumbnail_for_book(&calibre_config, &mut book, true);
+        if book.cover_thumbnail.is_none()
+            && book.extension.eq_ignore_ascii_case("epub")
+            && let Ok(materialized) = calibre::materialize_book_path(&calibre_config, &book)
+        {
+            tracing::info!(
+                book_id = book.id,
+                path = %materialized.display(),
+                "Materialized EPUB source to retry thumbnail extraction"
+            );
+            book.path = Some(materialized);
+            let _ = calibre::ensure_thumbnail_for_book(&calibre_config, &mut book, false);
+        }
         book.cover_thumbnail
     })
     .await

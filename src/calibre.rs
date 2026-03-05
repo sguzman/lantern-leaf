@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow};
+use epub::doc::EpubDoc;
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use reqwest::StatusCode;
@@ -1030,6 +1031,25 @@ fn ensure_book_thumbnail(
         && let Ok(bytes) = fs::read(&local_cover)
         && write_thumbnail_file(&thumb_path, &bytes).is_ok()
     {
+        info!(
+            book_id,
+            path = %thumb_path.display(),
+            source = %local_cover.display(),
+            "Hydrated calibre thumbnail from local cover sidecar"
+        );
+        return Some(thumb_path);
+    }
+
+    if let Some(epub_source) = source_path.filter(|path| is_epub_source_path(path))
+        && let Some(cover) = extract_epub_cover_bytes(epub_source)
+        && write_thumbnail_file(&thumb_path, &cover).is_ok()
+    {
+        info!(
+            book_id,
+            path = %thumb_path.display(),
+            source = %epub_source.display(),
+            "Hydrated calibre thumbnail from EPUB embedded cover"
+        );
         return Some(thumb_path);
     }
 
@@ -1041,6 +1061,22 @@ fn ensure_book_thumbnail(
     }
 
     None
+}
+
+fn is_epub_source_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("epub"))
+        .unwrap_or(false)
+}
+
+fn extract_epub_cover_bytes(source_path: &Path) -> Option<Vec<u8>> {
+    let mut doc = EpubDoc::new(source_path).ok()?;
+    let (cover, _mime) = doc.get_cover()?;
+    if cover.is_empty() {
+        return None;
+    }
+    Some(cover)
 }
 
 fn resolve_local_cover_file(book_dir: &Path) -> Option<PathBuf> {
