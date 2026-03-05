@@ -720,61 +720,39 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
         .with_context(|| format!("Failed to create image cache dir {}", image_dir.display()))?;
 
     let mut extracted = Vec::new();
-    let mut seen = HashSet::new();
-    let mut image_by_hash: std::collections::HashMap<String, ExtractedImage> =
-        std::collections::HashMap::new();
     let mut path_lookup: std::collections::HashMap<String, ExtractedImage> =
         std::collections::HashMap::new();
     let mut basename_lookup: std::collections::HashMap<String, ExtractedImage> =
         std::collections::HashMap::new();
 
-    for (idx, (id, resource_path, mime)) in entries.into_iter().enumerate() {
+    for (_idx, (id, resource_path, mime)) in entries.into_iter().enumerate() {
         let Some((bytes, _)) = doc.get_resource(&id) else {
             continue;
         };
 
-        let image_hash = short_hash(&bytes);
-        let image = if seen.insert(image_hash.clone()) {
-            let extension = resource_path
-                .extension()
-                .and_then(|s| s.to_str())
-                .filter(|ext| !ext.is_empty())
-                .map(|ext| ext.to_ascii_lowercase())
-                .or_else(|| extension_from_mime(&mime).map(str::to_string))
-                .unwrap_or_else(|| "img".to_string());
-            let source_name = resource_path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .map(sanitize_file_component)
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "image".to_string());
-            let file_name = format!("img-{idx:04}-{image_hash}-{source_name}.{extension}");
-            let output = image_dir.join(file_name);
+        let default_extension = extension_from_mime(&mime).map(str::to_string);
+        let output = epub_resource_output_path(&image_dir, &resource_path, default_extension);
+        if let Some(parent) = output.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create image cache dir {}", parent.display())
+            })?;
+        }
+        if !output.exists() {
+            fs::write(&output, &bytes)
+                .with_context(|| format!("Failed to write extracted image {}", output.display()))?;
+        }
 
-            if !output.exists() {
-                fs::write(&output, &bytes).with_context(|| {
-                    format!("Failed to write extracted image {}", output.display())
-                })?;
-            }
+        let label = resource_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("image")
+            .to_string();
 
-            let label = resource_path
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("image")
-                .to_string();
-
-            let extracted_image = ExtractedImage {
-                output: output.clone(),
-                label: label.clone(),
-            };
-            image_by_hash.insert(image_hash.clone(), extracted_image.clone());
-            extracted.push(extracted_image.clone());
-            extracted_image
-        } else if let Some(existing) = image_by_hash.get(&image_hash).cloned() {
-            existing
-        } else {
-            continue;
+        let image = ExtractedImage {
+            output: output.clone(),
+            label: label.clone(),
         };
+        extracted.push(image.clone());
 
         let normalized_key = normalize_epub_path_key(resource_path.to_string_lossy().as_ref());
         path_lookup.insert(normalized_key, image.clone());
@@ -938,23 +916,22 @@ fn extension_from_mime(mime: &str) -> Option<&'static str> {
     }
 }
 
-fn short_hash(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let full = format!("{:x}", hasher.finalize());
-    full.chars().take(12).collect()
-}
-
-fn sanitize_file_component(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-            out.push(ch.to_ascii_lowercase());
-        } else if ch.is_whitespace() || ch == '.' {
-            out.push('-');
+fn epub_resource_output_path(
+    image_dir: &Path,
+    resource_path: &Path,
+    default_extension: Option<String>,
+) -> PathBuf {
+    let mut out = image_dir.to_path_buf();
+    for component in resource_path.components() {
+        if let std::path::Component::Normal(segment) = component {
+            out.push(segment);
         }
     }
-    out.trim_matches('-').to_string()
+    let missing_ext = out.extension().and_then(|s| s.to_str()).is_none();
+    if missing_ext && let Some(ext) = default_extension {
+        out.set_extension(ext);
+    }
+    out
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

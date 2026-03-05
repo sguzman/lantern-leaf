@@ -522,6 +522,14 @@ function scrollSentenceIntoView(
   container.scrollTo({ top: targetTopPx, behavior });
 }
 
+function normalizeSyncText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function NumericSettingControl({
   label,
   value,
@@ -863,6 +871,8 @@ export const ReaderShell = memo(function ReaderShell({
   const [sessionSentencesRead, setSessionSentencesRead] = useState(0);
   const [sessionPagesFinished, setSessionPagesFinished] = useState(0);
   const nativeHtmlCacheRef = useRef<{ key: string; html: string }>({ key: "", html: "" });
+  const htmlSentenceAnchorMapRef = useRef<number[]>([]);
+  const prettyHighlightedNodeRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const node = topBarRef.current;
@@ -912,6 +922,27 @@ export const ReaderShell = memo(function ReaderShell({
 
   const resolvePrettyAnchorIdx = useCallback(
     (idx: number): number | null => {
+      if (reader.pretty_kind === "html") {
+        const anchors = htmlSentenceAnchorMapRef.current;
+        let anchorIdx = anchors[idx] ?? null;
+        if (anchorIdx === null || anchorIdx === undefined) {
+          for (let offset = 1; offset < anchors.length; offset += 1) {
+            const prev = idx - offset;
+            const next = idx + offset;
+            if (prev >= 0 && anchors[prev] !== null && anchors[prev] !== undefined) {
+              anchorIdx = anchors[prev];
+              break;
+            }
+            if (next < anchors.length && anchors[next] !== null && anchors[next] !== undefined) {
+              anchorIdx = anchors[next];
+              break;
+            }
+          }
+        }
+        if (anchorIdx !== null && anchorIdx !== undefined) {
+          return anchorIdx;
+        }
+      }
       const anchors = reader.sentence_anchor_map;
       let anchorIdx = anchors[idx] ?? null;
       if (anchorIdx === null || anchorIdx === undefined) {
@@ -930,7 +961,7 @@ export const ReaderShell = memo(function ReaderShell({
       }
       return anchorIdx ?? null;
     },
-    [reader.sentence_anchor_map]
+    [reader.pretty_kind, reader.sentence_anchor_map]
   );
 
   const alignHighlightedSentence = useCallback(
@@ -1111,18 +1142,27 @@ export const ReaderShell = memo(function ReaderShell({
 
   useEffect(() => {
     if (reader.text_only_mode) {
+      if (prettyHighlightedNodeRef.current) {
+        prettyHighlightedNodeRef.current.classList.remove("reader-pretty-highlight");
+        prettyHighlightedNodeRef.current = null;
+      }
       return;
     }
     const idx = reader.highlighted_sentence_idx;
     const container = sentenceScrollRef.current;
     if (idx === null || idx === undefined || !container) {
+      if (prettyHighlightedNodeRef.current) {
+        prettyHighlightedNodeRef.current.classList.remove("reader-pretty-highlight");
+        prettyHighlightedNodeRef.current = null;
+      }
       return;
     }
-    container.querySelectorAll(".reader-pretty-highlight").forEach((node) => {
-      node.classList.remove("reader-pretty-highlight");
-    });
     const anchorIdx = resolvePrettyAnchorIdx(idx);
     if (anchorIdx === null || anchorIdx === undefined) {
+      if (prettyHighlightedNodeRef.current) {
+        prettyHighlightedNodeRef.current.classList.remove("reader-pretty-highlight");
+        prettyHighlightedNodeRef.current = null;
+      }
       return;
     }
     const selector =
@@ -1131,7 +1171,14 @@ export const ReaderShell = memo(function ReaderShell({
         : `[data-ll-md-anchor="${anchorIdx}"]`;
     const target = container.querySelector(selector) as HTMLElement | null;
     if (target) {
+      if (prettyHighlightedNodeRef.current && prettyHighlightedNodeRef.current !== target) {
+        prettyHighlightedNodeRef.current.classList.remove("reader-pretty-highlight");
+      }
       target.classList.add("reader-pretty-highlight");
+      prettyHighlightedNodeRef.current = target;
+    } else if (prettyHighlightedNodeRef.current) {
+      prettyHighlightedNodeRef.current.classList.remove("reader-pretty-highlight");
+      prettyHighlightedNodeRef.current = null;
     }
   }, [
     reader.highlighted_sentence_idx,
@@ -1299,6 +1346,54 @@ export const ReaderShell = memo(function ReaderShell({
     reader.source_path,
     readerImageCandidates
   ]);
+
+  useEffect(() => {
+    if (!hasPrettyHtml || !renderedNativeHtml) {
+      htmlSentenceAnchorMapRef.current = [];
+      return;
+    }
+    const container = sentenceScrollRef.current;
+    if (!container) {
+      return;
+    }
+    const anchors = Array.from(
+      container.querySelectorAll("[data-ll-html-anchor]")
+    ) as HTMLElement[];
+    if (anchors.length === 0 || reader.sentences.length === 0) {
+      htmlSentenceAnchorMapRef.current = [];
+      return;
+    }
+    const anchorTexts = anchors.map((element) => normalizeSyncText(element.textContent ?? ""));
+    const mapped: number[] = [];
+    let scanStart = 0;
+    for (const sentence of reader.sentences) {
+      const normalizedSentence = normalizeSyncText(sentence);
+      const sentencePrefix = normalizedSentence.slice(0, 120);
+      let found = -1;
+      if (sentencePrefix.length > 0) {
+        for (let idx = scanStart; idx < anchorTexts.length; idx += 1) {
+          const anchorText = anchorTexts[idx];
+          if (!anchorText) {
+            continue;
+          }
+          if (
+            anchorText.includes(sentencePrefix) ||
+            sentencePrefix.includes(anchorText.slice(0, Math.min(64, anchorText.length)))
+          ) {
+            found = idx;
+            break;
+          }
+        }
+      }
+      if (found < 0) {
+        found = mapped.length > 0 ? mapped[mapped.length - 1] : scanStart;
+      }
+      const clamped = Math.max(0, Math.min(anchors.length - 1, found));
+      mapped.push(clamped);
+      scanStart = clamped;
+    }
+    htmlSentenceAnchorMapRef.current = mapped;
+  }, [hasPrettyHtml, renderedNativeHtml, reader.sentences]);
   const themeLabel = reader.settings.theme === "night" ? "Day" : "Night";
   const themeIcon =
     reader.settings.theme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />;
