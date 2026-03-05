@@ -26,6 +26,10 @@ static RE_HTML_IMG_SRC: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(?is)<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["'][^>]*>"#)
         .expect("valid html image src regex")
 });
+static RE_HTML_SVG_IMAGE_HREF: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?is)<image\b[^>]*?\b(?:xlink:href|href)\s*=\s*["']([^"']+)["'][^>]*>"#)
+        .expect("valid svg image href regex")
+});
 const PANDOC_FILTER_REL_PATH: &str = "conf/pandoc/strip-nontext.lua";
 const PANDOC_PIPELINE_REV: &str = "pandoc-clean-v1";
 const QUACK_CHECK_CONFIG_REL_PATH: &str = "conf/quack-check.toml";
@@ -813,6 +817,33 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
                     .and_then(|base| basename_lookup.get(&base).cloned())
             });
 
+            if let Some(image) = resolved {
+                chapter_images.push(image);
+            }
+        }
+        for captures in RE_HTML_SVG_IMAGE_HREF.captures_iter(&chapter) {
+            let Some(raw_src) = captures.get(1).map(|m| m.as_str()) else {
+                continue;
+            };
+            let src = raw_src
+                .split('#')
+                .next()
+                .unwrap_or(raw_src)
+                .split('?')
+                .next()
+                .unwrap_or(raw_src)
+                .trim();
+            if src.is_empty() {
+                continue;
+            }
+            let normalized_src = normalize_epub_path_key(src);
+            let resolved = path_lookup.get(&normalized_src).cloned().or_else(|| {
+                Path::new(src)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(normalize_epub_path_key)
+                    .and_then(|base| basename_lookup.get(&base).cloned())
+            });
             if let Some(image) = resolved {
                 chapter_images.push(image);
             }

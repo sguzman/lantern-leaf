@@ -221,8 +221,6 @@ export function renderNativePrettyHtml(
 
   let anchorIndex = 0;
   const anchorTags = new Set([
-    "section",
-    "article",
     "h1",
     "h2",
     "h3",

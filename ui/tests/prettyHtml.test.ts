@@ -67,4 +67,38 @@ describe("renderNativePrettyHtml", () => {
     expect(out).toContain('xlink:href="asset:/cache/images/img-0010-deadbeef0011-00161.jpeg"');
     expect(out).toContain('href="asset:/cache/images/img-0010-deadbeef0011-00161.jpeg"');
   });
+
+  it("rewrites mixed cover refs for epub cover chapter markup", () => {
+    const html = `
+      <section>
+        <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+          <image width="600" height="909" xlink:href="images/00161.jpeg"></image>
+        </svg>
+        <p class="coverimage"><img src="../images/00001.jpeg" alt="img"/></p>
+      </section>
+    `;
+    const out = renderNativePrettyHtml(html, [
+      {
+        rawPath: "/tmp/cache/images/images/00161.jpeg",
+        src: "asset:/cache/images/images/00161.jpeg",
+      },
+      {
+        rawPath: "/tmp/cache/images/images/00001.jpeg",
+        src: "asset:/cache/images/images/00001.jpeg",
+      },
+    ]);
+    expect(out).toContain('xlink:href="asset:/cache/images/images/00161.jpeg"');
+    expect(out).toContain('href="asset:/cache/images/images/00161.jpeg"');
+    expect(out).toContain('src="asset:/cache/images/images/00001.jpeg"');
+  });
+
+  it("does not assign block-level section/article anchors that over-highlight whole pages", () => {
+    const html = `
+      <section><article><p>Sentence one.</p><p>Sentence two.</p></article></section>
+    `;
+    const out = renderNativePrettyHtml(html, []);
+    expect(out).not.toContain("<section data-ll-html-anchor=");
+    expect(out).not.toContain("<article data-ll-html-anchor=");
+    expect(out).toContain("<p data-ll-html-anchor=");
+  });
 });

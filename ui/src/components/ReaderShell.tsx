@@ -1364,14 +1364,24 @@ export const ReaderShell = memo(function ReaderShell({
       return;
     }
     const anchorTexts = anchors.map((element) => normalizeSyncText(element.textContent ?? ""));
+    const hintAnchors = reader.sentence_anchor_map;
     const mapped: number[] = [];
     let scanStart = 0;
-    for (const sentence of reader.sentences) {
+    for (let sentenceIdx = 0; sentenceIdx < reader.sentences.length; sentenceIdx += 1) {
+      const sentence = reader.sentences[sentenceIdx];
       const normalizedSentence = normalizeSyncText(sentence);
       const sentencePrefix = normalizedSentence.slice(0, 120);
+      const hint = hintAnchors[sentenceIdx];
+      let localStart = scanStart;
+      let localEnd = anchorTexts.length - 1;
+      if (hint !== null && hint !== undefined && Number.isFinite(hint)) {
+        const h = Math.max(0, Math.min(anchorTexts.length - 1, hint));
+        localStart = Math.max(0, h - 40);
+        localEnd = Math.min(anchorTexts.length - 1, h + 40);
+      }
       let found = -1;
       if (sentencePrefix.length > 0) {
-        for (let idx = scanStart; idx < anchorTexts.length; idx += 1) {
+        for (let idx = localStart; idx <= localEnd; idx += 1) {
           const anchorText = anchorTexts[idx];
           if (!anchorText) {
             continue;
@@ -1386,14 +1396,19 @@ export const ReaderShell = memo(function ReaderShell({
         }
       }
       if (found < 0) {
-        found = mapped.length > 0 ? mapped[mapped.length - 1] : scanStart;
+        found =
+          hint !== null && hint !== undefined
+            ? hint
+            : mapped.length > 0
+              ? mapped[mapped.length - 1]
+              : scanStart;
       }
       const clamped = Math.max(0, Math.min(anchors.length - 1, found));
       mapped.push(clamped);
       scanStart = clamped;
     }
     htmlSentenceAnchorMapRef.current = mapped;
-  }, [hasPrettyHtml, renderedNativeHtml, reader.sentences]);
+  }, [hasPrettyHtml, reader.sentence_anchor_map, renderedNativeHtml, reader.sentences]);
   const themeLabel = reader.settings.theme === "night" ? "Day" : "Night";
   const themeIcon =
     reader.settings.theme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />;
