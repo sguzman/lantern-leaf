@@ -62,6 +62,19 @@ export function renderNativePrettyHtml(
     "hr",
     "i",
     "img",
+    "svg",
+    "image",
+    "g",
+    "defs",
+    "symbol",
+    "use",
+    "path",
+    "rect",
+    "circle",
+    "ellipse",
+    "line",
+    "polyline",
+    "polygon",
     "li",
     "main",
     "nav",
@@ -95,6 +108,8 @@ export function renderNativePrettyHtml(
     "aria-label",
     "class",
     "style",
+    "xmlns",
+    "xmlns:xlink",
   ]);
   const allowedPerTagAttrs = new Map<string, Set<string>>([
     ["a", new Set(["href"])],
@@ -102,6 +117,23 @@ export function renderNativePrettyHtml(
     ["td", new Set(["colspan", "rowspan"])],
     ["th", new Set(["colspan", "rowspan"])],
     ["style", new Set(["type", "media"])],
+    [
+      "svg",
+      new Set([
+        "viewbox",
+        "width",
+        "height",
+        "preserveaspectratio",
+        "version",
+        "xmlns",
+        "xmlns:xlink",
+      ]),
+    ],
+    [
+      "image",
+      new Set(["href", "xlink:href", "width", "height", "x", "y", "preserveaspectratio"]),
+    ],
+    ["use", new Set(["href", "xlink:href"])],
   ]);
 
   const scopeCssToNativeContainer = (rawCss: string): string => {
@@ -249,6 +281,20 @@ export function renderNativePrettyHtml(
         }
         if (!element.hasAttribute("loading")) {
           element.setAttribute("loading", "lazy");
+        }
+      } else if (tag === "image") {
+        const href =
+          (element.getAttribute("href") ?? "").trim() ||
+          (element.getAttribute("xlink:href") ?? "").trim();
+        const resolved =
+          resolveImageTarget(href) ??
+          (isSafeScheme(href) || normalizeImageTarget(href).length > 0 ? href : "");
+        if (resolved) {
+          element.setAttribute("href", resolved);
+          element.setAttribute("xlink:href", resolved);
+        } else {
+          element.remove();
+          return;
         }
       } else if (tag === "style") {
         const rawCss = element.textContent ?? "";

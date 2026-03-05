@@ -51,4 +51,20 @@ describe("renderNativePrettyHtml", () => {
     expect(out).not.toContain('href="doc.md"');
     expect(out).not.toContain("<img");
   });
+
+  it("rewrites svg image xlink references for epub cover pages", () => {
+    const html = `
+      <svg viewBox="0 0 100 100">
+        <image width="100" height="100" xlink:href="images/00161.jpeg"></image>
+      </svg>
+    `;
+    const out = renderNativePrettyHtml(html, [
+      {
+        rawPath: "images/img-0010-deadbeef0011-00161.jpeg",
+        src: "asset:/cache/images/img-0010-deadbeef0011-00161.jpeg",
+      },
+    ]);
+    expect(out).toContain('xlink:href="asset:/cache/images/img-0010-deadbeef0011-00161.jpeg"');
+    expect(out).toContain('href="asset:/cache/images/img-0010-deadbeef0011-00161.jpeg"');
+  });
 });

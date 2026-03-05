@@ -862,6 +862,7 @@ export const ReaderShell = memo(function ReaderShell({
   const [sessionWordsRead, setSessionWordsRead] = useState(0);
   const [sessionSentencesRead, setSessionSentencesRead] = useState(0);
   const [sessionPagesFinished, setSessionPagesFinished] = useState(0);
+  const nativeHtmlCacheRef = useRef<{ key: string; html: string }>({ key: "", html: "" });
 
   useEffect(() => {
     const node = topBarRef.current;
@@ -1140,13 +1141,17 @@ export const ReaderShell = memo(function ReaderShell({
     () => computeReaderTypographyLayout(reader.settings),
     [reader.settings]
   );
+  const imageCandidatesKey = useMemo(() => reader.images.join("\n"), [reader.images]);
   const readerImageCandidates = useMemo(
     () =>
-      reader.images.map((path) => ({
-        rawPath: path,
-        src: toReaderImageSrc(path)
-      })),
-    [reader.images]
+      imageCandidatesKey
+        .split("\n")
+        .filter((path) => path.length > 0)
+        .map((path) => ({
+          rawPath: path,
+          src: toReaderImageSrc(path)
+        })),
+    [imageCandidatesKey]
   );
   const estimatedTotalWords = useMemo(() => {
     if (reader.stats.page_end_percent <= 0) {
@@ -1256,8 +1261,20 @@ export const ReaderShell = memo(function ReaderShell({
     if (!hasPrettyHtml || !reader.reading_html_page) {
       return "";
     }
-    return renderNativePrettyHtml(reader.reading_html_page, readerImageCandidates);
-  }, [hasPrettyHtml, reader.reading_html_page, readerImageCandidates]);
+    const key = `${reader.source_path}\n${imageCandidatesKey}\n${reader.reading_html_page}`;
+    if (nativeHtmlCacheRef.current.key === key) {
+      return nativeHtmlCacheRef.current.html;
+    }
+    const rendered = renderNativePrettyHtml(reader.reading_html_page, readerImageCandidates);
+    nativeHtmlCacheRef.current = { key, html: rendered };
+    return rendered;
+  }, [
+    hasPrettyHtml,
+    imageCandidatesKey,
+    reader.reading_html_page,
+    reader.source_path,
+    readerImageCandidates
+  ]);
   const themeLabel = reader.settings.theme === "night" ? "Day" : "Night";
   const themeIcon =
     reader.settings.theme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />;
