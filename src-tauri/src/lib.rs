@@ -604,6 +604,7 @@ fn is_supported_source(path: &Path) -> bool {
                 || ext == "md"
                 || ext == "markdown"
                 || ext == "html"
+                || ext == "doc"
                 || ext == "docx"
     )
 }
@@ -643,7 +644,7 @@ fn resolve_source_path(path: &str) -> Result<PathBuf, BridgeError> {
         return Err(bridge_error(
             "unsupported_source",
             format!(
-                "Unsupported source type for {} (expected .epub/.pdf/.txt/.md/.markdown/.html/.docx)",
+                "Unsupported source type for {} (expected .epub/.pdf/.txt/.md/.markdown/.html/.doc/.docx)",
                 candidate.display()
             ),
         ));
@@ -3057,6 +3058,7 @@ mod tests {
         assert!(is_supported_source(Path::new("/tmp/book.md")));
         assert!(is_supported_source(Path::new("/tmp/book.markdown")));
         assert!(is_supported_source(Path::new("/tmp/book.html")));
+        assert!(is_supported_source(Path::new("/tmp/book.doc")));
         assert!(is_supported_source(Path::new("/tmp/book.docx")));
         assert!(!is_supported_source(Path::new("/tmp/book.odt")));
     }

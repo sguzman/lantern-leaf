@@ -297,7 +297,7 @@ export function StarterShell({
             <TextField
               fullWidth
               size="small"
-              label="Open Path (.epub/.pdf/.txt/.md/.markdown/.html/.docx)"
+              label="Open Path (.epub/.pdf/.txt/.md/.markdown/.html/.doc/.docx)"
               value={path}
               inputProps={{ "data-testid": "starter-open-path-input" }}
               onChange={(event) => setPath(event.target.value)}

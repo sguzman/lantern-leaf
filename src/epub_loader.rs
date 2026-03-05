@@ -18,7 +18,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::UNIX_EPOCH;
 use std::time::Instant;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 static RE_MARKDOWN_IMAGE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").expect("valid markdown image regex"));
@@ -129,45 +129,27 @@ fn load_source_content(path: &Path, cancel: Option<&CancellationToken>) -> Resul
         return load_pdf_with_quack_check(path, cancel);
     }
 
-    match load_with_pandoc(path, "plain", cancel) {
-        Ok(tts_text) => {
-            let reading_markdown = match load_with_pandoc(path, "gfm", cancel) {
-                Ok(markdown) => {
-                    let trimmed = markdown.trim();
-                    if trimmed.is_empty() {
-                        None
-                    } else {
-                        Some(markdown)
-                    }
-                }
-                Err(err) => {
-                    warn!(
-                        path = %path.display(),
-                        "Pandoc markdown conversion failed; keeping text-only ingest: {err}"
-                    );
-                    None
-                }
-            };
-            let result = SourceContent {
-                tts_text,
-                has_structured_markdown: reading_markdown.is_some(),
-                reading_markdown,
-            };
-            info!(
-                path = %path.display(),
-                stage = "pandoc_dual_convert",
-                elapsed_ms = start.elapsed().as_millis(),
-                has_structured_markdown = result.has_structured_markdown,
-                "Completed source conversion stage"
-            );
-            return Ok(result);
-        }
-        Err(err) => {
-            warn!(
-                path = %path.display(),
-                "Pandoc conversion failed; attempting format-specific fallback: {err}"
-            );
-        }
+    if is_pandoc_dual_source(path) {
+        let tts_text = load_with_pandoc(path, "plain", cancel)?;
+        let markdown = load_with_pandoc(path, "gfm", cancel)?;
+        let reading_markdown = if markdown.trim().is_empty() {
+            None
+        } else {
+            Some(markdown)
+        };
+        let result = SourceContent {
+            tts_text,
+            has_structured_markdown: reading_markdown.is_some(),
+            reading_markdown,
+        };
+        info!(
+            path = %path.display(),
+            stage = "pandoc_dual_convert",
+            elapsed_ms = start.elapsed().as_millis(),
+            has_structured_markdown = result.has_structured_markdown,
+            "Completed source conversion stage"
+        );
+        return Ok(result);
     }
 
     if is_markdown(path) {
@@ -182,94 +164,10 @@ fn load_source_content(path: &Path, cancel: Option<&CancellationToken>) -> Resul
         });
     }
 
-    if !is_epub(path) {
-        anyhow::bail!(
-            "Unsupported source format for {}. Supported source types are .epub, .pdf, .md, .markdown, .html, and .txt (other formats require successful pandoc conversion).",
-            path.display(),
-        );
-    }
-
-    info!(path = %path.display(), "Loading EPUB content");
-    let mut doc =
-        EpubDoc::new(path).with_context(|| format!("Failed to open EPUB at {}", path.display()))?;
-
-    let mut combined = String::new();
-    let mut chapters = 0usize;
-
-    loop {
-        ensure_not_cancelled(cancel, "epub_chapter_loop")?;
-        match doc.get_current_str() {
-            Some((chapter, _mime)) => {
-                chapters += 1;
-                if !combined.is_empty() {
-                    combined.push_str("\n\n");
-                }
-                // Use a lightweight HTML-to-text pass to remove most markup; fall back to raw chapter on errors.
-                // Use a very large width so we do not bake in hard line breaks; let the UI handle wrapping.
-                let plain = match html2text::from_read(chapter.as_bytes(), 10_000) {
-                    Ok(clean) => clean,
-                    Err(err) => {
-                        warn!(chapter = chapters, "html2text failed: {err}");
-                        chapter
-                    }
-                };
-                debug!(
-                    chapter = chapters,
-                    added_chars = plain.len(),
-                    "Parsed chapter"
-                );
-                combined.push_str(&plain);
-            }
-            None => break,
-        }
-
-        if !doc.go_next() {
-            break;
-        }
-    }
-
-    let tts_text = if combined.trim().is_empty() {
-        "No textual content found in this EPUB.".to_string()
-    } else {
-        combined
-    };
-    let reading_markdown = match load_with_pandoc(path, "gfm", cancel) {
-        Ok(markdown) => {
-            let trimmed = markdown.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(markdown)
-            }
-        }
-        Err(err) => {
-            warn!(
-                path = %path.display(),
-                "EPUB pandoc markdown conversion failed; using text fallback: {err}"
-            );
-            None
-        }
-    };
-
-    info!(
-        chapters,
-        total_chars = tts_text.len(),
-        markdown_chars = reading_markdown.as_ref().map(|v| v.len()).unwrap_or(0),
-        "Finished loading EPUB content"
+    anyhow::bail!(
+        "Unsupported source format for {}. Supported source types are .txt, .md, .markdown, .pdf, .html, .doc, .docx, and .epub.",
+        path.display(),
     );
-    let result = SourceContent {
-        tts_text,
-        has_structured_markdown: reading_markdown.is_some(),
-        reading_markdown,
-    };
-    info!(
-        path = %path.display(),
-        stage = "epub_fallback_convert",
-        elapsed_ms = start.elapsed().as_millis(),
-        has_structured_markdown = result.has_structured_markdown,
-        "Completed source conversion stage"
-    );
-    Ok(result)
 }
 
 fn markdown_to_plain_text(input: &str) -> String {
@@ -316,6 +214,20 @@ fn is_epub(path: &Path) -> bool {
             .and_then(|ext| ext.to_str())
             .map(|ext| ext.to_ascii_lowercase()),
         Some(ext) if ext == "epub"
+    )
+}
+
+fn is_pandoc_dual_source(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase()),
+        Some(ext)
+            if ext == "epub"
+                || ext == "html"
+                || ext == "htm"
+                || ext == "doc"
+                || ext == "docx"
     )
 }
 
