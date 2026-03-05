@@ -41,22 +41,22 @@
 ## Phase 5: HTML-to-TTS Sync Mapping
 - [x] Build a source map from plain-text sentence spans to HTML anchor offsets.
 - [x] Persist per-page/per-sentence anchor map in cache alongside dual artifacts.
-- [ ] On sentence highlight/playback transitions:
+- [x] On sentence highlight/playback transitions:
 - [x] scroll to mapped HTML anchor when available.
 - [x] apply nearest-anchor fallback when exact anchor is missing.
 - [x] Emit mapping telemetry (`hit`, `nearby_fallback`, `missing`) for debugging and regressions.
 
 ## Phase 6: Pagination and Navigation Strategy
-- [ ] Define pagination contract for native HTML sources:
-- [ ] Option A: sentence-window-driven virtual pagination over one HTML document.
-- [ ] Option B: chapter/section pagination with sentence-index continuity.
-- [ ] Keep page transitions synchronized with plain-text sentence boundaries.
-- [ ] Preserve keyboard shortcuts and TTS controls independent of visual pagination mode.
+- [x] Define pagination contract for native HTML sources:
+- [x] Option A: sentence-window-driven virtual pagination over one HTML document.
+- [x] Option B: chapter/section pagination with sentence-index continuity.
+- [x] Keep page transitions synchronized with plain-text sentence boundaries.
+- [x] Preserve keyboard shortcuts and TTS controls independent of visual pagination mode.
 
 ## Phase 7: Cache, Migration, and Recovery
 - [x] Extend cache schema for `pretty_html`, asset manifest, and sentence-anchor map.
 - [x] Add cache version bump and migration from markdown-centric artifacts.
-- [ ] On cache miss/corruption, rebuild artifacts non-destructively with clear tracing.
+- [x] On cache miss/corruption, rebuild artifacts non-destructively with clear tracing.
 - [x] Ensure recent-delete removes HTML assets, plain text, mapping artifacts, and thumbnails idempotently.
 
 ## Phase 8: Calibre/Recents Consistency for Covers and Assets
@@ -65,22 +65,22 @@
 - [x] Add tracing for thumbnail source (`cache`, `sidecar`, `epub_cover`, `server`, `materialized_epub`).
 
 ## Phase 9: Testing and Validation
-- [ ] Unit tests for HTML sanitizer and asset URL rewriting.
-- [ ] Unit tests for sentence-to-anchor mapping generation and fallback behavior.
-- [ ] Integration tests validating TTS continuity across Pretty/Text-only toggles.
-- [ ] Integration tests for EPUB with heavy images, internal links, footnotes, and tables.
-- [ ] Regression tests ensuring no raw markdown/link artifacts appear for EPUB/HTML pretty view.
-- [ ] Manual QA checklist for:
-- [ ] cover/thumbnail consistency across calibre and recents.
-- [ ] image rendering in pretty view.
-- [ ] internal link navigation.
-- [ ] sentence highlight and auto-scroll sync under playback.
+- [x] Unit tests for HTML sanitizer and asset URL rewriting.
+- [x] Unit tests for sentence-to-anchor mapping generation and fallback behavior.
+- [x] Integration tests validating TTS continuity across Pretty/Text-only toggles.
+- [x] Integration tests for EPUB with heavy images, internal links, footnotes, and tables.
+- [x] Regression tests ensuring no raw markdown/link artifacts appear for EPUB/HTML pretty view.
+- [x] Manual QA checklist for:
+- [x] cover/thumbnail consistency across calibre and recents.
+- [x] image rendering in pretty view.
+- [x] internal link navigation.
+- [x] sentence highlight and auto-scroll sync under playback.
 
 ## Phase 10: Rollout and Cleanup
-- [ ] Gate native HTML path behind a config flag for staged rollout.
-- [ ] Add observability dashboards/log summaries for mapping fallback rates and render errors.
-- [ ] Remove legacy EPUB/HTML markdown conversion path after stability window.
-- [ ] Update docs for architecture, cache layout, and debugging workflow.
+- [x] Gate native HTML path behind a config flag for staged rollout.
+- [x] Add observability dashboards/log summaries for mapping fallback rates and render errors.
+- [x] Remove legacy EPUB/HTML markdown conversion path after stability window.
+- [x] Update docs for architecture, cache layout, and debugging workflow.
 
 ## Acceptance Criteria
 - [x] EPUB/HTML Pretty Text renders as native HTML with working images and links.

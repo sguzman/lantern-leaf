@@ -38,6 +38,7 @@ import {
   computeReaderTopBarVisibility,
   computeReaderTtsControlVisibility
 } from "./layoutPolicies";
+import { renderNativePrettyHtml } from "./prettyHtml";
 import { computeReaderTypographyLayout } from "./readerTypography";
 import type {
   FontFamily,
@@ -484,206 +485,6 @@ function renderMarkdownToHtml(
 
   flushList();
   return out.join("");
-}
-
-function renderNativeHtml(
-  html: string,
-  imageCandidates: Array<{ rawPath: string; src: string }>
-): string {
-  const parser = new DOMParser();
-  const parsed = parser.parseFromString(html, "text/html");
-  const allowTags = new Set([
-    "a",
-    "article",
-    "aside",
-    "b",
-    "blockquote",
-    "br",
-    "code",
-    "div",
-    "em",
-    "figcaption",
-    "figure",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "header",
-    "hr",
-    "i",
-    "img",
-    "li",
-    "main",
-    "nav",
-    "ol",
-    "p",
-    "pre",
-    "s",
-    "section",
-    "small",
-    "span",
-    "strong",
-    "sub",
-    "sup",
-    "table",
-    "tbody",
-    "td",
-    "th",
-    "thead",
-    "tr",
-    "u",
-    "ul"
-  ]);
-  const allowedGlobalAttrs = new Set(["id", "title", "lang", "dir", "role", "aria-label"]);
-  const allowedPerTagAttrs = new Map<string, Set<string>>([
-    ["a", new Set(["href"])],
-    ["img", new Set(["src", "alt", "width", "height", "loading"])],
-    ["td", new Set(["colspan", "rowspan"])],
-    ["th", new Set(["colspan", "rowspan"])]
-  ]);
-  const unusedImages = [...imageCandidates];
-  const resolveImageTarget = (target: string): string | null => {
-    const normalizedTarget = normalizeImageTarget(target);
-    if (!normalizedTarget) {
-      return null;
-    }
-    if (
-      normalizedTarget.startsWith("http://") ||
-      normalizedTarget.startsWith("https://") ||
-      normalizedTarget.startsWith("data:") ||
-      normalizedTarget.startsWith("asset:")
-    ) {
-      return target;
-    }
-    const targetBaseName = imageBaseName(normalizedTarget);
-    const matched = unusedImages.find((candidate) => {
-      const candidateNormalized = normalizeImageTarget(candidate.rawPath);
-      return (
-        candidateNormalized === normalizedTarget ||
-        candidateNormalized.endsWith(`/${normalizedTarget}`) ||
-        imageBaseName(candidateNormalized) === targetBaseName
-      );
-    });
-    if (matched) {
-      return matched.src;
-    }
-    return null;
-  };
-  const isSafeScheme = (value: string): boolean =>
-    value.startsWith("http://") ||
-    value.startsWith("https://") ||
-    value.startsWith("data:") ||
-    value.startsWith("asset:") ||
-    value.startsWith("#");
-  const toInternalAnchor = (raw: string): string | null => {
-    if (raw.startsWith("#")) {
-      return raw;
-    }
-    const hashIdx = raw.indexOf("#");
-    if (hashIdx >= 0) {
-      const fragment = raw.slice(hashIdx);
-      return fragment.startsWith("#") ? fragment : null;
-    }
-    return null;
-  };
-
-  let anchorIndex = 0;
-  const anchorTags = new Set([
-    "section",
-    "article",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "p",
-    "li",
-    "blockquote",
-    "pre",
-    "img"
-  ]);
-  const sanitizeNode = (node: Node): void => {
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      const element = node as Element;
-      const tag = element.tagName.toLowerCase();
-      if (!allowTags.has(tag)) {
-        const parent = element.parentNode;
-        if (!parent) {
-          element.remove();
-          return;
-        }
-        while (element.firstChild) {
-          parent.insertBefore(element.firstChild, element);
-        }
-        parent.removeChild(element);
-        return;
-      }
-      const allowAttrs = allowedPerTagAttrs.get(tag) ?? new Set<string>();
-      const attrs = [...element.attributes];
-      for (const attr of attrs) {
-        const name = attr.name.toLowerCase();
-        if (name.startsWith("on")) {
-          element.removeAttribute(attr.name);
-          continue;
-        }
-        if (name === "class" || name === "style") {
-          element.removeAttribute(attr.name);
-          continue;
-        }
-        if (allowedGlobalAttrs.has(name) || name.startsWith("aria-") || allowAttrs.has(name)) {
-          continue;
-        }
-        element.removeAttribute(attr.name);
-      }
-      if (tag === "img") {
-        const src = (element.getAttribute("src") ?? "").trim();
-        const resolved = resolveImageTarget(src) ?? (isSafeScheme(src) ? src : "");
-        if (resolved) {
-          element.setAttribute("src", resolved);
-        } else {
-          element.remove();
-          return;
-        }
-        if (!element.hasAttribute("loading")) {
-          element.setAttribute("loading", "lazy");
-        }
-      } else if (tag === "a") {
-        const href = (element.getAttribute("href") ?? "").trim();
-        const resolvedImage = resolveImageTarget(href);
-        const internal = toInternalAnchor(href);
-        let resolved = "";
-        if (resolvedImage) {
-          resolved = resolvedImage;
-        } else if (internal) {
-          resolved = internal;
-        } else if (isSafeScheme(href)) {
-          resolved = href;
-        }
-        if (!resolved) {
-          element.removeAttribute("href");
-        } else {
-          element.setAttribute("href", resolved);
-          if (resolved.startsWith("http://") || resolved.startsWith("https://")) {
-            element.setAttribute("target", "_blank");
-            element.setAttribute("rel", "noreferrer");
-          }
-        }
-      }
-      if (anchorTags.has(tag)) {
-        element.setAttribute("data-ll-html-anchor", String(anchorIndex));
-        anchorIndex += 1;
-      }
-    }
-    const children = [...node.childNodes];
-    for (const child of children) {
-      sanitizeNode(child);
-    }
-  };
-  sanitizeNode(parsed.body);
-  return parsed.body.innerHTML;
 }
 
 function scrollSentenceIntoView(
@@ -1450,7 +1251,7 @@ export const ReaderShell = memo(function ReaderShell({
     if (!hasPrettyHtml || !reader.reading_html_page) {
       return "";
     }
-    return renderNativeHtml(reader.reading_html_page, readerImageCandidates);
+    return renderNativePrettyHtml(reader.reading_html_page, readerImageCandidates);
   }, [hasPrettyHtml, reader.reading_html_page, readerImageCandidates]);
   const themeLabel = reader.settings.theme === "night" ? "Day" : "Night";
   const themeIcon =

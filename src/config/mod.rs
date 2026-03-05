@@ -11,6 +11,6 @@ mod tables;
 
 pub use io::{load_config, parse_config, serialize_config};
 pub use models::{
-    AppConfig, FontFamily, FontWeight, HighlightColor, LogLevel, ThemeMode, TimeRemainingDisplay,
-    TtsPauseResumeBehavior,
+    AppConfig, FontFamily, FontWeight, HighlightColor, LogLevel, NativeHtmlPaginationMode,
+    ThemeMode, TimeRemainingDisplay, TtsPauseResumeBehavior,
 };

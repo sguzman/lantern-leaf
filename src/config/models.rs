@@ -53,6 +53,10 @@ pub struct AppConfig {
     pub show_stats: bool,
     #[serde(default = "crate::config::defaults::default_dual_view_pipeline_enabled")]
     pub dual_view_pipeline_enabled: bool,
+    #[serde(default = "crate::config::defaults::default_native_html_pretty_enabled")]
+    pub native_html_pretty_enabled: bool,
+    #[serde(default = "crate::config::defaults::default_native_html_pagination_mode")]
+    pub native_html_pagination_mode: NativeHtmlPaginationMode,
     #[serde(default = "crate::config::defaults::default_day_highlight")]
     pub day_highlight: HighlightColor,
     #[serde(default = "crate::config::defaults::default_night_highlight")]
@@ -122,6 +126,10 @@ impl Default for AppConfig {
             show_stats: crate::config::defaults::default_show_stats(),
             dual_view_pipeline_enabled: crate::config::defaults::default_dual_view_pipeline_enabled(
             ),
+            native_html_pretty_enabled: crate::config::defaults::default_native_html_pretty_enabled(
+            ),
+            native_html_pagination_mode:
+                crate::config::defaults::default_native_html_pagination_mode(),
             day_highlight: crate::config::defaults::default_day_highlight(),
             night_highlight: crate::config::defaults::default_night_highlight(),
             log_level: crate::config::defaults::default_log_level(),
@@ -195,6 +203,20 @@ pub enum TimeRemainingDisplay {
 impl Default for TimeRemainingDisplay {
     fn default() -> Self {
         TimeRemainingDisplay::Adaptive
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum NativeHtmlPaginationMode {
+    SentenceWindow,
+    ChapterSection,
+}
+
+impl Default for NativeHtmlPaginationMode {
+    fn default() -> Self {
+        NativeHtmlPaginationMode::SentenceWindow
     }
 }
 

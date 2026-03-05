@@ -69,6 +69,14 @@ pub(crate) fn default_dual_view_pipeline_enabled() -> bool {
     true
 }
 
+pub(crate) fn default_native_html_pretty_enabled() -> bool {
+    true
+}
+
+pub(crate) fn default_native_html_pagination_mode() -> crate::config::NativeHtmlPaginationMode {
+    crate::config::NativeHtmlPaginationMode::SentenceWindow
+}
+
 pub(crate) fn default_day_highlight() -> crate::config::HighlightColor {
     crate::config::HighlightColor {
         r: 0.2,

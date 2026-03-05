@@ -36,6 +36,8 @@ time_remaining_display = "adaptive"
 [ui]
 show_tts = true
 show_settings = true
+native_html_pretty_enabled = true
+native_html_pagination_mode = "sentence_window"
 
 [logging]
 log_level = "debug"

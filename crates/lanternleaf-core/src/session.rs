@@ -253,7 +253,10 @@ struct SessionImage {
 
 struct MappingTelemetry {
     lookups: AtomicUsize,
+    hits: AtomicUsize,
     fallbacks: AtomicUsize,
+    missing: AtomicUsize,
+    summaries: AtomicUsize,
 }
 
 static MAPPING_TELEMETRY: OnceLock<MappingTelemetry> = OnceLock::new();
@@ -261,8 +264,49 @@ static MAPPING_TELEMETRY: OnceLock<MappingTelemetry> = OnceLock::new();
 fn mapping_telemetry() -> &'static MappingTelemetry {
     MAPPING_TELEMETRY.get_or_init(|| MappingTelemetry {
         lookups: AtomicUsize::new(0),
+        hits: AtomicUsize::new(0),
         fallbacks: AtomicUsize::new(0),
+        missing: AtomicUsize::new(0),
+        summaries: AtomicUsize::new(0),
     })
+}
+
+fn maybe_log_mapping_summary(path: &Path) {
+    const SUMMARY_EVERY: usize = 128;
+    let telemetry = mapping_telemetry();
+    let lookups = telemetry.lookups.load(Ordering::Relaxed);
+    if lookups == 0 || !lookups.is_multiple_of(SUMMARY_EVERY) {
+        return;
+    }
+    let summary_idx = lookups / SUMMARY_EVERY;
+    let last = telemetry.summaries.load(Ordering::Relaxed);
+    if summary_idx <= last {
+        return;
+    }
+    if telemetry
+        .summaries
+        .compare_exchange(last, summary_idx, Ordering::Relaxed, Ordering::Relaxed)
+        .is_err()
+    {
+        return;
+    }
+    let hits = telemetry.hits.load(Ordering::Relaxed);
+    let fallbacks = telemetry.fallbacks.load(Ordering::Relaxed);
+    let missing = telemetry.missing.load(Ordering::Relaxed);
+    let fallback_rate = if lookups == 0 {
+        0.0
+    } else {
+        (fallbacks as f64 / lookups as f64) * 100.0
+    };
+    tracing::info!(
+        path = %path.display(),
+        lookups,
+        hits,
+        fallbacks,
+        missing,
+        fallback_rate_pct = (fallback_rate * 100.0).round() / 100.0,
+        "Sentence mapping telemetry summary"
+    );
 }
 
 impl ReaderSession {
@@ -304,6 +348,16 @@ impl ReaderSession {
             tracing::warn!(
                 path = %source_path.display(),
                 "Config field dual_view_pipeline_enabled=false is deprecated; dual view pipeline is now always enabled"
+            );
+        }
+        if matches!(
+            config.native_html_pagination_mode,
+            config::NativeHtmlPaginationMode::ChapterSection
+        ) {
+            tracing::info!(
+                path = %source_path.display(),
+                mode = "chapter_section",
+                "Native HTML pagination mode configured; sentence indexing continuity remains canonical and drives page transitions"
             );
         }
         let reading_markdown = loaded.reading_markdown;
@@ -411,11 +465,14 @@ impl ReaderSession {
             .get(self.current_page)
             .cloned()
             .filter(|value| !value.trim().is_empty());
-        let reading_html_page = self
-            .reading_html
-            .as_ref()
-            .cloned()
-            .filter(|value| !value.trim().is_empty());
+        let reading_html_page = if self.config.native_html_pretty_enabled {
+            self.reading_html
+                .as_ref()
+                .cloned()
+                .filter(|value| !value.trim().is_empty())
+        } else {
+            None
+        };
         let pretty_kind = if reading_html_page.is_some() {
             PrettyKind::Html
         } else if reading_markdown_page.is_some() {
@@ -429,6 +486,8 @@ impl ReaderSession {
             total_pages = self.pages.len(),
             text_only = self.text_only_mode,
             pretty_kind = ?pretty_kind,
+            native_html_pretty_enabled = self.config.native_html_pretty_enabled,
+            native_html_pagination_mode = ?self.config.native_html_pagination_mode,
             anchor_hits,
             anchor_missing,
             has_markdown = self.reading_markdown.is_some(),
@@ -1006,7 +1065,11 @@ impl ReaderSession {
                     "Display->audio mapping fallback frequency is elevated"
                 );
             }
+            telemetry.missing.fetch_add(1, Ordering::Relaxed);
+        } else {
+            telemetry.hits.fetch_add(1, Ordering::Relaxed);
         }
+        maybe_log_mapping_summary(&self.source_path);
         mapped
     }
 
@@ -1028,7 +1091,11 @@ impl ReaderSession {
                     "Audio->display mapping fallback frequency is elevated"
                 );
             }
+            telemetry.missing.fetch_add(1, Ordering::Relaxed);
+        } else {
+            telemetry.hits.fetch_add(1, Ordering::Relaxed);
         }
+        maybe_log_mapping_summary(&self.source_path);
         mapped
     }
 
@@ -1081,7 +1148,9 @@ impl ReaderSession {
             return cached;
         }
         let Some(markdown_page) = self.markdown_pages.get(page_idx) else {
-            if let Some(reading_html) = self.reading_html.as_ref() {
+            if self.config.native_html_pretty_enabled
+                && let Some(reading_html) = self.reading_html.as_ref()
+            {
                 let anchor_count = count_html_anchors(reading_html);
                 if anchor_count == 0 {
                     tracing::debug!(
@@ -1883,5 +1952,34 @@ mod tests {
     fn markdown_anchor_count_detects_blocks() {
         let markdown = "# Title\n\nParagraph one.\n\n- Item one\n- Item two\n\n## Next";
         assert_eq!(count_markdown_anchors(markdown), 5);
+    }
+
+    #[test]
+    fn html_anchor_count_detects_structural_elements() {
+        let html = "<section><h1>A</h1><p>One</p><ul><li>x</li><li>y</li></ul><img src=\"a.png\"/></section>";
+        assert_eq!(count_html_anchors(html), 6);
+    }
+
+    #[test]
+    fn proportional_anchor_map_spreads_sentences_across_anchors() {
+        let map = proportional_anchor_map(5, 3);
+        assert_eq!(map, vec![Some(0), Some(0), Some(1), Some(1), Some(2)]);
+    }
+
+    #[test]
+    fn html_sentence_anchor_map_falls_back_to_identity_when_no_pretty_anchors() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = build_test_session(&[&["A.", "B.", "C."]]);
+        session.reading_html = Some("<div>   </div>".to_string());
+        session.repaginate(&normalizer, None);
+        let sentence_count = session
+            .raw_page_sentences
+            .get(session.current_page)
+            .map(|v| v.len())
+            .unwrap_or(0);
+        assert_eq!(
+            session.current_sentence_anchor_map(),
+            (0..sentence_count).map(Some).collect::<Vec<_>>()
+        );
     }
 }

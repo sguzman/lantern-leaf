@@ -1013,12 +1013,28 @@ fn try_read_pandoc_cache(
 
     let meta_str = match fs::read_to_string(&meta_path) {
         Ok(v) => v,
-        Err(_) => return Ok(None),
+        Err(err) => {
+            info!(
+                path = %path.display(),
+                target,
+                meta_path = %meta_path.display(),
+                "Pandoc cache miss: metadata unavailable ({err})"
+            );
+            return Ok(None);
+        }
     };
 
     let cached_meta: PandocCacheMeta = match toml::from_str(&meta_str) {
         Ok(v) => v,
-        Err(_) => return Ok(None),
+        Err(err) => {
+            warn!(
+                path = %path.display(),
+                target,
+                meta_path = %meta_path.display(),
+                "Pandoc cache metadata corrupt; rebuilding artifacts: {err}"
+            );
+            return Ok(None);
+        }
     };
 
     if cached_meta.source_len != signature.source_len
@@ -1027,6 +1043,11 @@ fn try_read_pandoc_cache(
         || cached_meta.target != signature.target
         || cached_meta.filter_sha256 != signature.filter_sha256
     {
+        info!(
+            path = %path.display(),
+            target,
+            "Pandoc cache miss: signature changed, rebuilding artifacts"
+        );
         return Ok(None);
     }
 
@@ -1057,12 +1078,26 @@ fn try_read_pdf_cache(path: &Path, signature: &PdfCacheMeta) -> Result<Option<St
     let (text_path, meta_path, _) = pdf_cache_paths(path);
     let meta_str = match fs::read_to_string(&meta_path) {
         Ok(v) => v,
-        Err(_) => return Ok(None),
+        Err(err) => {
+            info!(
+                path = %path.display(),
+                meta_path = %meta_path.display(),
+                "PDF transcript cache miss: metadata unavailable ({err})"
+            );
+            return Ok(None);
+        }
     };
 
     let cached_meta: PdfCacheMeta = match toml::from_str(&meta_str) {
         Ok(v) => v,
-        Err(_) => return Ok(None),
+        Err(err) => {
+            warn!(
+                path = %path.display(),
+                meta_path = %meta_path.display(),
+                "PDF transcript cache metadata corrupt; rebuilding artifacts: {err}"
+            );
+            return Ok(None);
+        }
     };
 
     if cached_meta.source_len != signature.source_len
@@ -1071,15 +1106,32 @@ fn try_read_pdf_cache(path: &Path, signature: &PdfCacheMeta) -> Result<Option<St
         || cached_meta.quack_config_sha256 != signature.quack_config_sha256
         || cached_meta.quack_text_filename != signature.quack_text_filename
     {
+        info!(
+            path = %path.display(),
+            "PDF transcript cache miss: signature changed, rebuilding artifacts"
+        );
         return Ok(None);
     }
 
-    let text = fs::read_to_string(&text_path).with_context(|| {
-        format!(
-            "Failed to read PDF transcript cache text at {}",
-            text_path.display()
-        )
-    })?;
+    let text = match fs::read_to_string(&text_path) {
+        Ok(value) => value,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            info!(
+                path = %path.display(),
+                cache_text_path = %text_path.display(),
+                "PDF transcript cache metadata exists but text payload is missing; rebuilding artifacts"
+            );
+            return Ok(None);
+        }
+        Err(err) => {
+            return Err(err).with_context(|| {
+                format!(
+                    "Failed to read PDF transcript cache text at {}",
+                    text_path.display()
+                )
+            });
+        }
+    };
     Ok(Some(text))
 }
 
@@ -1286,6 +1338,25 @@ mod tests {
         assert!(!loaded.has_structured_markdown);
         assert!(loaded.reading_markdown.is_none());
         assert_eq!(loaded.tts_text, "plain text source");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn html_source_emits_native_html_without_markdown_fallback() {
+        let path = unique_temp_file("html_contract", "html");
+        fs::write(
+            &path,
+            "<html><body><h1>Heading</h1><p>Paragraph</p><img src=\"cover.png\"/></body></html>",
+        )
+        .expect("write html fixture");
+
+        let loaded = load_book_content(&path).expect("html should load");
+        assert!(loaded.reading_html.is_some());
+        assert!(loaded.reading_markdown.is_none());
+        assert!(loaded.has_structured_markdown);
+        assert!(loaded.tts_text.contains("Heading"));
+        assert!(loaded.tts_text.contains("Paragraph"));
 
         let _ = fs::remove_file(path);
     }

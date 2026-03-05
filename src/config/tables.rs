@@ -59,6 +59,8 @@ impl From<ConfigTables> for AppConfig {
             show_settings: tables.ui.show_settings,
             show_stats: tables.ui.show_stats,
             dual_view_pipeline_enabled: tables.ui.dual_view_pipeline_enabled,
+            native_html_pretty_enabled: tables.ui.native_html_pretty_enabled,
+            native_html_pagination_mode: tables.ui.native_html_pagination_mode,
             log_level: tables.logging.log_level,
             cache_dir: tables.storage.cache_dir,
             tts_model_path: tables.tts.tts_model_path,
@@ -107,6 +109,8 @@ impl From<&AppConfig> for ConfigTables {
                 show_settings: config.show_settings,
                 show_stats: config.show_stats,
                 dual_view_pipeline_enabled: config.dual_view_pipeline_enabled,
+                native_html_pretty_enabled: config.native_html_pretty_enabled,
+                native_html_pagination_mode: config.native_html_pagination_mode,
             },
             logging: LoggingConfig {
                 log_level: config.log_level,
@@ -244,6 +248,10 @@ struct UiConfig {
     show_stats: bool,
     #[serde(default = "defaults::default_dual_view_pipeline_enabled")]
     dual_view_pipeline_enabled: bool,
+    #[serde(default = "defaults::default_native_html_pretty_enabled")]
+    native_html_pretty_enabled: bool,
+    #[serde(default = "defaults::default_native_html_pagination_mode")]
+    native_html_pagination_mode: super::models::NativeHtmlPaginationMode,
 }
 
 impl Default for UiConfig {
@@ -253,6 +261,8 @@ impl Default for UiConfig {
             show_settings: defaults::default_show_settings(),
             show_stats: defaults::default_show_stats(),
             dual_view_pipeline_enabled: defaults::default_dual_view_pipeline_enabled(),
+            native_html_pretty_enabled: defaults::default_native_html_pretty_enabled(),
+            native_html_pagination_mode: defaults::default_native_html_pagination_mode(),
         }
     }
 }
