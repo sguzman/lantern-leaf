@@ -252,8 +252,34 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
-function renderInlineMarkdown(raw: string): string {
+function normalizeImageTarget(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^<|>$/g, "")
+    .split("#")[0]
+    .split("?")[0]
+    .replace(/\\/g, "/")
+    .toLowerCase();
+}
+
+function imageBaseName(raw: string): string {
+  const normalized = normalizeImageTarget(raw);
+  const parts = normalized.split("/");
+  return parts[parts.length - 1] ?? normalized;
+}
+
+function renderInlineMarkdown(
+  raw: string,
+  resolveImageTarget: (target: string) => string | null
+): string {
   let html = escapeHtml(raw);
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_match, alt, target) => {
+    const resolved = resolveImageTarget(String(target ?? ""));
+    if (!resolved) {
+      return `<span class="reader-md-missing-image">[image: ${escapeHtml(String(alt ?? "").trim() || "missing")}]</span>`;
+    }
+    return `<img src="${escapeHtml(resolved)}" alt="${escapeHtml(String(alt ?? "").trim())}" loading="lazy" />`;
+  });
   html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
   html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
@@ -261,11 +287,52 @@ function renderInlineMarkdown(raw: string): string {
   return html;
 }
 
-function renderMarkdownToHtml(markdown: string): string {
+function renderMarkdownToHtml(
+  markdown: string,
+  imageCandidates: Array<{ rawPath: string; src: string }>
+): string {
   const lines = markdown.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   const out: string[] = [];
   let listBuffer: string[] = [];
   let anchorIndex = 0;
+  const unusedImages = [...imageCandidates];
+
+  const resolveImageTarget = (target: string): string | null => {
+    const normalizedTarget = normalizeImageTarget(target);
+    if (!normalizedTarget) {
+      return null;
+    }
+    if (
+      normalizedTarget.startsWith("http://") ||
+      normalizedTarget.startsWith("https://") ||
+      normalizedTarget.startsWith("data:") ||
+      normalizedTarget.startsWith("asset:")
+    ) {
+      return target;
+    }
+    const targetBaseName = imageBaseName(normalizedTarget);
+    const matched = unusedImages.find((candidate) => {
+      const candidateNormalized = normalizeImageTarget(candidate.rawPath);
+      return (
+        candidateNormalized === normalizedTarget ||
+        candidateNormalized.endsWith(`/${normalizedTarget}`) ||
+        imageBaseName(candidateNormalized) === targetBaseName
+      );
+    });
+    if (matched) {
+      const idx = unusedImages.indexOf(matched);
+      if (idx >= 0) {
+        unusedImages.splice(idx, 1);
+      }
+      return matched.src;
+    }
+    if (unusedImages.length > 0) {
+      const fallback = unusedImages.shift();
+      return fallback?.src ?? null;
+    }
+    return null;
+  };
+
   const nextAnchor = (): string => {
     const current = anchorIndex;
     anchorIndex += 1;
@@ -289,25 +356,45 @@ function renderMarkdownToHtml(markdown: string): string {
     }
     if (trimmed.startsWith("# ")) {
       flushList();
-      out.push(`<h1${nextAnchor()}>${renderInlineMarkdown(trimmed.slice(2).trim())}</h1>`);
+      out.push(
+        `<h1${nextAnchor()}>${renderInlineMarkdown(
+          trimmed.slice(2).trim(),
+          resolveImageTarget
+        )}</h1>`
+      );
       continue;
     }
     if (trimmed.startsWith("## ")) {
       flushList();
-      out.push(`<h2${nextAnchor()}>${renderInlineMarkdown(trimmed.slice(3).trim())}</h2>`);
+      out.push(
+        `<h2${nextAnchor()}>${renderInlineMarkdown(
+          trimmed.slice(3).trim(),
+          resolveImageTarget
+        )}</h2>`
+      );
       continue;
     }
     if (trimmed.startsWith("### ")) {
       flushList();
-      out.push(`<h3${nextAnchor()}>${renderInlineMarkdown(trimmed.slice(4).trim())}</h3>`);
+      out.push(
+        `<h3${nextAnchor()}>${renderInlineMarkdown(
+          trimmed.slice(4).trim(),
+          resolveImageTarget
+        )}</h3>`
+      );
       continue;
     }
     if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-      listBuffer.push(`<li${nextAnchor()}>${renderInlineMarkdown(trimmed.slice(2).trim())}</li>`);
+      listBuffer.push(
+        `<li${nextAnchor()}>${renderInlineMarkdown(
+          trimmed.slice(2).trim(),
+          resolveImageTarget
+        )}</li>`
+      );
       continue;
     }
     flushList();
-    out.push(`<p${nextAnchor()}>${renderInlineMarkdown(trimmed)}</p>`);
+    out.push(`<p${nextAnchor()}>${renderInlineMarkdown(trimmed, resolveImageTarget)}</p>`);
   }
 
   flushList();
@@ -899,8 +986,12 @@ export const ReaderShell = memo(function ReaderShell({
     () => computeReaderTypographyLayout(reader.settings),
     [reader.settings]
   );
-  const readerImageSources = useMemo(
-    () => reader.images.map((path) => toReaderImageSrc(path)),
+  const readerImageCandidates = useMemo(
+    () =>
+      reader.images.map((path) => ({
+        rawPath: path,
+        src: toReaderImageSrc(path)
+      })),
     [reader.images]
   );
   const estimatedTotalWords = useMemo(() => {
@@ -996,12 +1087,13 @@ export const ReaderShell = memo(function ReaderShell({
   const textModeLabel = reader.text_only_mode ? "Pretty Text" : "Text-only";
   const isPrettyTextMode = !reader.text_only_mode;
   const markdownUnavailable = isPrettyTextMode && !reader.reading_markdown_page;
+  const showSentenceList = reader.text_only_mode || markdownUnavailable;
   const renderedMarkdownHtml = useMemo(() => {
     if (!isPrettyTextMode || !reader.reading_markdown_page) {
       return "";
     }
-    return renderMarkdownToHtml(reader.reading_markdown_page);
-  }, [isPrettyTextMode, reader.reading_markdown_page]);
+    return renderMarkdownToHtml(reader.reading_markdown_page, readerImageCandidates);
+  }, [isPrettyTextMode, reader.reading_markdown_page, readerImageCandidates]);
   const themeLabel = reader.settings.theme === "night" ? "Day" : "Night";
   const themeIcon =
     reader.settings.theme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />;
@@ -1279,25 +1371,8 @@ export const ReaderShell = memo(function ReaderShell({
                       Markdown view unavailable for this source. Showing text fallback.
                     </Typography>
                   ) : null}
-                  {!reader.text_only_mode && readerImageSources.length > 0 ? (
-                    <Stack spacing={1}>
-                      {readerImageSources.map((src, idx) => (
-                        <img
-                          key={`${reader.source_path}:image:${idx}`}
-                          src={src}
-                          alt={`Book image ${idx + 1}`}
-                          loading="lazy"
-                          style={{
-                            maxWidth: "100%",
-                            maxHeight: 360,
-                            objectFit: "contain",
-                            borderRadius: 10
-                          }}
-                        />
-                      ))}
-                    </Stack>
-                  ) : null}
-                  {reader.sentences.map((sentence, idx) => {
+                  {showSentenceList
+                    ? reader.sentences.map((sentence, idx) => {
                     const highlighted = reader.highlighted_sentence_idx === idx;
                     const searchMatch = searchMatchSet.has(idx);
                     const baseBorderColor = isPrettyTextMode
@@ -1346,7 +1421,8 @@ export const ReaderShell = memo(function ReaderShell({
                         {sentence}
                       </button>
                     );
-                  })}
+                  })
+                    : null}
                 </Stack>
               </div>
             </div>

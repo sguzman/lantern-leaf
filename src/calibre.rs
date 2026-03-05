@@ -23,6 +23,7 @@ const THUMB_WIDTH: u32 = 68;
 const THUMB_HEIGHT: u32 = 100;
 const THUMB_PREFETCH_LIMIT: usize = 200;
 const THUMB_PREFETCH_BUDGET: Duration = Duration::from_secs(2);
+const THUMB_CACHED_PREFETCH_BUDGET: Duration = Duration::from_secs(4);
 const THUMB_FETCH_TIMEOUT: Duration = Duration::from_millis(350);
 const CALIBRE_DB_TIMEOUT_SECS: u64 = 15;
 
@@ -268,12 +269,18 @@ pub fn load_cached_books(config: &CalibreConfig) -> Result<Vec<CalibreBook>> {
         Some(books) => books,
         None => return Ok(Vec::new()),
     };
+    info!(
+        book_count = cached.len(),
+        budget_ms = THUMB_CACHED_PREFETCH_BUDGET.as_millis(),
+        "Hydrating cached calibre thumbnails (local-first pass)"
+    );
     let changed = hydrate_book_thumbnails(
         config,
         &mut cached,
-        THUMB_PREFETCH_LIMIT,
-        THUMB_PREFETCH_BUDGET,
+        usize::MAX,
+        THUMB_CACHED_PREFETCH_BUDGET,
         None,
+        false,
     );
     if changed {
         info!(
@@ -316,6 +323,7 @@ pub fn load_books_with_cancel(
                 THUMB_PREFETCH_LIMIT,
                 THUMB_PREFETCH_BUDGET,
                 cancel,
+                true,
             );
             if changed {
                 let _ = write_cache(&signature, &cached);
@@ -346,6 +354,7 @@ pub fn load_books_with_cancel(
                     THUMB_PREFETCH_LIMIT,
                     THUMB_PREFETCH_BUDGET,
                     cancel,
+                    true,
                 );
                 if changed {
                     let _ = write_cache(&signature, &cached);
@@ -372,6 +381,7 @@ pub fn load_books_with_cancel(
         THUMB_PREFETCH_LIMIT,
         THUMB_PREFETCH_BUDGET,
         cancel,
+        true,
     );
     ensure_not_cancelled(cancel, "before_write_cache")?;
     info!(book_count = books.len(), "Writing calibre cache file");
@@ -907,6 +917,7 @@ fn hydrate_book_thumbnails(
     limit: usize,
     budget: Duration,
     cancel: Option<&CancellationToken>,
+    allow_remote_fetch: bool,
 ) -> bool {
     let mut changed = false;
     let started = Instant::now();
@@ -932,7 +943,13 @@ fn hydrate_book_thumbnails(
         }
         let current = book.cover_thumbnail.clone();
         let book_started = Instant::now();
-        let next = ensure_book_thumbnail(config, book.id, book.path.as_deref(), deadline);
+        let next = ensure_book_thumbnail(
+            config,
+            book.id,
+            book.path.as_deref(),
+            deadline,
+            allow_remote_fetch,
+        );
         if next != current {
             book.cover_thumbnail = next;
             changed = true;
@@ -980,6 +997,7 @@ fn ensure_book_thumbnail(
     book_id: u64,
     source_path: Option<&Path>,
     deadline: Instant,
+    allow_remote_fetch: bool,
 ) -> Option<PathBuf> {
     let thumb_path = calibre_thumbnail_path(config, book_id);
     if thumb_path.exists() {
@@ -994,7 +1012,8 @@ fn ensure_book_thumbnail(
         return Some(thumb_path);
     }
 
-    if let Some(bytes) = fetch_thumbnail_from_server(config, book_id, deadline)
+    if allow_remote_fetch
+        && let Some(bytes) = fetch_thumbnail_from_server(config, book_id, deadline)
         && write_thumbnail_file(&thumb_path, &bytes).is_ok()
     {
         return Some(thumb_path);
