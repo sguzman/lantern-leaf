@@ -1510,12 +1510,11 @@ export const ReaderShell = memo(function ReaderShell({
                         border: "1px solid rgba(148, 163, 184, 0.36)",
                         borderRadius: 12,
                         background: "rgba(255, 255, 255, 0.82)",
-                        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.06)",
-                        color: "#1f2937"
+                        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.06)"
                       }}
                     >
                       <div
-                        className="reader-markdown-content"
+                        className="reader-native-html-content"
                         data-testid="reader-pretty-native-html"
                         onClick={handlePrettyContentClick}
                         dangerouslySetInnerHTML={{ __html: renderedNativeHtml }}

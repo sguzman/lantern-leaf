@@ -70,6 +70,16 @@ body {
   object-fit: contain;
 }
 
+.reader-native-html-content {
+  all: initial;
+  display: block;
+}
+
+.reader-native-html-content img {
+  max-width: 100%;
+  height: auto;
+}
+
 .reader-md-missing-image {
   color: #9a3412;
   font-style: italic;

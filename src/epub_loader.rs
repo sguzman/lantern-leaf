@@ -881,7 +881,13 @@ fn normalize_markdown_image_target(raw: &str) -> Option<&str> {
 fn is_supported_image_mime(mime: &str) -> bool {
     matches!(
         mime.to_ascii_lowercase().as_str(),
-        "image/png" | "image/jpeg" | "image/jpg" | "image/gif" | "image/webp" | "image/bmp"
+        "image/png"
+            | "image/jpeg"
+            | "image/jpg"
+            | "image/gif"
+            | "image/webp"
+            | "image/bmp"
+            | "image/svg+xml"
     )
 }
 
@@ -892,6 +898,7 @@ fn extension_from_mime(mime: &str) -> Option<&'static str> {
         "image/gif" => Some("gif"),
         "image/webp" => Some("webp"),
         "image/bmp" => Some("bmp"),
+        "image/svg+xml" => Some("svg"),
         _ => None,
     }
 }

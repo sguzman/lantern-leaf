@@ -22,7 +22,7 @@ describe("renderNativePrettyHtml", () => {
     expect(out).toContain('src="asset:/cache/images/cover.jpg"');
     expect(out).not.toContain("<script");
     expect(out).not.toContain("onclick=");
-    expect(out).not.toContain("style=");
+    expect(out).toContain('style="color:red"');
   });
 
   it("preserves internal anchors and table/footnote-like content", () => {

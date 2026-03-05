@@ -1,11 +1,28 @@
 function normalizeImageTarget(raw: string): string {
-  return raw
+  const cleaned = raw
     .trim()
     .replace(/^<|>$/g, "")
     .split("#")[0]
     .split("?")[0]
-    .replace(/\\/g, "/")
-    .toLowerCase();
+    .replace(/\\/g, "/");
+  let decoded = cleaned;
+  try {
+    decoded = decodeURIComponent(cleaned);
+  } catch {
+    decoded = cleaned;
+  }
+  const parts: string[] = [];
+  for (const part of decoded.split("/")) {
+    if (!part || part === ".") {
+      continue;
+    }
+    if (part === "..") {
+      parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+  return parts.join("/").toLowerCase();
 }
 
 function imageBaseName(raw: string): string {
@@ -21,6 +38,9 @@ export function renderNativePrettyHtml(
   const container = document.createElement("div");
   container.innerHTML = html;
   const allowTags = new Set([
+    "html",
+    "head",
+    "body",
     "a",
     "article",
     "aside",
@@ -63,13 +83,26 @@ export function renderNativePrettyHtml(
     "tr",
     "u",
     "ul",
+    "style",
+    "link",
   ]);
-  const allowedGlobalAttrs = new Set(["id", "title", "lang", "dir", "role", "aria-label"]);
+  const allowedGlobalAttrs = new Set([
+    "id",
+    "title",
+    "lang",
+    "dir",
+    "role",
+    "aria-label",
+    "class",
+    "style",
+  ]);
   const allowedPerTagAttrs = new Map<string, Set<string>>([
     ["a", new Set(["href"])],
     ["img", new Set(["src", "alt", "width", "height", "loading"])],
     ["td", new Set(["colspan", "rowspan"])],
     ["th", new Set(["colspan", "rowspan"])],
+    ["style", new Set(["type", "media"])],
+    ["link", new Set(["rel", "href", "type", "media"])],
   ]);
   const unusedImages = [...imageCandidates];
   const resolveImageTarget = (target: string): string | null => {
@@ -138,6 +171,10 @@ export function renderNativePrettyHtml(
       const element = node as Element;
       const tag = element.tagName.toLowerCase();
       if (!allowTags.has(tag)) {
+        if (tag === "script" || tag === "iframe" || tag === "object" || tag === "embed") {
+          element.remove();
+          return;
+        }
         const parent = element.parentNode;
         if (!parent) {
           element.remove();
@@ -157,10 +194,6 @@ export function renderNativePrettyHtml(
           element.removeAttribute(attr.name);
           continue;
         }
-        if (name === "class" || name === "style") {
-          element.removeAttribute(attr.name);
-          continue;
-        }
         if (allowedGlobalAttrs.has(name) || name.startsWith("aria-") || allowAttrs.has(name)) {
           continue;
         }
@@ -168,7 +201,9 @@ export function renderNativePrettyHtml(
       }
       if (tag === "img") {
         const src = (element.getAttribute("src") ?? "").trim();
-        const resolved = resolveImageTarget(src) ?? (isSafeScheme(src) ? src : "");
+        const resolved =
+          resolveImageTarget(src) ??
+          (isSafeScheme(src) || normalizeImageTarget(src).length > 0 ? src : "");
         if (resolved) {
           element.setAttribute("src", resolved);
         } else {
