@@ -885,6 +885,7 @@ export const ReaderShell = memo(function ReaderShell({
   const playbackLabel = reader.tts.state === "playing" ? "Pause" : "Play";
   const hasHighlightSentence = reader.highlighted_sentence_idx !== null;
   const textModeLabel = reader.text_only_mode ? "Pretty Text" : "Text-only";
+  const isPrettyTextMode = !reader.text_only_mode;
   const themeLabel = reader.settings.theme === "night" ? "Day" : "Night";
   const themeIcon =
     reader.settings.theme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />;
@@ -1126,7 +1127,10 @@ export const ReaderShell = memo(function ReaderShell({
                   paddingRight: `${readerTypography.horizontalMarginPx}px`,
                   paddingTop: `${readerTypography.verticalMarginPx}px`,
                   paddingBottom: `${readerTypography.verticalMarginPx}px`,
-                  scrollbarGutter: "stable"
+                  scrollbarGutter: "stable",
+                  background: isPrettyTextMode
+                    ? "linear-gradient(180deg, rgba(255,255,255,0.7) 0%, rgba(248,250,252,0.8) 100%)"
+                    : "transparent"
                 }}
               >
                 <Stack spacing={0.75}>
@@ -1151,6 +1155,12 @@ export const ReaderShell = memo(function ReaderShell({
                   {reader.sentences.map((sentence, idx) => {
                     const highlighted = reader.highlighted_sentence_idx === idx;
                     const searchMatch = searchMatchSet.has(idx);
+                    const baseBorderColor = isPrettyTextMode
+                      ? "rgba(148, 163, 184, 0.36)"
+                      : "transparent";
+                    const baseBackground = isPrettyTextMode
+                      ? "rgba(255, 255, 255, 0.78)"
+                      : "transparent";
                     return (
                       <button
                         key={`${reader.current_page}:${idx}`}
@@ -1164,19 +1174,28 @@ export const ReaderShell = memo(function ReaderShell({
                         data-highlighted={highlighted ? "1" : "0"}
                         style={{
                           fontSize: `${readerTypography.fontSizePx}px`,
-                          lineHeight: readerTypography.lineSpacing,
+                          lineHeight: isPrettyTextMode
+                            ? Math.max(readerTypography.lineSpacing, 1.55)
+                            : readerTypography.lineSpacing,
                           wordSpacing: `${readerTypography.wordSpacingPx}px`,
                           letterSpacing: `${readerTypography.letterSpacingPx}px`,
                           borderColor: highlighted
                             ? "var(--reader-highlight-border)"
                             : searchMatch
                               ? "var(--reader-search-border)"
-                              : "transparent",
+                              : baseBorderColor,
                           background: highlighted
                             ? "var(--reader-highlight-bg)"
                             : searchMatch
                               ? "var(--reader-search-bg)"
-                              : "transparent"
+                              : baseBackground,
+                          maxWidth: isPrettyTextMode ? "72ch" : "100%",
+                          marginInline: isPrettyTextMode ? "auto" : undefined,
+                          boxShadow: isPrettyTextMode
+                            ? "0 1px 2px rgba(15, 23, 42, 0.06)"
+                            : "none",
+                          borderRadius: isPrettyTextMode ? 12 : 8,
+                          color: isPrettyTextMode ? "#1f2937" : undefined
                         }}
                       >
                         {sentence}
