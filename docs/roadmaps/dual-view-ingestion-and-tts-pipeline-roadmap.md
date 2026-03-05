@@ -1,40 +1,40 @@
 # Dual View Ingestion and TTS Pipeline Roadmap
 
 ## Objective
-- [ ] Deliver two reader outputs per source where possible:
-- [ ] `reading_markdown` for Pretty Text rendering.
-- [ ] `tts_text` for Text-only view and the full TTS/normalization/sentence pipeline.
-- [ ] Keep TTS strictly sourced from `tts_text` to simplify behavior and reduce drift.
+- [x] Deliver two reader outputs per source where possible:
+- [x] `reading_markdown` for Pretty Text rendering.
+- [x] `tts_text` for Text-only view and the full TTS/normalization/sentence pipeline.
+- [x] Keep TTS strictly sourced from `tts_text` to simplify behavior and reduce drift.
 
 ## Phase 1: Data Model and Contracts
-- [ ] Add a normalized content model with explicit optional fields:
-- [ ] `reading_markdown: Option<String>`
-- [ ] `tts_text: String`
-- [ ] `has_structured_markdown: bool`
-- [ ] Add source capability metadata to session snapshot/event payloads.
-- [ ] Update TypeScript generated bindings for the new model.
-- [ ] Add tracing for model creation and field availability decisions.
+- [x] Add a normalized content model with explicit optional fields:
+- [x] `reading_markdown: Option<String>`
+- [x] `tts_text: String`
+- [x] `has_structured_markdown: bool`
+- [x] Add source capability metadata to session snapshot/event payloads.
+- [x] Update TypeScript generated bindings for the new model.
+- [x] Add tracing for model creation and field availability decisions.
 
 ## Phase 2: Ingestion Pipeline by Source Type
-- [ ] EPUB ingest emits `reading_markdown + tts_text`.
-- [ ] HTML ingest emits `reading_markdown + tts_text`.
-- [ ] DOCX ingest emits `reading_markdown + tts_text`.
-- [ ] PDF ingest attempts structured extract and emits `reading_markdown + tts_text` when viable.
-- [ ] PDF raw/scan fallback emits `tts_text` only with `reading_markdown = None`.
+- [x] EPUB ingest emits `reading_markdown + tts_text`.
+- [x] HTML ingest emits `reading_markdown + tts_text`.
+- [x] DOCX ingest emits `reading_markdown + tts_text`.
+- [x] PDF ingest attempts structured extract and emits `reading_markdown + tts_text` when viable.
+- [x] PDF raw/scan fallback emits `tts_text` only with `reading_markdown = None`.
 - [ ] Add tracing spans per ingest stage with source type, duration, and fallback reason.
 
 ## Phase 3: TTS and Normalization Ownership
-- [ ] Route all sentence splitting/normalization/TTS planning to `tts_text` only.
-- [ ] Prevent Pretty Text view switches from changing TTS sentence indexing.
-- [ ] Confirm bookmark/highlight resume uses `tts_text` sentence indices.
+- [x] Route all sentence splitting/normalization/TTS planning to `tts_text` only.
+- [x] Prevent Pretty Text view switches from changing TTS sentence indexing.
+- [x] Confirm bookmark/highlight resume uses `tts_text` sentence indices.
 - [ ] Add tracing to prove which payload (`tts_text`) fed each TTS runtime step.
 
 ## Phase 4: Reader Rendering Modes
-- [ ] Pretty Text mode renders `reading_markdown` when present.
-- [ ] Pretty Text mode falls back to rendered `tts_text` when markdown is unavailable.
-- [ ] Text-only mode always renders plain `tts_text`.
-- [ ] Expose non-blocking UI indicator when markdown is unavailable for current source.
-- [ ] Preserve existing settings behavior across both modes (font, spacing, highlight, search).
+- [x] Pretty Text mode renders `reading_markdown` when present.
+- [x] Pretty Text mode falls back to rendered `tts_text` when markdown is unavailable.
+- [x] Text-only mode always renders plain `tts_text`.
+- [x] Expose non-blocking UI indicator when markdown is unavailable for current source.
+- [x] Preserve existing settings behavior across both modes (font, spacing, highlight, search).
 
 ## Phase 5: Cross-View Alignment and Mapping
 - [ ] Define and persist a mapping from `tts_text` sentence indices to Pretty Text rendered anchors.
