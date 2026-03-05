@@ -102,9 +102,13 @@ const mockReaderSnapshot = (): ReaderSnapshot => ({
   current_page: 0,
   total_pages: MOCK_PAGES.length,
   text_only_mode: false,
+  has_structured_markdown: false,
   images: [],
+  tts_text_page: MOCK_PAGES[0].text,
+  reading_markdown_page: null,
   page_text: MOCK_PAGES[0].text,
   sentences: MOCK_PAGES[0].sentences,
+  sentence_anchor_map: [0],
   highlighted_sentence_idx: 0,
   search_query: "",
   search_matches: [],
@@ -223,8 +227,11 @@ function applyMockPage(reader: ReaderSnapshot, page: number): void {
 
   reader.current_page = clampedPage;
   reader.total_pages = MOCK_PAGES.length;
+  reader.tts_text_page = pageData.text;
+  reader.reading_markdown_page = null;
   reader.page_text = pageData.text;
   reader.sentences = pageData.sentences;
+  reader.sentence_anchor_map = pageData.sentences.map((_, idx) => idx);
   reader.highlighted_sentence_idx = 0;
   reader.tts.current_sentence_idx = 0;
   reader.tts.sentence_count = pageData.sentences.length;

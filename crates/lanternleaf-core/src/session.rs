@@ -130,9 +130,13 @@ pub struct ReaderSnapshot {
     pub current_page: usize,
     pub total_pages: usize,
     pub text_only_mode: bool,
+    pub has_structured_markdown: bool,
     pub images: Vec<String>,
+    pub tts_text_page: String,
+    pub reading_markdown_page: Option<String>,
     pub page_text: String,
     pub sentences: Vec<String>,
+    pub sentence_anchor_map: Vec<Option<usize>>,
     pub highlighted_sentence_idx: Option<usize>,
     pub search_query: String,
     pub search_matches: Vec<usize>,
@@ -206,10 +210,13 @@ pub struct SessionEvent {
 pub struct ReaderSession {
     pub source_path: PathBuf,
     source_name: String,
-    full_text: String,
+    tts_text: String,
+    reading_markdown: Option<String>,
+    has_structured_markdown: bool,
     images: Vec<SessionImage>,
     pub config: config::AppConfig,
     pages: Vec<String>,
+    markdown_pages: Vec<String>,
     raw_page_sentences: Vec<Vec<String>>,
     page_word_counts: Vec<usize>,
     page_sentence_counts: Vec<usize>,
@@ -269,7 +276,9 @@ impl ReaderSession {
         let mut session = Self {
             source_path,
             source_name,
-            full_text: loaded.text,
+            tts_text: loaded.tts_text,
+            reading_markdown: loaded.reading_markdown,
+            has_structured_markdown: loaded.has_structured_markdown,
             images: loaded
                 .images
                 .into_iter()
@@ -283,6 +292,7 @@ impl ReaderSession {
                 .collect(),
             config,
             pages: Vec::new(),
+            markdown_pages: Vec::new(),
             raw_page_sentences: Vec::new(),
             page_word_counts: Vec::new(),
             page_sentence_counts: Vec::new(),
@@ -344,22 +354,37 @@ impl ReaderSession {
         normalizer: &normalizer::TextNormalizer,
     ) -> ReaderSnapshot {
         let sentences = self.current_sentences(normalizer);
+        let sentence_anchor_map = sentences
+            .iter()
+            .enumerate()
+            .map(|(idx, _)| Some(idx))
+            .collect();
         let highlighted_sentence_idx = self.current_highlight_idx();
         let stats = self.stats(normalizer);
         let tts = self.tts_view(normalizer, stats.tts_progress_pct);
+        let tts_text_page = self
+            .pages
+            .get(self.current_page)
+            .cloned()
+            .unwrap_or_else(String::new);
+        let reading_markdown_page = self
+            .markdown_pages
+            .get(self.current_page)
+            .cloned()
+            .filter(|value| !value.trim().is_empty());
         ReaderSnapshot {
             source_path: self.source_path_str(),
             source_name: self.source_name.clone(),
             current_page: self.current_page,
             total_pages: self.pages.len(),
             text_only_mode: self.text_only_mode,
+            has_structured_markdown: self.has_structured_markdown,
             images: self.current_page_images(),
-            page_text: self
-                .pages
-                .get(self.current_page)
-                .cloned()
-                .unwrap_or_else(String::new),
+            tts_text_page: tts_text_page.clone(),
+            reading_markdown_page,
+            page_text: tts_text_page,
             sentences,
+            sentence_anchor_map,
             highlighted_sentence_idx,
             search_query: self.search_query.clone(),
             search_matches: self.search_matches.clone(),
@@ -716,12 +741,22 @@ impl ReaderSession {
         preserve_global_idx: Option<usize>,
     ) {
         self.pages = pagination::paginate(
-            &self.full_text,
+            &self.tts_text,
             self.config.font_size,
             self.config.lines_per_page,
         );
         if self.pages.is_empty() {
             self.pages.push(String::new());
+        }
+        self.markdown_pages = self
+            .reading_markdown
+            .as_ref()
+            .map(|markdown| {
+                pagination::paginate(markdown, self.config.font_size, self.config.lines_per_page)
+            })
+            .unwrap_or_default();
+        if !self.markdown_pages.is_empty() && self.markdown_pages.len() < self.pages.len() {
+            self.markdown_pages.resize(self.pages.len(), String::new());
         }
         self.raw_page_sentences = self
             .pages
@@ -1362,10 +1397,13 @@ mod tests {
         ReaderSession {
             source_path: PathBuf::from("/tmp/test.epub"),
             source_name: "test.epub".to_string(),
-            full_text: pages.join("\n\n"),
+            tts_text: pages.join("\n\n"),
+            reading_markdown: None,
+            has_structured_markdown: false,
             images: Vec::new(),
             config: config::AppConfig::default(),
             pages,
+            markdown_pages: Vec::new(),
             raw_page_sentences,
             page_word_counts,
             page_sentence_counts,

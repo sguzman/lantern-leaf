@@ -39,7 +39,9 @@ pub struct BookImage {
 
 #[derive(Debug, Clone)]
 pub struct LoadedBook {
-    pub text: String,
+    pub tts_text: String,
+    pub reading_markdown: Option<String>,
+    pub has_structured_markdown: bool,
     pub images: Vec<BookImage>,
 }
 
@@ -54,7 +56,7 @@ pub fn load_book_content_with_cancel(
     cancel: Option<&CancellationToken>,
 ) -> Result<LoadedBook> {
     ensure_not_cancelled(cancel, "load_book_content_start")?;
-    let text = load_source_text(path, cancel)?;
+    let content = load_source_content(path, cancel)?;
     ensure_not_cancelled(cancel, "after_load_source_text")?;
     let images = match collect_images(path) {
         Ok(images) => images,
@@ -65,36 +67,78 @@ pub fn load_book_content_with_cancel(
     };
     info!(
         path = %path.display(),
+        has_structured_markdown = content.has_structured_markdown,
+        markdown_chars = content.reading_markdown.as_ref().map(|v| v.len()).unwrap_or(0),
+        tts_chars = content.tts_text.len(),
         image_count = images.len(),
         "Source load complete"
     );
-    Ok(LoadedBook { text, images })
+    Ok(LoadedBook {
+        tts_text: content.tts_text,
+        reading_markdown: content.reading_markdown,
+        has_structured_markdown: content.has_structured_markdown,
+        images,
+    })
 }
 
-fn load_source_text(path: &Path, cancel: Option<&CancellationToken>) -> Result<String> {
+#[derive(Debug, Clone)]
+struct SourceContent {
+    tts_text: String,
+    reading_markdown: Option<String>,
+    has_structured_markdown: bool,
+}
+
+fn load_source_content(path: &Path, cancel: Option<&CancellationToken>) -> Result<SourceContent> {
     ensure_not_cancelled(cancel, "load_source_text_start")?;
     if is_text_file(path) {
         info!(path = %path.display(), "Loading plain text content");
         let data = fs::read_to_string(path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
-        let text = if data.trim().is_empty() {
+        let tts_text = if data.trim().is_empty() {
             "No textual content found in this file.".to_string()
         } else {
             data
         };
         info!(
-            total_chars = text.len(),
+            total_chars = tts_text.len(),
             "Finished loading plain text content"
         );
-        return Ok(text);
+        return Ok(SourceContent {
+            tts_text,
+            reading_markdown: None,
+            has_structured_markdown: false,
+        });
     }
 
     if is_pdf(path) {
         return load_pdf_with_quack_check(path, cancel);
     }
 
-    match load_with_pandoc(path, cancel) {
-        Ok(text) => return Ok(text),
+    match load_with_pandoc(path, "plain", cancel) {
+        Ok(tts_text) => {
+            let reading_markdown = match load_with_pandoc(path, "gfm", cancel) {
+                Ok(markdown) => {
+                    let trimmed = markdown.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(markdown)
+                    }
+                }
+                Err(err) => {
+                    warn!(
+                        path = %path.display(),
+                        "Pandoc markdown conversion failed; keeping text-only ingest: {err}"
+                    );
+                    None
+                }
+            };
+            return Ok(SourceContent {
+                tts_text,
+                has_structured_markdown: reading_markdown.is_some(),
+                reading_markdown,
+            });
+        }
         Err(err) => {
             warn!(
                 path = %path.display(),
@@ -107,7 +151,12 @@ fn load_source_text(path: &Path, cancel: Option<&CancellationToken>) -> Result<S
         ensure_not_cancelled(cancel, "before_markdown_read")?;
         let data = fs::read_to_string(path)
             .with_context(|| format!("Failed to read markdown file at {}", path.display()))?;
-        return Ok(data);
+        let tts_text = markdown_to_plain_text(&data);
+        return Ok(SourceContent {
+            tts_text,
+            reading_markdown: Some(data),
+            has_structured_markdown: true,
+        });
     }
 
     if !is_epub(path) {
@@ -156,16 +205,60 @@ fn load_source_text(path: &Path, cancel: Option<&CancellationToken>) -> Result<S
         }
     }
 
-    if combined.trim().is_empty() {
-        combined.push_str("No textual content found in this EPUB.");
-    }
+    let tts_text = if combined.trim().is_empty() {
+        "No textual content found in this EPUB.".to_string()
+    } else {
+        combined
+    };
+    let reading_markdown = match load_with_pandoc(path, "gfm", cancel) {
+        Ok(markdown) => {
+            let trimmed = markdown.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(markdown)
+            }
+        }
+        Err(err) => {
+            warn!(
+                path = %path.display(),
+                "EPUB pandoc markdown conversion failed; using text fallback: {err}"
+            );
+            None
+        }
+    };
 
     info!(
         chapters,
-        total_chars = combined.len(),
+        total_chars = tts_text.len(),
+        markdown_chars = reading_markdown.as_ref().map(|v| v.len()).unwrap_or(0),
         "Finished loading EPUB content"
     );
-    Ok(combined)
+    Ok(SourceContent {
+        tts_text,
+        has_structured_markdown: reading_markdown.is_some(),
+        reading_markdown,
+    })
+}
+
+fn markdown_to_plain_text(input: &str) -> String {
+    match html2text::from_read(input.as_bytes(), 10_000) {
+        Ok(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                "No textual content found in this file.".to_string()
+            } else {
+                text
+            }
+        }
+        Err(_) => {
+            if input.trim().is_empty() {
+                "No textual content found in this file.".to_string()
+            } else {
+                input.to_string()
+            }
+        }
+    }
 }
 
 fn is_text_file(path: &Path) -> bool {
@@ -204,7 +297,7 @@ fn is_pdf(path: &Path) -> bool {
     )
 }
 
-fn load_pdf_with_quack_check(path: &Path, cancel: Option<&CancellationToken>) -> Result<String> {
+fn load_pdf_with_quack_check(path: &Path, cancel: Option<&CancellationToken>) -> Result<SourceContent> {
     ensure_not_cancelled(cancel, "before_pdf_quack_check")?;
     let config_path = quack_check_config_path()?;
     let config_sha256 = hash_file(&config_path).with_context(|| {
@@ -217,12 +310,17 @@ fn load_pdf_with_quack_check(path: &Path, cancel: Option<&CancellationToken>) ->
     let signature = pdf_signature(path, &config_sha256, &text_filename)?;
 
     if let Some(cached) = try_read_pdf_cache(path, &signature)? {
+        let tts_text = normalize_pdf_text_for_reader(&cached);
         info!(
             path = %path.display(),
-            total_chars = cached.len(),
+            total_chars = tts_text.len(),
             "Using cached quack-check PDF transcript"
         );
-        return Ok(normalize_pdf_text_for_reader(&cached));
+        return Ok(SourceContent {
+            tts_text,
+            reading_markdown: None,
+            has_structured_markdown: false,
+        });
     }
 
     let (_, _, run_out_dir) = pdf_cache_paths(path);
@@ -238,21 +336,32 @@ fn load_pdf_with_quack_check(path: &Path, cancel: Option<&CancellationToken>) ->
             path.display()
         )
     })?;
-    let text = if run.text.trim().is_empty() {
+    let tts_text = if run.text.trim().is_empty() {
         "No textual content found in this file.".to_string()
     } else {
         normalize_pdf_text_for_reader(&run.text)
     };
+    let reading_markdown = run
+        .markdown
+        .trim()
+        .is_empty()
+        .then(|| None)
+        .unwrap_or_else(|| Some(run.markdown));
 
-    write_pdf_cache(path, &signature, &text)?;
+    write_pdf_cache(path, &signature, &tts_text)?;
     info!(
         path = %path.display(),
-        total_chars = text.len(),
+        total_chars = tts_text.len(),
+        markdown_chars = reading_markdown.as_ref().map(|v| v.len()).unwrap_or(0),
         job_id = %run.job_id,
         job_dir = %run.job_dir.display(),
         "Finished quack-check PDF transcription"
     );
-    Ok(text)
+    Ok(SourceContent {
+        tts_text,
+        has_structured_markdown: reading_markdown.is_some(),
+        reading_markdown,
+    })
 }
 
 fn normalize_pdf_text_for_reader(input: &str) -> String {
@@ -305,16 +414,17 @@ fn flush_pdf_paragraph(out: &mut String, paragraph: &mut String) {
     paragraph.clear();
 }
 
-fn load_with_pandoc(path: &Path, cancel: Option<&CancellationToken>) -> Result<String> {
+fn load_with_pandoc(path: &Path, target: &str, cancel: Option<&CancellationToken>) -> Result<String> {
     ensure_not_cancelled(cancel, "before_pandoc")?;
     info!(
         path = %path.display(),
-        "Converting source to plain text with pandoc"
+        target,
+        "Converting source with pandoc"
     );
 
-    let signature = source_signature(path)?;
-    if let Some(cached) = try_read_pandoc_cache(path, &signature)? {
-        info!(path = %path.display(), "Using cached pandoc plain-text conversion");
+    let signature = source_signature(path, target)?;
+    if let Some(cached) = try_read_pandoc_cache(path, target, &signature)? {
+        info!(path = %path.display(), target, "Using cached pandoc conversion");
         return Ok(cached);
     }
 
@@ -322,20 +432,26 @@ fn load_with_pandoc(path: &Path, cancel: Option<&CancellationToken>) -> Result<S
     let output = Command::new("pandoc")
         .arg(path)
         .arg("--to")
-        .arg("plain")
+        .arg(target)
         .arg("--wrap=none")
         .arg("--columns=100000")
         .arg("--strip-comments")
         .arg("--eol=lf")
-        .arg("--lua-filter")
-        .arg(&filter_path)
+        .args(if target == "plain" {
+            vec![
+                "--lua-filter".to_string(),
+                filter_path.to_string_lossy().to_string(),
+            ]
+        } else {
+            Vec::new()
+        })
         .output()
         .with_context(|| format!("Failed to start pandoc for {}", path.display()))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!(
-            "pandoc conversion failed for {}: {}",
+            "pandoc conversion to {target} failed for {}: {}",
             path.display(),
             stderr.trim()
         );
@@ -350,12 +466,13 @@ fn load_with_pandoc(path: &Path, cancel: Option<&CancellationToken>) -> Result<S
         text
     };
 
-    if let Err(err) = write_pandoc_cache(path, &signature, &text) {
+    if let Err(err) = write_pandoc_cache(path, target, &signature, &text) {
         warn!(path = %path.display(), "Failed to cache pandoc text output: {err}");
     }
 
     info!(
         path = %path.display(),
+        target,
         total_chars = text.len(),
         "Finished pandoc conversion"
     );
@@ -662,6 +779,8 @@ struct PandocCacheMeta {
     #[serde(default)]
     pipeline_rev: String,
     #[serde(default)]
+    target: String,
+    #[serde(default)]
     filter_sha256: String,
 }
 
@@ -687,7 +806,7 @@ struct QuackCheckOutputToml {
     text_filename: Option<String>,
 }
 
-fn source_signature(path: &Path) -> Result<PandocCacheMeta> {
+fn source_signature(path: &Path, target: &str) -> Result<PandocCacheMeta> {
     let meta = fs::metadata(path)
         .with_context(|| format!("Failed to read source metadata for {}", path.display()))?;
 
@@ -697,14 +816,19 @@ fn source_signature(path: &Path) -> Result<PandocCacheMeta> {
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
         .map(|duration| duration.as_secs());
 
-    let filter_path = pandoc_filter_path()?;
-    let filter_sha256 = hash_file(&filter_path)
-        .with_context(|| format!("Failed to hash pandoc filter at {}", filter_path.display()))?;
+    let filter_sha256 = if target == "plain" {
+        let filter_path = pandoc_filter_path()?;
+        hash_file(&filter_path)
+            .with_context(|| format!("Failed to hash pandoc filter at {}", filter_path.display()))?
+    } else {
+        String::new()
+    };
 
     Ok(PandocCacheMeta {
         source_len: meta.len(),
         source_modified_unix_secs: modified,
         pipeline_rev: PANDOC_PIPELINE_REV.to_string(),
+        target: target.to_string(),
         filter_sha256,
     })
 }
@@ -727,11 +851,16 @@ fn pdf_signature(path: &Path, config_sha256: &str, text_filename: &str) -> Resul
     })
 }
 
-fn pandoc_cache_paths(path: &Path) -> (PathBuf, PathBuf) {
+fn pandoc_cache_paths(path: &Path, target: &str) -> (PathBuf, PathBuf) {
     let dir = hash_dir(path);
+    let suffix = if target == "plain" {
+        "plain"
+    } else {
+        "markdown"
+    };
     (
-        dir.join("source-plain.txt"),
-        dir.join("source-plain.meta.toml"),
+        dir.join(format!("source-{suffix}.txt")),
+        dir.join(format!("source-{suffix}.meta.toml")),
     )
 }
 
@@ -744,8 +873,12 @@ fn pdf_cache_paths(path: &Path) -> (PathBuf, PathBuf, PathBuf) {
     )
 }
 
-fn try_read_pandoc_cache(path: &Path, signature: &PandocCacheMeta) -> Result<Option<String>> {
-    let (text_path, meta_path) = pandoc_cache_paths(path);
+fn try_read_pandoc_cache(
+    path: &Path,
+    target: &str,
+    signature: &PandocCacheMeta,
+) -> Result<Option<String>> {
+    let (text_path, meta_path) = pandoc_cache_paths(path, target);
 
     let meta_str = match fs::read_to_string(&meta_path) {
         Ok(v) => v,
@@ -760,6 +893,7 @@ fn try_read_pandoc_cache(path: &Path, signature: &PandocCacheMeta) -> Result<Opt
     if cached_meta.source_len != signature.source_len
         || cached_meta.source_modified_unix_secs != signature.source_modified_unix_secs
         || cached_meta.pipeline_rev != signature.pipeline_rev
+        || cached_meta.target != signature.target
         || cached_meta.filter_sha256 != signature.filter_sha256
     {
         return Ok(None);
@@ -804,8 +938,13 @@ fn try_read_pdf_cache(path: &Path, signature: &PdfCacheMeta) -> Result<Option<St
     Ok(Some(text))
 }
 
-fn write_pandoc_cache(path: &Path, signature: &PandocCacheMeta, text: &str) -> Result<()> {
-    let (text_path, meta_path) = pandoc_cache_paths(path);
+fn write_pandoc_cache(
+    path: &Path,
+    target: &str,
+    signature: &PandocCacheMeta,
+    text: &str,
+) -> Result<()> {
+    let (text_path, meta_path) = pandoc_cache_paths(path, target);
     if let Some(parent) = text_path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create cache dir {}", parent.display()))?;

@@ -243,6 +243,71 @@ function toReaderImageSrc(path: string): string {
   }
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function renderInlineMarkdown(raw: string): string {
+  let html = escapeHtml(raw);
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+  return html;
+}
+
+function renderMarkdownToHtml(markdown: string): string {
+  const lines = markdown.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const out: string[] = [];
+  let listBuffer: string[] = [];
+
+  const flushList = (): void => {
+    if (listBuffer.length === 0) {
+      return;
+    }
+    out.push(`<ul>${listBuffer.join("")}</ul>`);
+    listBuffer = [];
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushList();
+      continue;
+    }
+    if (trimmed.startsWith("# ")) {
+      flushList();
+      out.push(`<h1>${renderInlineMarkdown(trimmed.slice(2).trim())}</h1>`);
+      continue;
+    }
+    if (trimmed.startsWith("## ")) {
+      flushList();
+      out.push(`<h2>${renderInlineMarkdown(trimmed.slice(3).trim())}</h2>`);
+      continue;
+    }
+    if (trimmed.startsWith("### ")) {
+      flushList();
+      out.push(`<h3>${renderInlineMarkdown(trimmed.slice(4).trim())}</h3>`);
+      continue;
+    }
+    if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      listBuffer.push(`<li>${renderInlineMarkdown(trimmed.slice(2).trim())}</li>`);
+      continue;
+    }
+    flushList();
+    out.push(`<p>${renderInlineMarkdown(trimmed)}</p>`);
+  }
+
+  flushList();
+  return out.join("");
+}
+
 function scrollSentenceIntoView(
   container: HTMLElement,
   sentence: HTMLElement,
@@ -886,6 +951,13 @@ export const ReaderShell = memo(function ReaderShell({
   const hasHighlightSentence = reader.highlighted_sentence_idx !== null;
   const textModeLabel = reader.text_only_mode ? "Pretty Text" : "Text-only";
   const isPrettyTextMode = !reader.text_only_mode;
+  const markdownUnavailable = isPrettyTextMode && !reader.reading_markdown_page;
+  const renderedMarkdownHtml = useMemo(() => {
+    if (!isPrettyTextMode || !reader.reading_markdown_page) {
+      return "";
+    }
+    return renderMarkdownToHtml(reader.reading_markdown_page);
+  }, [isPrettyTextMode, reader.reading_markdown_page]);
   const themeLabel = reader.settings.theme === "night" ? "Day" : "Night";
   const themeIcon =
     reader.settings.theme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />;
@@ -1134,6 +1206,35 @@ export const ReaderShell = memo(function ReaderShell({
                 }}
               >
                 <Stack spacing={0.75}>
+                  {isPrettyTextMode && reader.reading_markdown_page ? (
+                    <div
+                      style={{
+                        maxWidth: "72ch",
+                        marginInline: "auto",
+                        padding: "10px 12px",
+                        border: "1px solid rgba(148, 163, 184, 0.36)",
+                        borderRadius: 12,
+                        background: "rgba(255, 255, 255, 0.82)",
+                        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.06)",
+                        color: "#1f2937"
+                      }}
+                    >
+                      <div
+                        className="reader-markdown-content"
+                        data-testid="reader-pretty-markdown"
+                        dangerouslySetInnerHTML={{ __html: renderedMarkdownHtml }}
+                      />
+                    </div>
+                  ) : null}
+                  {markdownUnavailable ? (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      data-testid="reader-pretty-markdown-fallback"
+                    >
+                      Markdown view unavailable for this source. Showing text fallback.
+                    </Typography>
+                  ) : null}
                   {!reader.text_only_mode && readerImageSources.length > 0 ? (
                     <Stack spacing={1}>
                       {readerImageSources.map((src, idx) => (

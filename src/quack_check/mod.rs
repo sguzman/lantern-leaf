@@ -23,6 +23,7 @@ use tracing::warn;
 pub struct RunResult {
     pub job_id: String,
     pub job_dir: PathBuf,
+    pub markdown: String,
     pub text: String,
 }
 
@@ -113,6 +114,7 @@ pub fn run_pdf_to_text_with_cancel(
     Ok(RunResult {
         job_id,
         job_dir,
+        markdown: result.markdown,
         text: result.text,
     })
 }

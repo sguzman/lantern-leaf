@@ -604,6 +604,7 @@ fn is_supported_source(path: &Path) -> bool {
                 || ext == "md"
                 || ext == "markdown"
                 || ext == "html"
+                || ext == "docx"
     )
 }
 
@@ -642,7 +643,7 @@ fn resolve_source_path(path: &str) -> Result<PathBuf, BridgeError> {
         return Err(bridge_error(
             "unsupported_source",
             format!(
-                "Unsupported source type for {} (expected .epub/.pdf/.txt/.md/.markdown/.html)",
+                "Unsupported source type for {} (expected .epub/.pdf/.txt/.md/.markdown/.html/.docx)",
                 candidate.display()
             ),
         ));
@@ -2948,9 +2949,13 @@ mod tests {
                 current_page: 0,
                 total_pages: 1,
                 text_only_mode: false,
+                has_structured_markdown: false,
                 images: Vec::new(),
+                tts_text_page: "hello".to_string(),
+                reading_markdown_page: None,
                 page_text: "hello".to_string(),
                 sentences: vec!["hello".to_string()],
+                sentence_anchor_map: vec![Some(0)],
                 highlighted_sentence_idx: Some(0),
                 search_query: String::new(),
                 search_matches: vec![],
@@ -3044,7 +3049,8 @@ mod tests {
         assert!(is_supported_source(Path::new("/tmp/book.md")));
         assert!(is_supported_source(Path::new("/tmp/book.markdown")));
         assert!(is_supported_source(Path::new("/tmp/book.html")));
-        assert!(!is_supported_source(Path::new("/tmp/book.docx")));
+        assert!(is_supported_source(Path::new("/tmp/book.docx")));
+        assert!(!is_supported_source(Path::new("/tmp/book.odt")));
     }
 
     #[test]
@@ -3056,7 +3062,7 @@ mod tests {
             .expect_err("missing source must fail");
         assert_eq!(missing.code, "not_found");
 
-        let unsupported = unique_temp_file("unsupported", "docx");
+        let unsupported = unique_temp_file("unsupported", "odt");
         fs::write(&unsupported, "hello world").expect("write temp file");
         let err = resolve_source_path(unsupported.to_string_lossy().as_ref())
             .expect_err("unsupported extension must fail");
