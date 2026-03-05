@@ -102,8 +102,43 @@ export function renderNativePrettyHtml(
     ["td", new Set(["colspan", "rowspan"])],
     ["th", new Set(["colspan", "rowspan"])],
     ["style", new Set(["type", "media"])],
-    ["link", new Set(["rel", "href", "type", "media"])],
   ]);
+
+  const scopeCssToNativeContainer = (rawCss: string): string => {
+    const scope = ".reader-native-html-content";
+    let css = rawCss.replace(/@import[^;]+;/gi, "");
+    css = css.replace(/@page\s*\{[\s\S]*?\}/gi, "");
+    css = css.replace(/(^|})\s*([^@}{][^{]+)\{/g, (_m, sep, selectorGroup) => {
+      const rewritten = String(selectorGroup)
+        .split(",")
+        .map((selector) => {
+          const trimmed = selector.trim();
+          if (!trimmed) {
+            return trimmed;
+          }
+          if (
+            trimmed.startsWith(scope) ||
+            trimmed.startsWith("@") ||
+            trimmed.startsWith("from") ||
+            trimmed.startsWith("to") ||
+            /\d+%\s*$/.test(trimmed)
+          ) {
+            return trimmed;
+          }
+          const normalized = trimmed
+            .replace(/\bhtml\b/g, scope)
+            .replace(/\bbody\b/g, scope)
+            .replace(/\:root\b/g, scope);
+          if (normalized.includes(scope)) {
+            return normalized;
+          }
+          return `${scope} ${normalized}`;
+        })
+        .join(", ");
+      return `${sep} ${rewritten}{`;
+    });
+    return css;
+  };
   const unusedImages = [...imageCandidates];
   const resolveImageTarget = (target: string): string | null => {
     const normalizedTarget = normalizeImageTarget(target);
@@ -213,6 +248,13 @@ export function renderNativePrettyHtml(
         if (!element.hasAttribute("loading")) {
           element.setAttribute("loading", "lazy");
         }
+      } else if (tag === "style") {
+        const rawCss = element.textContent ?? "";
+        element.textContent = scopeCssToNativeContainer(rawCss);
+      } else if (tag === "link") {
+        // Remove external/relative stylesheet links to avoid global style bleed.
+        element.remove();
+        return;
       } else if (tag === "a") {
         const href = (element.getAttribute("href") ?? "").trim();
         const resolvedImage = resolveImageTarget(href);

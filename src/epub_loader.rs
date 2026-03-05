@@ -413,6 +413,24 @@ fn load_epub_native_html(path: &Path, cancel: Option<&CancellationToken>) -> Res
     ensure_not_cancelled(cancel, "before_epub_native_html_open")?;
     let mut doc =
         EpubDoc::new(path).with_context(|| format!("Failed to open EPUB at {}", path.display()))?;
+    let mut style_blocks = Vec::new();
+    let mut css_resources: Vec<(String, String)> = doc
+        .resources
+        .iter()
+        .map(|(id, item)| (id.clone(), item.mime.clone()))
+        .filter(|(_, mime)| mime.eq_ignore_ascii_case("text/css"))
+        .collect();
+    css_resources.sort_by(|a, b| a.0.cmp(&b.0));
+    for (id, _) in css_resources {
+        if let Some((bytes, _)) = doc.get_resource(&id)
+            && let Ok(css) = String::from_utf8(bytes)
+        {
+            let trimmed = css.trim();
+            if !trimmed.is_empty() {
+                style_blocks.push(trimmed.to_string());
+            }
+        }
+    }
     let mut sections = Vec::new();
     let mut chapter_idx = 0usize;
     loop {
@@ -434,7 +452,12 @@ fn load_epub_native_html(path: &Path, cancel: Option<&CancellationToken>) -> Res
     if sections.is_empty() {
         Ok("<p>No structured HTML content found in this EPUB.</p>".to_string())
     } else {
-        Ok(sections.join("\n"))
+        let styles = if style_blocks.is_empty() {
+            String::new()
+        } else {
+            format!("<style>{}</style>\n", style_blocks.join("\n\n"))
+        };
+        Ok(format!("{styles}{}", sections.join("\n")))
     }
 }
 
