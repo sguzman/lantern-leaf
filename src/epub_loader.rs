@@ -1424,6 +1424,41 @@ mod tests {
     }
 
     #[test]
+    fn html_source_tts_text_drops_non_text_noise_from_plain_conversion() {
+        let path = unique_temp_file("html_plain_cleanup", "html");
+        fs::write(
+            &path,
+            r#"
+            <html>
+              <head>
+                <style>body { color: red; }</style>
+                <script>console.log("nope")</script>
+              </head>
+              <body>
+                <h1>Readable Heading</h1>
+                <p>First readable paragraph.</p>
+                <figure><img src="cover.png" alt="Cover"/><figcaption>Ignored figure caption</figcaption></figure>
+                <table><tr><td>Ignore table text</td></tr></table>
+                <p>Second readable paragraph.</p>
+              </body>
+            </html>
+            "#,
+        )
+        .expect("write html cleanup fixture");
+
+        let loaded = load_book_content(&path).expect("html should load");
+        assert!(loaded.reading_html.is_some());
+        assert!(loaded.tts_text.contains("Readable Heading"));
+        assert!(loaded.tts_text.contains("First readable paragraph."));
+        assert!(loaded.tts_text.contains("Second readable paragraph."));
+        assert!(!loaded.tts_text.contains("console.log"));
+        assert!(!loaded.tts_text.contains("body { color: red; }"));
+        assert!(!loaded.tts_text.contains("Ignore table text"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn resolve_pdf_content_marks_markdown_only_when_present() {
         let structured =
             resolve_pdf_dual_view_content("Line one.\nLine two.", "# Heading\n\nLine one.");

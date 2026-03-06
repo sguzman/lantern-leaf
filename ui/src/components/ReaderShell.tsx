@@ -38,6 +38,7 @@ import {
   computeReaderTopBarVisibility,
   computeReaderTtsControlVisibility
 } from "./layoutPolicies";
+import { buildHtmlSentenceAnchorMap, normalizeSyncText } from "./htmlSync";
 import { renderNativePrettyHtml } from "./prettyHtml";
 import { computeReaderTypographyLayout } from "./readerTypography";
 import type {
@@ -520,14 +521,6 @@ function scrollSentenceIntoView(
     return;
   }
   container.scrollTo({ top: targetTopPx, behavior });
-}
-
-function normalizeSyncText(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function NumericSettingControl({
@@ -1440,80 +1433,22 @@ export const ReaderShell = memo(function ReaderShell({
       htmlSentenceAnchorMapRef.current = [];
       return;
     }
-    const anchorTexts = anchors.map((element) => normalizeSyncText(element.textContent ?? ""));
-    const mapped: number[] = [];
-    let scanStart = 0;
-    const hintAnchors = reader.sentence_anchor_map;
-    let confidentMatches = 0;
-    let fallbackMatches = 0;
-    let cappedLeaps = 0;
-    for (let sentenceIdx = 0; sentenceIdx < reader.sentences.length; sentenceIdx += 1) {
-      const sentence = reader.sentences[sentenceIdx];
-      const normalizedSentence = normalizeSyncText(sentence);
-      const sentencePrefix = normalizedSentence.slice(0, 120);
-      const shortPrefix = normalizedSentence.slice(0, 56);
-      const prev = mapped.length > 0 ? mapped[mapped.length - 1] : scanStart;
-      const hintRaw = hintAnchors[sentenceIdx];
-      const hint =
-        hintRaw !== null && hintRaw !== undefined && Number.isFinite(hintRaw)
-          ? Math.max(0, Math.min(anchorTexts.length - 1, hintRaw))
-          : prev;
-      const base = Math.max(prev, hint);
-      const localStart = Math.max(0, Math.min(prev, hint) - 18);
-      const localEnd = Math.min(anchorTexts.length - 1, base + 56);
-      let found = -1;
-      let foundScore = 0;
-      if (sentencePrefix.length > 0) {
-        for (let idx = localStart; idx <= localEnd; idx += 1) {
-          const anchorText = anchorTexts[idx];
-          if (!anchorText) {
-            continue;
-          }
-          if (anchorText.includes(sentencePrefix)) {
-            found = idx;
-            foundScore = 1;
-            break;
-          }
-          let score = 0;
-          if (shortPrefix.length >= 24 && anchorText.includes(shortPrefix)) {
-            score = Math.max(score, 0.92);
-          }
-          const anchorPrefix = anchorText.slice(0, Math.min(72, anchorText.length));
-          if (anchorPrefix.length >= 24 && sentencePrefix.includes(anchorPrefix)) {
-            score = Math.max(score, 0.78);
-          }
-          if (score > foundScore) {
-            found = idx;
-            foundScore = score;
-          }
-        }
-      }
-      if (found < 0 || foundScore < 0.88) {
-        fallbackMatches += 1;
-        const driftTarget = Math.max(prev, hint);
-        found = Math.min(prev + 1, driftTarget);
-      } else {
-        if (found - prev > 2 && foundScore < 0.99) {
-          cappedLeaps += 1;
-          found = prev;
-        } else {
-          confidentMatches += 1;
-        }
-      }
-      const clamped = Math.max(0, Math.min(anchors.length - 1, found));
-      mapped.push(clamped);
-      scanStart = Math.max(scanStart, clamped);
-    }
+    const anchorTexts = anchors.map((element) => element.textContent ?? "");
+    const { map, diagnostics } = buildHtmlSentenceAnchorMap(
+      anchorTexts,
+      reader.sentences,
+      reader.sentence_anchor_map
+    );
     if (import.meta.env.DEV) {
       console.debug("reader pretty html sync map", {
         sentences: reader.sentences.length,
         anchors: anchors.length,
-        confidentMatches,
-        fallbackMatches,
-        cappedLeaps
+        confidentMatches: diagnostics.confidentMatches,
+        fallbackMatches: diagnostics.fallbackMatches,
+        cappedLeaps: diagnostics.cappedLeaps
       });
     }
-    htmlSentenceAnchorMapRef.current = mapped;
+    htmlSentenceAnchorMapRef.current = map;
   }, [hasPrettyHtml, reader.sentence_anchor_map, renderedNativeHtml, reader.sentences]);
   const themeLabel = reader.settings.theme === "night" ? "Day" : "Night";
   const themeIcon =
