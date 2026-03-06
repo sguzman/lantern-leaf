@@ -214,7 +214,11 @@ export default function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <main className="app-root h-screen overflow-hidden">
+      <main
+        className={
+          readerMode ? "app-root h-screen overflow-hidden" : "app-root h-screen overflow-y-auto"
+        }
+      >
         <AppHiddenStatus />
 
         <Container
@@ -222,7 +226,7 @@ export default function App() {
           className={
             readerMode
               ? "h-full overflow-hidden px-2 py-2 md:px-4 md:py-3"
-              : "h-full overflow-y-auto px-2 py-4 md:px-4 md:py-6"
+              : "px-2 py-4 md:px-4 md:py-6"
           }
         >
           <Stack
