@@ -1081,7 +1081,31 @@ impl ReaderSession {
         let plan = self.ensure_current_plan(normalizer);
         let telemetry = mapping_telemetry();
         telemetry.lookups.fetch_add(1, Ordering::Relaxed);
-        let mapped = plan.audio_to_display.get(audio_idx).copied();
+        let mapped = if plan.audio_to_display.is_empty() {
+            None
+        } else {
+            let clamped = audio_idx.min(plan.audio_to_display.len().saturating_sub(1));
+            plan.audio_to_display
+                .get(clamped)
+                .copied()
+                .or_else(|| {
+                    // Keep playback highlight stable by walking outward to the nearest
+                    // mapped display sentence when exact audio->display mapping is missing.
+                    for offset in 1..plan.audio_to_display.len() {
+                        let prev = clamped.saturating_sub(offset);
+                        if let Some(display) = plan.audio_to_display.get(prev) {
+                            return Some(*display);
+                        }
+                        let next = clamped.saturating_add(offset);
+                        if let Some(display) = plan.audio_to_display.get(next) {
+                            return Some(*display);
+                        }
+                    }
+                    None
+                })
+                .or(self.highlighted_display_idx)
+                .or_else(|| (self.current_display_len() > 0).then_some(0))
+        };
         if mapped.is_none() {
             let fallback = telemetry.fallbacks.fetch_add(1, Ordering::Relaxed) + 1;
             if fallback % 32 == 0 {
