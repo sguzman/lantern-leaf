@@ -684,7 +684,7 @@ export const ReaderShell = memo(function ReaderShell({
   const [statsTab, setStatsTab] = useState<"page" | "global" | "session">("page");
   const sentenceRefs = useRef<Record<number, HTMLButtonElement | null>>({});
   const sentenceScrollRef = useRef<HTMLDivElement | null>(null);
-  const topBarRef = useRef<HTMLDivElement | null>(null);
+  const layoutViewportRef = useRef<HTMLDivElement | null>(null);
   const [topBarWidth, setTopBarWidth] = useState(0);
   const [sessionNowMs, setSessionNowMs] = useState(Date.now());
   const sessionStartMsRef = useRef(Date.now());
@@ -713,7 +713,7 @@ export const ReaderShell = memo(function ReaderShell({
   const pendingScrollFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const node = topBarRef.current;
+    const node = layoutViewportRef.current;
     if (!node) {
       return;
     }
@@ -1380,9 +1380,8 @@ export const ReaderShell = memo(function ReaderShell({
   return (
     <Card className="w-full max-w-[1700px] min-h-0 rounded-3xl border border-slate-200 shadow-sm lg:h-full">
       <CardContent className="h-full p-4 md:p-6" sx={{ position: "relative" }}>
-        <Stack spacing={2} sx={{ height: "100%", minHeight: 0 }}>
+        <Stack ref={layoutViewportRef} spacing={2} sx={{ height: "100%", minHeight: 0 }}>
           <Stack
-            ref={topBarRef}
             direction="row"
             alignItems="center"
             spacing={1}
