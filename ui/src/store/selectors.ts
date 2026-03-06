@@ -101,15 +101,7 @@ export function useAppThemeState() {
   return useAppStore(
     useShallow((state) => ({
       bootstrapState: state.bootstrapState,
-      readerThemeSettings: state.reader
-        ? {
-            theme: state.reader.settings.theme,
-            font_family: state.reader.settings.font_family,
-            font_weight: state.reader.settings.font_weight,
-            day_highlight: state.reader.settings.day_highlight,
-            night_highlight: state.reader.settings.night_highlight
-          }
-        : null
+      readerThemeSettings: state.reader?.settings ?? null
     }))
   );
 }
