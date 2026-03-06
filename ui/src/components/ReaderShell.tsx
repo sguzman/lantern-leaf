@@ -25,7 +25,6 @@ import {
 } from "@mui/material";
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type MouseEvent } from "react";
 
-import { computeReaderTopBarVisibility } from "./layoutPolicies";
 import { recordPerfMeasure, useRenderDebugCounter } from "../perf/debug";
 import { buildHtmlSentenceAnchorMap } from "./htmlSync";
 import { renderNativePrettyHtml } from "./prettyHtml";
@@ -684,8 +683,6 @@ export const ReaderShell = memo(function ReaderShell({
   const [statsTab, setStatsTab] = useState<"page" | "global" | "session">("page");
   const sentenceRefs = useRef<Record<number, HTMLButtonElement | null>>({});
   const sentenceScrollRef = useRef<HTMLDivElement | null>(null);
-  const layoutViewportRef = useRef<HTMLDivElement | null>(null);
-  const [topBarWidth, setTopBarWidth] = useState(0);
   const [sessionNowMs, setSessionNowMs] = useState(Date.now());
   const sessionStartMsRef = useRef(Date.now());
   const listeningAccumulatedMsRef = useRef(0);
@@ -711,31 +708,6 @@ export const ReaderShell = memo(function ReaderShell({
   const prettyLastAutoScrollAnchorRef = useRef<number | null>(null);
   const prettyLastAutoScrollPageRef = useRef<number | null>(null);
   const pendingScrollFrameRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    const node = layoutViewportRef.current;
-    if (!node) {
-      return;
-    }
-
-    const resizeObserver = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) {
-        return;
-      }
-      const nextWidth = entry.contentRect.width;
-      setTopBarWidth((current) =>
-        Math.abs(current - nextWidth) > 0.5 ? nextWidth : current
-      );
-    });
-    resizeObserver.observe(node);
-    const initialWidth = node.getBoundingClientRect().width;
-    setTopBarWidth((current) =>
-      Math.abs(current - initialWidth) > 0.5 ? initialWidth : current
-    );
-
-    return () => resizeObserver.disconnect();
-  }, []);
 
   useEffect(() => {
     setPageInput(String(reader.current_page + 1));
@@ -1052,10 +1024,6 @@ export const ReaderShell = memo(function ReaderShell({
     return null;
   }, [reader.panels.show_settings, reader.panels.show_stats, reader.panels.show_tts]);
 
-  const topBarVisibility = useMemo(
-    () => computeReaderTopBarVisibility(topBarWidth),
-    [topBarWidth]
-  );
   const readerTypography = useMemo(
     () => computeReaderTypographyLayout(reader.settings),
     [reader.settings]
@@ -1380,7 +1348,7 @@ export const ReaderShell = memo(function ReaderShell({
   return (
     <Card className="w-full max-w-[1700px] min-h-0 rounded-3xl border border-slate-200 shadow-sm lg:h-full">
       <CardContent className="h-full p-4 md:p-6" sx={{ position: "relative" }}>
-        <Stack ref={layoutViewportRef} spacing={2} sx={{ height: "100%", minHeight: 0 }}>
+        <Stack spacing={2} sx={{ height: "100%", minHeight: 0 }}>
           <Stack
             direction="row"
             alignItems="center"
@@ -1428,40 +1396,34 @@ export const ReaderShell = memo(function ReaderShell({
             >
               Next Page
             </Button>
-            {topBarVisibility.showSentenceButtons ? (
-              <>
-                <Button
-                  variant="outlined"
-                  onClick={() => void onPrevSentence()}
-                  disabled={busy}
-                  data-testid="reader-prev-sentence-button"
-                  sx={{ flexShrink: 0 }}
-                >
-                  Prev Sentence
-                </Button>
-                <Button
-                  variant="outlined"
-                  onClick={() => void onNextSentence()}
-                  disabled={busy}
-                  data-testid="reader-next-sentence-button"
-                  sx={{ flexShrink: 0 }}
-                >
-                  Next Sentence
-                </Button>
-              </>
-            ) : null}
-            {topBarVisibility.showJumpButton ? (
-              <Button
-                variant="outlined"
-                startIcon={<GpsFixedIcon />}
-                onClick={() => jumpToHighlightedSentence()}
-                disabled={!hasHighlightSentence}
-                data-testid="reader-jump-highlight-button"
-                sx={{ flexShrink: 0 }}
-              >
-                Jump to Highlight
-              </Button>
-            ) : null}
+            <Button
+              variant="outlined"
+              onClick={() => void onPrevSentence()}
+              disabled={busy}
+              data-testid="reader-prev-sentence-button"
+              sx={{ flexShrink: 0 }}
+            >
+              Prev Sentence
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={() => void onNextSentence()}
+              disabled={busy}
+              data-testid="reader-next-sentence-button"
+              sx={{ flexShrink: 0 }}
+            >
+              Next Sentence
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<GpsFixedIcon />}
+              onClick={() => jumpToHighlightedSentence()}
+              disabled={!hasHighlightSentence}
+              data-testid="reader-jump-highlight-button"
+              sx={{ flexShrink: 0 }}
+            >
+              Jump to Highlight
+            </Button>
             <TextField
               size="small"
               value={pageInput}
