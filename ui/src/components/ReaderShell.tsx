@@ -34,13 +34,11 @@ import {
 } from "@mui/material";
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type MouseEvent } from "react";
 
-import {
-  computeReaderTopBarVisibility,
-  computeReaderTtsControlVisibility
-} from "./layoutPolicies";
+import { computeReaderTopBarVisibility } from "./layoutPolicies";
 import { buildHtmlSentenceAnchorMap, normalizeSyncText } from "./htmlSync";
 import { renderNativePrettyHtml } from "./prettyHtml";
 import { computeReaderTypographyLayout } from "./readerTypography";
+import { TtsPlayerWidget } from "./TtsPlayerWidget";
 import type {
   FontFamily,
   FontWeight,
@@ -846,9 +844,7 @@ export const ReaderShell = memo(function ReaderShell({
   const sentenceRefs = useRef<Record<number, HTMLButtonElement | null>>({});
   const sentenceScrollRef = useRef<HTMLDivElement | null>(null);
   const topBarRef = useRef<HTMLDivElement | null>(null);
-  const ttsControlRowRef = useRef<HTMLDivElement | null>(null);
   const [topBarWidth, setTopBarWidth] = useState(0);
-  const [ttsControlRowWidth, setTtsControlRowWidth] = useState(0);
   const [sessionNowMs, setSessionNowMs] = useState(Date.now());
   const sessionStartMsRef = useRef(Date.now());
   const listeningAccumulatedMsRef = useRef(0);
@@ -887,23 +883,6 @@ export const ReaderShell = memo(function ReaderShell({
 
     return () => resizeObserver.disconnect();
   }, []);
-
-  useEffect(() => {
-    const node = ttsControlRowRef.current;
-    if (!node) {
-      return;
-    }
-    const resizeObserver = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) {
-        return;
-      }
-      setTtsControlRowWidth(entry.contentRect.width);
-    });
-    resizeObserver.observe(node);
-    setTtsControlRowWidth(node.getBoundingClientRect().width);
-    return () => resizeObserver.disconnect();
-  }, [reader.panels.show_tts]);
 
   useEffect(() => {
     setPageInput(String(reader.current_page + 1));
@@ -1274,10 +1253,6 @@ export const ReaderShell = memo(function ReaderShell({
     () => computeReaderTopBarVisibility(topBarWidth),
     [topBarWidth]
   );
-  const ttsControlVisibility = useMemo(
-    () => computeReaderTtsControlVisibility(ttsControlRowWidth),
-    [ttsControlRowWidth]
-  );
   const readerTypography = useMemo(
     () => computeReaderTypographyLayout(reader.settings),
     [reader.settings]
@@ -1382,7 +1357,6 @@ export const ReaderShell = memo(function ReaderShell({
     [listeningMinutes, sessionGlobalPercentFinished]
   );
 
-  const playbackLabel = reader.tts.state === "playing" ? "Pause" : "Play";
   const hasHighlightSentence = reader.highlighted_sentence_idx !== null;
   const textModeLabel = reader.text_only_mode ? "Pretty Text" : "Text-only";
   const isPrettyTextMode = !reader.text_only_mode;
@@ -1392,6 +1366,15 @@ export const ReaderShell = memo(function ReaderShell({
     isPrettyTextMode && reader.pretty_kind === "html" && Boolean(reader.reading_html_page);
   const prettyUnavailable = isPrettyTextMode && !hasPrettyMarkdown && !hasPrettyHtml;
   const showSentenceList = reader.text_only_mode || prettyUnavailable;
+  const ttsSentenceLabel = useMemo(
+    () =>
+      `Sentence ${reader.tts.current_sentence_idx !== null ? reader.tts.current_sentence_idx + 1 : 0}/${Math.max(1, reader.tts.sentence_count)}`,
+    [reader.tts.current_sentence_idx, reader.tts.sentence_count]
+  );
+  const ttsProgressLabel = useMemo(
+    () => `Progress ${reader.tts.progress_pct.toFixed(3)}% | ${reader.tts.state}`,
+    [reader.tts.progress_pct, reader.tts.state]
+  );
   const renderedMarkdownHtml = useMemo(() => {
     if (!hasPrettyMarkdown || !reader.reading_markdown_page) {
       return "";
@@ -1684,12 +1667,13 @@ export const ReaderShell = memo(function ReaderShell({
           </Stack>
 
           <Stack direction={{ xs: "column", lg: "row" }} spacing={2} sx={{ flex: 1, minHeight: 0 }}>
-            <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200">
+            <div className="min-h-0 flex flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200">
               <div
                 ref={sentenceScrollRef}
-                className="h-full overflow-y-auto overscroll-contain"
+                className="overflow-y-auto overscroll-contain"
                 data-testid="reader-sentence-scroll-container"
                 style={{
+                  height: reader.panels.show_tts ? "calc(100% - 118px)" : "100%",
                   paddingLeft: `${readerTypography.horizontalMarginPx}px`,
                   paddingRight: `${readerTypography.horizontalMarginPx}px`,
                   paddingTop: `${readerTypography.verticalMarginPx}px`,
@@ -1805,6 +1789,22 @@ export const ReaderShell = memo(function ReaderShell({
                     : null}
                 </Stack>
               </div>
+              <TtsPlayerWidget
+                visible={reader.panels.show_tts}
+                busy={busy}
+                isPlaying={reader.tts.state === "playing"}
+                canPrevPage={reader.current_page > 0}
+                canNextPage={reader.current_page + 1 < reader.total_pages}
+                canPrevSentence={reader.tts.can_seek_prev}
+                canNextSentence={reader.tts.can_seek_next}
+                currentSentenceLabel={ttsSentenceLabel}
+                progressLabel={ttsProgressLabel}
+                onPrevPage={onPrevPage}
+                onPrevSentence={onTtsSeekPrev}
+                onTogglePlayPause={onTtsTogglePlayPause}
+                onNextSentence={onTtsSeekNext}
+                onNextPage={onNextPage}
+              />
             </div>
 
             {panelTitle ? (
@@ -2209,118 +2209,9 @@ export const ReaderShell = memo(function ReaderShell({
                             Last TTS event #{ttsStateEvent.request_id}: {ttsStateEvent.action}
                           </Typography>
                         ) : null}
-                        <Stack
-                          ref={ttsControlRowRef}
-                          direction="row"
-                          spacing={1}
-                          data-testid="reader-tts-control-row"
-                          sx={{
-                            flexWrap: "nowrap",
-                            overflowX: "auto",
-                            overflowY: "hidden",
-                            whiteSpace: "nowrap",
-                            minHeight: 36,
-                            pb: 0.25,
-                            scrollbarWidth: "thin",
-                            "& .MuiButton-root": {
-                              flexShrink: 0,
-                              whiteSpace: "nowrap"
-                            }
-                          }}
-                        >
-                          <Button
-                            variant="contained"
-                            size="small"
-                            onClick={() => void onTtsTogglePlayPause()}
-                            data-testid="reader-tts-toggle-button"
-                          >
-                            {playbackLabel}
-                          </Button>
-                          {ttsControlVisibility.showPlayButton ? (
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              onClick={() => void onTtsPlay()}
-                              data-testid="reader-tts-play-button"
-                            >
-                              Play
-                            </Button>
-                          ) : null}
-                          {ttsControlVisibility.showPauseButton ? (
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              onClick={() => void onTtsPause()}
-                              data-testid="reader-tts-pause-button"
-                            >
-                              Pause
-                            </Button>
-                          ) : null}
-                          {ttsControlVisibility.showPlayPageButton ? (
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              onClick={() => void onTtsPlayFromPageStart()}
-                              disabled={reader.tts.sentence_count === 0}
-                              data-testid="reader-tts-play-page-button"
-                            >
-                              Play Page
-                            </Button>
-                          ) : null}
-                          {ttsControlVisibility.showPlayHighlightButton ? (
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              onClick={() => void onTtsPlayFromHighlight()}
-                              disabled={!hasHighlightSentence}
-                              data-testid="reader-tts-play-highlight-button"
-                            >
-                              Play Highlight
-                            </Button>
-                          ) : null}
-                          {ttsControlVisibility.showPrevSentenceButton ? (
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              onClick={() => void onTtsSeekPrev()}
-                              disabled={!reader.tts.can_seek_prev}
-                              data-testid="reader-tts-prev-sentence-button"
-                            >
-                              Prev Sentence
-                            </Button>
-                          ) : null}
-                          {ttsControlVisibility.showNextSentenceButton ? (
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              onClick={() => void onTtsSeekNext()}
-                              disabled={!reader.tts.can_seek_next}
-                              data-testid="reader-tts-next-sentence-button"
-                            >
-                              Next Sentence
-                            </Button>
-                          ) : null}
-                          <Button
-                            variant="outlined"
-                            size="small"
-                            onClick={() => void onTtsPrecomputePage()}
-                            disabled={reader.tts.sentence_count === 0}
-                            data-testid="reader-tts-precompute-page-button"
-                          >
-                            Precompute Page
-                          </Button>
-                          {ttsControlVisibility.showRepeatButton ? (
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              onClick={() => void onTtsRepeatSentence()}
-                              disabled={!hasHighlightSentence}
-                              data-testid="reader-tts-repeat-button"
-                            >
-                              Repeat
-                            </Button>
-                          ) : null}
-                        </Stack>
+                        <Typography variant="caption" color="text.secondary">
+                          Playback controls are shown in the player bar at the bottom of the reading pane.
+                        </Typography>
                         <Divider />
                         <NumericSettingControl
                           label="Playback Speed"
