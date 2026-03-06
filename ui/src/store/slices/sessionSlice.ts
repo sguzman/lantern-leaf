@@ -10,6 +10,8 @@ export function createSessionSliceActions({ set, get, backend }: SliceContext): 
   | "refreshRecents"
   | "openSourcePath"
   | "openClipboardText"
+  | "openBrowserTab"
+  | "refreshCurrentBrowserTab"
   | "deleteRecent"
   | "returnToStarter"
   | "closeReaderSession"
@@ -144,6 +146,62 @@ export function createSessionSliceActions({ set, get, backend }: SliceContext): 
             return;
           }
           const detailed = `[openClipboardText:${bridgeError.code}] ${bridgeError.message}`;
+          set({
+            error: detailed,
+            toast: buildToast("error", detailed)
+          });
+          throw bridgeError;
+        }
+      });
+    },
+
+    openBrowserTab: async (tabId, windowId) => {
+      await withBusy(set, get, "openBrowserTab", async () => {
+        try {
+          const result = await backend.sourceOpenBrowserTab(tabId, windowId);
+          const recents = await backend.recentList();
+          set({
+            session: result.session,
+            reader: result.reader,
+            recents,
+            toast: buildToast("success", "Browser tab imported")
+          });
+        } catch (error) {
+          const bridgeError = toBridgeError(error);
+          if (bridgeError.code === "open_cancelled") {
+            set({
+              toast: buildToast("info", bridgeError.message)
+            });
+            return;
+          }
+          const detailed = `[openBrowserTab:${bridgeError.code}] ${bridgeError.message}`;
+          set({
+            error: detailed,
+            toast: buildToast("error", detailed)
+          });
+          throw bridgeError;
+        }
+      });
+    },
+
+    refreshCurrentBrowserTab: async () => {
+      await withBusy(set, get, "refreshCurrentBrowserTab", async () => {
+        const reader = get().reader;
+        if (!reader || !reader.source_path.toLowerCase().endsWith(".lltab")) {
+          return;
+        }
+        try {
+          const result = await backend.sourceRefreshBrowserTab(reader.source_path);
+          const recents = await backend.recentList();
+          set({
+            session: result.session,
+            reader: result.reader,
+            recents,
+            toast: buildToast("success", "Browser tab refreshed")
+          });
+        } catch (error) {
+          const bridgeError = toBridgeError(error);
+          const detailed = `[refreshCurrentBrowserTab:${bridgeError.code}] ${bridgeError.message}`;
           set({
             error: detailed,
             toast: buildToast("error", detailed)

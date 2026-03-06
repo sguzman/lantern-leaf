@@ -12,6 +12,8 @@ export const selectSessionSlice = (state: AppStore) => ({
   refreshRecents: state.refreshRecents,
   openSourcePath: state.openSourcePath,
   openClipboardText: state.openClipboardText,
+  openBrowserTab: state.openBrowserTab,
+  refreshCurrentBrowserTab: state.refreshCurrentBrowserTab,
   deleteRecent: state.deleteRecent,
   returnToStarter: state.returnToStarter,
   closeReaderSession: state.closeReaderSession
@@ -199,6 +201,7 @@ export function useStarterScreenState() {
       runtimeLogLevel: state.runtimeLogLevel,
       openSourcePath: state.openSourcePath,
       openClipboardText: state.openClipboardText,
+      openBrowserTab: state.openBrowserTab,
       deleteRecent: state.deleteRecent,
       refreshRecents: state.refreshRecents,
       loadCalibreBooks: state.loadCalibreBooks,
@@ -214,9 +217,11 @@ export function useReaderQuickActionsState() {
     useShallow((state) => ({
       busy: state.busy,
       isTextOnly: state.reader?.text_only_mode ?? false,
+      isBrowserTab: state.reader?.source_path.toLowerCase().endsWith(".lltab") ?? false,
       showSettings: state.reader?.panels.show_settings ?? false,
       showStats: state.reader?.panels.show_stats ?? false,
       showTts: state.reader?.panels.show_tts ?? false,
+      onRefreshBrowserTab: state.refreshCurrentBrowserTab,
       onToggleTextOnly: state.readerToggleTextOnly,
       onToggleSettingsPanel: state.toggleSettingsPanel,
       onToggleStatsPanel: state.toggleStatsPanel,

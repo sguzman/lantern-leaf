@@ -43,7 +43,8 @@ function makeBootstrapState(): BootstrapState {
       key_safe_quit: "q",
       key_toggle_settings: "ctrl+t",
       key_toggle_stats: "ctrl+g",
-      key_toggle_tts: "ctrl+y"
+      key_toggle_tts: "ctrl+y",
+      browser_tabs_enabled: true
     }
   };
 }
@@ -153,8 +154,14 @@ function createBackend(overrides: Partial<BackendApi> = {}) {
     panelToggleTts: async () => makeSessionState("reader"),
     recentList: async () => [] as RecentBook[],
     recentDelete: async () => {},
+    browserTabsHealth: async () => ({ ok: true, extension_connected: true, now: null }),
+    browserTabsListWindows: async () => [],
+    browserTabsListTabs: async () => [],
     sourceOpenPath: async () => defaultOpenResult,
+    sourceOpenClipboard: async () => defaultOpenResult,
     sourceOpenClipboardText: async () => defaultOpenResult,
+    sourceOpenBrowserTab: async () => defaultOpenResult,
+    sourceRefreshBrowserTab: async () => defaultOpenResult,
     readerGetSnapshot: async () => defaultReader,
     readerNextPage: async () => defaultReader,
     readerPrevPage: async () => defaultReader,
@@ -175,11 +182,13 @@ function createBackend(overrides: Partial<BackendApi> = {}) {
     readerTtsSeekNext: async () => defaultReader,
     readerTtsSeekPrev: async () => defaultReader,
     readerTtsRepeatSentence: async () => defaultReader,
+    readerTtsPrecomputePage: async () => defaultReader,
     readerCloseSession: async () => makeSessionState("starter"),
     loggingSetLevel: async () => "debug",
     calibreLoadBooks: async () => [] as CalibreBook[],
     calibreLoadCachedBooks: async () => [] as CalibreBook[],
     calibreOpenBook: async () => defaultOpenResult,
+    calibreEnsureThumbnail: async () => null,
     onSourceOpen: async (handler) => {
       hooks.source = handler;
       return async () => {};

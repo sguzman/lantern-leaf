@@ -1,5 +1,6 @@
 import GraphicEqIcon from "@mui/icons-material/GraphicEq";
 import QueryStatsIcon from "@mui/icons-material/QueryStats";
+import RefreshIcon from "@mui/icons-material/Refresh";
 import SpeedDialIcon from "@mui/material/SpeedDialIcon";
 import TextFieldsIcon from "@mui/icons-material/TextFields";
 import TuneIcon from "@mui/icons-material/Tune";
@@ -12,9 +13,11 @@ export const ReaderQuickActionsDock = memo(function ReaderQuickActionsDock() {
   const {
     busy,
     isTextOnly,
+    isBrowserTab,
     showSettings,
     showStats,
     showTts,
+    onRefreshBrowserTab,
     onToggleTextOnly,
     onToggleSettingsPanel,
     onToggleStatsPanel,
@@ -25,10 +28,19 @@ export const ReaderQuickActionsDock = memo(function ReaderQuickActionsDock() {
   const actions = useMemo(
     () => [
       {
+        key: "refresh-browser-tab",
+        label: "Refresh Tab",
+        icon: <RefreshIcon />,
+        active: false,
+        hidden: !isBrowserTab,
+        onClick: onRefreshBrowserTab
+      },
+      {
         key: "text",
         label: "Text-only",
         icon: <TextFieldsIcon />,
         active: isTextOnly,
+        hidden: false,
         onClick: onToggleTextOnly
       },
       {
@@ -36,6 +48,7 @@ export const ReaderQuickActionsDock = memo(function ReaderQuickActionsDock() {
         label: "Settings",
         icon: <TuneIcon />,
         active: showSettings,
+        hidden: false,
         onClick: onToggleSettingsPanel
       },
       {
@@ -43,6 +56,7 @@ export const ReaderQuickActionsDock = memo(function ReaderQuickActionsDock() {
         label: "Stats",
         icon: <QueryStatsIcon />,
         active: showStats,
+        hidden: false,
         onClick: onToggleStatsPanel
       },
       {
@@ -50,11 +64,14 @@ export const ReaderQuickActionsDock = memo(function ReaderQuickActionsDock() {
         label: "TTS Controls",
         icon: <GraphicEqIcon />,
         active: showTts,
+        hidden: false,
         onClick: onToggleTtsPanel
       }
-    ],
+    ].filter((action) => !action.hidden),
     [
+      isBrowserTab,
       isTextOnly,
+      onRefreshBrowserTab,
       onToggleSettingsPanel,
       onToggleStatsPanel,
       onToggleTextOnly,

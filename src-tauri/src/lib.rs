@@ -15,7 +15,8 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt};
 use ts_rs::TS;
 
 pub use lanternleaf_core::{
-    cache, calibre, config, epub_loader, normalizer, pagination, quack_check, text_utils, tts,
+    browser_tabs, cache, calibre, config, epub_loader, normalizer, pagination, quack_check,
+    text_utils, tts,
 };
 use lanternleaf_core::{cancellation, session};
 
@@ -56,6 +57,7 @@ struct BootstrapConfig {
     key_toggle_settings: String,
     key_toggle_stats: String,
     key_toggle_tts: String,
+    browser_tabs_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -324,6 +326,7 @@ fn bootstrap_state_from_backend(guard: &BackendState) -> BootstrapState {
             key_toggle_settings: guard.base_config.key_toggle_settings.clone(),
             key_toggle_stats: guard.base_config.key_toggle_stats.clone(),
             key_toggle_tts: guard.base_config.key_toggle_tts.clone(),
+            browser_tabs_enabled: guard.base_config.browser_tabs_enabled,
         },
     }
 }
@@ -606,6 +609,7 @@ fn is_supported_source(path: &Path) -> bool {
                 || ext == "html"
                 || ext == "doc"
                 || ext == "docx"
+                || ext == "lltab"
     )
 }
 
@@ -644,7 +648,7 @@ fn resolve_source_path(path: &str) -> Result<PathBuf, BridgeError> {
         return Err(bridge_error(
             "unsupported_source",
             format!(
-                "Unsupported source type for {} (expected .epub/.pdf/.txt/.md/.markdown/.html/.doc/.docx)",
+                "Unsupported source type for {} (expected .epub/.pdf/.txt/.md/.markdown/.html/.doc/.docx/.lltab)",
                 candidate.display()
             ),
         ));
@@ -659,6 +663,11 @@ fn resolve_source_path(path: &str) -> Result<PathBuf, BridgeError> {
             ),
         )
     })
+}
+
+fn browsr_client_from_config(cfg: &config::AppConfig) -> Result<browser_tabs::BrowsrClient, BridgeError> {
+    browser_tabs::BrowsrClient::new(&cfg.browsr_base_url, cfg.browsr_timeout_ms)
+        .map_err(|err| bridge_error("browsr_config_error", err.to_string()))
 }
 
 fn thumbnail_path_to_data_url(path: &Path) -> Option<String> {
@@ -1906,6 +1915,171 @@ async fn source_open_clipboard(
     open_resolved_source(&app, &state, path).await
 }
 
+#[tauri::command]
+async fn browser_tabs_health(
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<browser_tabs::BrowsrHealth, BridgeError> {
+    let cfg = {
+        let guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        guard.base_config.clone()
+    };
+    if !cfg.browser_tabs_enabled {
+        return Err(bridge_error(
+            "browser_tabs_disabled",
+            "Browser tabs import is disabled in config",
+        ));
+    }
+    let client = browsr_client_from_config(&cfg)?;
+    client
+        .health()
+        .await
+        .map_err(|err| bridge_error("browsr_unavailable", err.to_string()))
+}
+
+#[tauri::command]
+async fn browser_tabs_list_windows(
+    state: State<'_, Mutex<BackendState>>,
+) -> Result<Vec<browser_tabs::BrowserWindow>, BridgeError> {
+    let cfg = {
+        let guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        guard.base_config.clone()
+    };
+    if !cfg.browser_tabs_enabled {
+        return Err(bridge_error(
+            "browser_tabs_disabled",
+            "Browser tabs import is disabled in config",
+        ));
+    }
+    let client = browsr_client_from_config(&cfg)?;
+    client
+        .list_windows()
+        .await
+        .map_err(|err| bridge_error("browsr_request_failed", err.to_string()))
+}
+
+#[tauri::command]
+async fn browser_tabs_list_tabs(
+    state: State<'_, Mutex<BackendState>>,
+    window_id: Option<u64>,
+    query: Option<String>,
+    refresh: Option<bool>,
+) -> Result<Vec<browser_tabs::BrowserTab>, BridgeError> {
+    let cfg = {
+        let guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        guard.base_config.clone()
+    };
+    if !cfg.browser_tabs_enabled {
+        return Err(bridge_error(
+            "browser_tabs_disabled",
+            "Browser tabs import is disabled in config",
+        ));
+    }
+    let client = browsr_client_from_config(&cfg)?;
+    client
+        .list_tabs(window_id, query.as_deref(), refresh.unwrap_or(false))
+        .await
+        .map_err(|err| bridge_error("browsr_request_failed", err.to_string()))
+}
+
+#[tauri::command]
+async fn source_open_browser_tab(
+    app: tauri::AppHandle,
+    state: State<'_, Mutex<BackendState>>,
+    tab_id: u64,
+    window_id: Option<u64>,
+) -> Result<OpenSourceResult, BridgeError> {
+    let cfg = {
+        let guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        guard.base_config.clone()
+    };
+    if !cfg.browser_tabs_enabled {
+        return Err(bridge_error(
+            "browser_tabs_disabled",
+            "Browser tabs import is disabled in config",
+        ));
+    }
+    let client = browsr_client_from_config(&cfg)?;
+    let tab_meta = client
+        .list_tabs(window_id, None, false)
+        .await
+        .ok()
+        .and_then(|tabs| tabs.into_iter().find(|tab| tab.id == tab_id));
+    let snapshot = client
+        .snapshot_tab(tab_id)
+        .await
+        .map_err(|err| bridge_error("browsr_snapshot_failed", err.to_string()))?;
+    let source_path = cache::persist_browser_tab_source(&snapshot, tab_meta.as_ref())
+        .map_err(|err| bridge_error("browser_tab_cache_error", err))?;
+    info!(
+        tab_id,
+        window_id,
+        source_path = %source_path.display(),
+        title = %snapshot.title,
+        url = %snapshot.url,
+        html_truncated = snapshot.truncation.html.truncated,
+        text_truncated = snapshot.truncation.text.truncated,
+        "Persisted browser-tab snapshot source"
+    );
+    open_resolved_source(&app, &state, source_path).await
+}
+
+#[tauri::command]
+async fn source_refresh_browser_tab(
+    app: tauri::AppHandle,
+    state: State<'_, Mutex<BackendState>>,
+    path: String,
+) -> Result<OpenSourceResult, BridgeError> {
+    let source_path = resolve_source_path(&path)?;
+    let manifest = cache::load_browser_tab_manifest(&source_path).ok_or_else(|| {
+        bridge_error(
+            "invalid_input",
+            format!("Source is not a browser-tab manifest: {}", source_path.display()),
+        )
+    })?;
+    let cfg = {
+        let guard = state
+            .lock()
+            .map_err(|_| bridge_error("lock_poisoned", "Backend state lock poisoned"))?;
+        guard.base_config.clone()
+    };
+    if !cfg.browser_tabs_enabled {
+        return Err(bridge_error(
+            "browser_tabs_disabled",
+            "Browser tabs import is disabled in config",
+        ));
+    }
+    let client = browsr_client_from_config(&cfg)?;
+    let tab_meta = client
+        .list_tabs(manifest.window_id, None, true)
+        .await
+        .ok()
+        .and_then(|tabs| tabs.into_iter().find(|tab| tab.id == manifest.tab_id));
+    let snapshot = client
+        .snapshot_tab(manifest.tab_id)
+        .await
+        .map_err(|err| bridge_error("browsr_snapshot_failed", err.to_string()))?;
+    let refreshed_source_path = cache::persist_browser_tab_source(&snapshot, tab_meta.as_ref())
+        .map_err(|err| bridge_error("browser_tab_cache_error", err))?;
+    info!(
+        tab_id = manifest.tab_id,
+        source_path = %refreshed_source_path.display(),
+        title = %snapshot.title,
+        url = %snapshot.url,
+        html_truncated = snapshot.truncation.html.truncated,
+        text_truncated = snapshot.truncation.text.truncated,
+        "Refreshed browser-tab snapshot source"
+    );
+    open_resolved_source(&app, &state, refreshed_source_path).await
+}
+
 fn read_clipboard_text_with_fallback(app: &tauri::AppHandle) -> Result<String, String> {
     match app.clipboard().read_text() {
         Ok(text) => {
@@ -2739,6 +2913,11 @@ macro_rules! bridge_command_idents {
             source_open_path,
             source_open_clipboard,
             source_open_clipboard_text,
+            browser_tabs_health,
+            browser_tabs_list_windows,
+            browser_tabs_list_tabs,
+            source_open_browser_tab,
+            source_refresh_browser_tab,
             reader_get_snapshot,
             reader_next_page,
             reader_prev_page,
@@ -2880,7 +3059,7 @@ mod tests {
 
     #[test]
     fn bridge_command_surface_remains_stable() {
-        assert_eq!(BRIDGE_COMMAND_NAMES.len(), 40);
+        assert_eq!(BRIDGE_COMMAND_NAMES.len(), 45);
         assert_eq!(BRIDGE_COMMAND_NAMES[0], "session_get_bootstrap");
         assert_eq!(
             BRIDGE_COMMAND_NAMES[BRIDGE_COMMAND_NAMES.len() - 1],
@@ -2890,6 +3069,11 @@ mod tests {
         assert!(BRIDGE_COMMAND_NAMES.contains(&"session_toggle_theme"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"source_open_clipboard"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"source_open_clipboard_text"));
+        assert!(BRIDGE_COMMAND_NAMES.contains(&"browser_tabs_health"));
+        assert!(BRIDGE_COMMAND_NAMES.contains(&"browser_tabs_list_windows"));
+        assert!(BRIDGE_COMMAND_NAMES.contains(&"browser_tabs_list_tabs"));
+        assert!(BRIDGE_COMMAND_NAMES.contains(&"source_open_browser_tab"));
+        assert!(BRIDGE_COMMAND_NAMES.contains(&"source_refresh_browser_tab"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"reader_tts_play"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"reader_tts_repeat_sentence"));
         assert!(BRIDGE_COMMAND_NAMES.contains(&"reader_tts_precompute_page"));

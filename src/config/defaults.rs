@@ -103,6 +103,18 @@ pub(crate) fn default_cache_dir() -> String {
     ".cache".to_string()
 }
 
+pub(crate) fn default_browser_tabs_enabled() -> bool {
+    true
+}
+
+pub(crate) fn default_browsr_base_url() -> String {
+    "http://127.0.0.1:17373".to_string()
+}
+
+pub(crate) fn default_browsr_timeout_ms() -> u64 {
+    8000
+}
+
 pub(crate) fn default_lines_per_page() -> usize {
     700
 }

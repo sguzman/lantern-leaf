@@ -328,11 +328,16 @@ impl ReaderSession {
     ) -> Result<Self, String> {
         let loaded = epub_loader::load_book_content_with_cancel(&source_path, cancel)
             .map_err(|err| format!("{err:#}"))?;
-        let source_name = source_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("book")
-            .to_string();
+        let source_name = crate::cache::load_browser_tab_manifest(&source_path)
+            .map(|manifest| manifest.title.trim().to_string())
+            .filter(|title| !title.is_empty())
+            .or_else(|| {
+                source_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| "book".to_string());
 
         // Cache-based overrides are loaded before calling this constructor; keep
         // runtime defaults in bounds regardless of config source.

@@ -17,6 +17,8 @@ pub(super) struct ConfigTables {
     #[serde(default)]
     storage: StorageConfig,
     #[serde(default)]
+    integration: IntegrationConfig,
+    #[serde(default)]
     tts: TtsConfig,
     #[serde(default)]
     keybindings: KeybindingsConfig,
@@ -63,6 +65,9 @@ impl From<ConfigTables> for AppConfig {
             native_html_pagination_mode: tables.ui.native_html_pagination_mode,
             log_level: tables.logging.log_level,
             cache_dir: tables.storage.cache_dir,
+            browser_tabs_enabled: tables.integration.browser_tabs_enabled,
+            browsr_base_url: tables.integration.browsr_base_url,
+            browsr_timeout_ms: tables.integration.browsr_timeout_ms,
             tts_model_path: tables.tts.tts_model_path,
             tts_espeak_path: tables.tts.tts_espeak_path,
             tts_speed: tables.tts.tts_speed,
@@ -117,6 +122,11 @@ impl From<&AppConfig> for ConfigTables {
             },
             storage: StorageConfig {
                 cache_dir: config.cache_dir.clone(),
+            },
+            integration: IntegrationConfig {
+                browser_tabs_enabled: config.browser_tabs_enabled,
+                browsr_base_url: config.browsr_base_url.clone(),
+                browsr_timeout_ms: config.browsr_timeout_ms,
             },
             tts: TtsConfig {
                 tts_model_path: config.tts_model_path.clone(),
@@ -291,6 +301,26 @@ impl Default for StorageConfig {
     fn default() -> Self {
         StorageConfig {
             cache_dir: defaults::default_cache_dir(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+struct IntegrationConfig {
+    #[serde(default = "defaults::default_browser_tabs_enabled")]
+    browser_tabs_enabled: bool,
+    #[serde(default = "defaults::default_browsr_base_url")]
+    browsr_base_url: String,
+    #[serde(default = "defaults::default_browsr_timeout_ms")]
+    browsr_timeout_ms: u64,
+}
+
+impl Default for IntegrationConfig {
+    fn default() -> Self {
+        IntegrationConfig {
+            browser_tabs_enabled: defaults::default_browser_tabs_enabled(),
+            browsr_base_url: defaults::default_browsr_base_url(),
+            browsr_timeout_ms: defaults::default_browsr_timeout_ms(),
         }
     }
 }

@@ -19,6 +19,38 @@ import type {
   TtsStateEvent
 } from "../types";
 
+export interface BrowsrHealth {
+  ok: boolean;
+  extension_connected: boolean;
+  now: string | null;
+}
+
+export interface BrowserWindowInfo {
+  id: number;
+  focused: boolean;
+  height: number | null;
+  incognito: boolean | null;
+  left: number | null;
+  state: string | null;
+  top: number | null;
+  type: string | null;
+  width: number | null;
+}
+
+export interface BrowserTabInfo {
+  id: number;
+  windowId: number;
+  index: number | null;
+  active: boolean | null;
+  audible: boolean | null;
+  pinned: boolean | null;
+  status: string | null;
+  title: string;
+  url: string;
+  favIconUrl: string | null;
+  lastAccessed: number | null;
+}
+
 const MAX_RECENT_LIMIT = 512;
 const DEFAULT_RECENT_LIMIT = 64;
 
@@ -93,6 +125,36 @@ const MOCK_PAGES: Array<{ text: string; sentences: string[] }> = [
   {
     text: "This is the mock reader content on page three.",
     sentences: ["This is the mock reader content on page three."]
+  }
+];
+
+const MOCK_BROWSER_WINDOWS: BrowserWindowInfo[] = [
+  {
+    id: 1001,
+    focused: true,
+    height: 1080,
+    incognito: false,
+    left: 0,
+    state: "maximized",
+    top: 0,
+    type: "normal",
+    width: 1920
+  }
+];
+
+const MOCK_BROWSER_TABS: BrowserTabInfo[] = [
+  {
+    id: 2001,
+    windowId: 1001,
+    index: 0,
+    active: true,
+    audible: false,
+    pinned: false,
+    status: "complete",
+    title: "Mock Article",
+    url: "https://example.com/mock-article",
+    favIconUrl: "https://example.com/favicon.ico",
+    lastAccessed: Date.now()
   }
 ];
 
@@ -191,7 +253,8 @@ const mockState: MockBackendState = {
       key_safe_quit: "q",
       key_toggle_settings: "ctrl+t",
       key_toggle_stats: "ctrl+g",
-      key_toggle_tts: "ctrl+y"
+      key_toggle_tts: "ctrl+y",
+      browser_tabs_enabled: true
     }
   },
   session: {
@@ -329,6 +392,49 @@ async function mockSourceOpenClipboardText(text: string): Promise<OpenSourceResu
     } satisfies BridgeError;
   }
   return mockOpenWithPath(".cache/clipboard/mock.txt");
+}
+
+async function mockBrowserTabsHealth(): Promise<BrowsrHealth> {
+  return {
+    ok: true,
+    extension_connected: true,
+    now: new Date().toISOString()
+  };
+}
+
+async function mockBrowserTabsListWindows(): Promise<BrowserWindowInfo[]> {
+  return structuredClone(MOCK_BROWSER_WINDOWS);
+}
+
+async function mockBrowserTabsListTabs(
+  windowId?: number,
+  query?: string
+): Promise<BrowserTabInfo[]> {
+  const needle = (query ?? "").trim().toLowerCase();
+  return structuredClone(
+    MOCK_BROWSER_TABS.filter((tab) => {
+      if (windowId !== undefined && tab.windowId !== windowId) {
+        return false;
+      }
+      if (!needle) {
+        return true;
+      }
+      return (
+        tab.title.toLowerCase().includes(needle) || tab.url.toLowerCase().includes(needle)
+      );
+    })
+  );
+}
+
+async function mockSourceOpenBrowserTab(tabId: number): Promise<OpenSourceResult> {
+  const tab = MOCK_BROWSER_TABS.find((value) => value.id === tabId);
+  if (!tab) {
+    throw {
+      code: "not_found",
+      message: `Unknown mock browser tab ${tabId}`
+    } satisfies BridgeError;
+  }
+  return mockOpenWithPath(`.cache/browser-tabs/${tab.id}/browser-tab.lltab`);
 }
 
 async function mockReaderGetSnapshot(): Promise<ReaderSnapshot> {
@@ -597,9 +703,18 @@ export interface BackendApi {
   panelToggleTts: () => Promise<SessionState>;
   recentList: (limit?: number) => Promise<RecentBook[]>;
   recentDelete: (path: string) => Promise<void>;
+  browserTabsHealth: () => Promise<BrowsrHealth>;
+  browserTabsListWindows: () => Promise<BrowserWindowInfo[]>;
+  browserTabsListTabs: (
+    windowId?: number,
+    query?: string,
+    refresh?: boolean
+  ) => Promise<BrowserTabInfo[]>;
   sourceOpenPath: (path: string) => Promise<OpenSourceResult>;
   sourceOpenClipboard: () => Promise<OpenSourceResult>;
   sourceOpenClipboardText: (text: string) => Promise<OpenSourceResult>;
+  sourceOpenBrowserTab: (tabId: number, windowId?: number) => Promise<OpenSourceResult>;
+  sourceRefreshBrowserTab: (path: string) => Promise<OpenSourceResult>;
   readerGetSnapshot: () => Promise<ReaderSnapshot>;
   readerNextPage: () => Promise<ReaderSnapshot>;
   readerPrevPage: () => Promise<ReaderSnapshot>;
@@ -649,10 +764,19 @@ function createTauriBackendApi(): BackendApi {
     recentList: (limit) =>
       invokeCommand<RecentBook[]>("recent_list", { limit: normalizeRecentLimit(limit) }),
     recentDelete: (path) => invokeCommand<void>("recent_delete", { path }),
+    browserTabsHealth: () => invokeCommand<BrowsrHealth>("browser_tabs_health"),
+    browserTabsListWindows: () =>
+      invokeCommand<BrowserWindowInfo[]>("browser_tabs_list_windows"),
+    browserTabsListTabs: (windowId, query, refresh) =>
+      invokeCommand<BrowserTabInfo[]>("browser_tabs_list_tabs", { windowId, query, refresh }),
     sourceOpenPath: (path) => invokeCommand<OpenSourceResult>("source_open_path", { path }),
     sourceOpenClipboard: () => invokeCommand<OpenSourceResult>("source_open_clipboard"),
     sourceOpenClipboardText: (text) =>
       invokeCommand<OpenSourceResult>("source_open_clipboard_text", { text }),
+    sourceOpenBrowserTab: (tabId, windowId) =>
+      invokeCommand<OpenSourceResult>("source_open_browser_tab", { tabId, windowId }),
+    sourceRefreshBrowserTab: (path) =>
+      invokeCommand<OpenSourceResult>("source_refresh_browser_tab", { path }),
     readerGetSnapshot: () => invokeCommand<ReaderSnapshot>("reader_get_snapshot"),
     readerNextPage: () => invokeCommand<ReaderSnapshot>("reader_next_page"),
     readerPrevPage: () => invokeCommand<ReaderSnapshot>("reader_prev_page"),
@@ -720,9 +844,14 @@ function createMockBackendApi(): BackendApi {
     panelToggleTts: mockPanelToggleTts,
     recentList: mockRecentList,
     recentDelete: mockRecentDelete,
+    browserTabsHealth: mockBrowserTabsHealth,
+    browserTabsListWindows: mockBrowserTabsListWindows,
+    browserTabsListTabs: mockBrowserTabsListTabs,
     sourceOpenPath: mockSourceOpenPath,
     sourceOpenClipboard: () => mockSourceOpenClipboardText(""),
     sourceOpenClipboardText: mockSourceOpenClipboardText,
+    sourceOpenBrowserTab: mockSourceOpenBrowserTab,
+    sourceRefreshBrowserTab: mockOpenWithPath,
     readerGetSnapshot: mockReaderGetSnapshot,
     readerNextPage: mockReaderNextPage,
     readerPrevPage: mockReaderPrevPage,

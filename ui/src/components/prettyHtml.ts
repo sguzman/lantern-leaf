@@ -31,12 +31,42 @@ function imageBaseName(raw: string): string {
   return parts[parts.length - 1] ?? normalized;
 }
 
+function resolveRelativeUrl(raw: string, baseUrl: string | null): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed || !baseUrl) {
+    return null;
+  }
+  if (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("data:") ||
+    trimmed.startsWith("asset:") ||
+    trimmed.startsWith("#")
+  ) {
+    return trimmed;
+  }
+  try {
+    return new URL(trimmed, baseUrl).toString();
+  } catch {
+    return null;
+  }
+}
+
 export function renderNativePrettyHtml(
   html: string,
   imageCandidates: Array<{ rawPath: string; src: string }>
 ): string {
   const container = document.createElement("div");
   container.innerHTML = html;
+  let baseUrl: string | null =
+    container.querySelector<HTMLElement>("[data-ll-base-url]")?.dataset.llBaseUrl ?? null;
+  const wrappers = Array.from(container.querySelectorAll<HTMLElement>("[data-ll-base-url]"));
+  for (const wrapper of wrappers) {
+    while (wrapper.firstChild) {
+      wrapper.parentNode?.insertBefore(wrapper.firstChild, wrapper);
+    }
+    wrapper.remove();
+  }
   const allowTags = new Set([
     "html",
     "head",
@@ -269,7 +299,8 @@ export function renderNativePrettyHtml(
         const src = (element.getAttribute("src") ?? "").trim();
         const resolved =
           resolveImageTarget(src) ??
-          (isSafeScheme(src) || normalizeImageTarget(src).length > 0 ? src : "");
+          resolveRelativeUrl(src, baseUrl) ??
+          (isSafeScheme(src) ? src : "");
         if (resolved) {
           element.setAttribute("src", resolved);
         } else {
@@ -285,7 +316,8 @@ export function renderNativePrettyHtml(
           (element.getAttribute("xlink:href") ?? "").trim();
         const resolved =
           resolveImageTarget(href) ??
-          (isSafeScheme(href) || normalizeImageTarget(href).length > 0 ? href : "");
+          resolveRelativeUrl(href, baseUrl) ??
+          (isSafeScheme(href) ? href : "");
         if (resolved) {
           element.setAttribute("href", resolved);
           element.setAttribute("xlink:href", resolved);
@@ -309,6 +341,8 @@ export function renderNativePrettyHtml(
           resolved = resolvedImage;
         } else if (internal) {
           resolved = internal;
+        } else if (resolveRelativeUrl(href, baseUrl)) {
+          resolved = resolveRelativeUrl(href, baseUrl) ?? "";
         } else if (isSafeScheme(href)) {
           resolved = href;
         }

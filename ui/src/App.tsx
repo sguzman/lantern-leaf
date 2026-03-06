@@ -363,6 +363,7 @@ function StarterScreen() {
       loadingCalibre={starter.loadingCalibre}
       onOpenPath={starter.openSourcePath}
       onOpenClipboardText={starter.openClipboardText}
+      onOpenBrowserTab={starter.openBrowserTab}
       onDeleteRecent={starter.deleteRecent}
       onRefreshRecents={starter.refreshRecents}
       onLoadCalibre={starter.loadCalibreBooks}

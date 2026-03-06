@@ -5,6 +5,7 @@ import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
+  Alert,
   Button,
   Card,
   CardActions,
@@ -26,7 +27,12 @@ import {
   filterAndSortCalibreBooks,
   type CalibreSort
 } from "./calibreList";
-import { backendApi } from "../api/tauri";
+import {
+  backendApi,
+  type BrowserTabInfo,
+  type BrowserWindowInfo,
+  type BrowsrHealth
+} from "../api/tauri";
 import { recordPerfMeasure, useRenderDebugCounter } from "../perf/debug";
 import type {
   BootstrapState,
@@ -46,6 +52,7 @@ interface StarterShellProps {
   loadingCalibre: boolean;
   onOpenPath: (path: string) => Promise<void>;
   onOpenClipboardText: () => Promise<void>;
+  onOpenBrowserTab: (tabId: number, windowId?: number) => Promise<void>;
   onDeleteRecent: (path: string) => Promise<void>;
   onRefreshRecents: () => Promise<void>;
   onLoadCalibre: (forceRefresh?: boolean) => Promise<void>;
@@ -91,6 +98,7 @@ export function StarterShell({
   loadingCalibre,
   onOpenPath,
   onOpenClipboardText,
+  onOpenBrowserTab,
   onDeleteRecent,
   onRefreshRecents,
   onLoadCalibre,
@@ -105,6 +113,13 @@ export function StarterShell({
   useRenderDebugCounter("StarterShell");
   const [path, setPath] = useState("");
   const [clipboardError, setClipboardError] = useState<string | null>(null);
+  const [browserHealth, setBrowserHealth] = useState<BrowsrHealth | null>(null);
+  const [browserWindows, setBrowserWindows] = useState<BrowserWindowInfo[]>([]);
+  const [browserTabs, setBrowserTabs] = useState<BrowserTabInfo[]>([]);
+  const [browserTabsLoading, setBrowserTabsLoading] = useState(false);
+  const [browserTabsError, setBrowserTabsError] = useState<string | null>(null);
+  const [selectedBrowserWindowId, setSelectedBrowserWindowId] = useState<number | "all">("all");
+  const [browserTabSearch, setBrowserTabSearch] = useState("");
   const [calibreSearch, setCalibreSearch] = useState("");
   const [recentsSearch, setRecentsSearch] = useState("");
   const [showCalibre, setShowCalibre] = useState(true);
@@ -162,6 +177,21 @@ export function StarterShell({
     return sorted;
   }, [recents, recentsSearch, recentsSort]);
 
+  const visibleBrowserTabs = useMemo(() => {
+    const needle = browserTabSearch.trim().toLowerCase();
+    return browserTabs.filter((tab) => {
+      if (selectedBrowserWindowId !== "all" && tab.windowId !== selectedBrowserWindowId) {
+        return false;
+      }
+      if (!needle) {
+        return true;
+      }
+      return (
+        tab.title.toLowerCase().includes(needle) || tab.url.toLowerCase().includes(needle)
+      );
+    });
+  }, [browserTabSearch, browserTabs, selectedBrowserWindowId]);
+
   const virtualWindow = useMemo(() => {
     return computeVirtualWindow(
       filteredCalibre,
@@ -205,6 +235,35 @@ export function StarterShell({
   useEffect(() => {
     setLogLevelValue(runtimeLogLevel);
   }, [runtimeLogLevel]);
+
+  const loadBrowserTabs = async (refresh = false): Promise<void> => {
+    setBrowserTabsLoading(true);
+    setBrowserTabsError(null);
+    try {
+      const [health, windows, tabs] = await Promise.all([
+        backendApi.browserTabsHealth(),
+        backendApi.browserTabsListWindows(),
+        backendApi.browserTabsListTabs(
+          selectedBrowserWindowId === "all" ? undefined : selectedBrowserWindowId,
+          browserTabSearch,
+          refresh
+        )
+      ]);
+      setBrowserHealth(health);
+      setBrowserWindows(windows);
+      setBrowserTabs(tabs);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : `[starter-browser-tabs] ${String(error)}`;
+      setBrowserTabsError(message);
+    } finally {
+      setBrowserTabsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadBrowserTabs(false);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -417,6 +476,123 @@ export function StarterShell({
               {clipboardError}
             </Typography>
           ) : null}
+
+          <Card variant="outlined">
+            <CardContent>
+              <Stack spacing={1.5}>
+                <Stack
+                  direction={{ xs: "column", md: "row" }}
+                  spacing={1}
+                  alignItems={{ xs: "stretch", md: "center" }}
+                  justifyContent="space-between"
+                >
+                  <Typography variant="h6" component="h2" fontWeight={700}>
+                    Browser Tabs
+                  </Typography>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => void loadBrowserTabs(true)}
+                    disabled={busy || browserTabsLoading}
+                    data-testid="starter-browser-tabs-refresh-button"
+                  >
+                    Refresh Tabs
+                  </Button>
+                </Stack>
+
+                <Typography
+                  variant="caption"
+                  color={browserHealth?.extension_connected ? "success.main" : "text.secondary"}
+                  data-testid="starter-browser-tabs-health"
+                >
+                  {browserHealth
+                    ? `Browsr ${browserHealth.ok ? "online" : "offline"} · extension ${browserHealth.extension_connected ? "connected" : "disconnected"}`
+                    : "Browsr status unavailable"}
+                </Typography>
+
+                {browserTabsError ? <Alert severity="error">{browserTabsError}</Alert> : null}
+
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
+                  <FormControl size="small" className="md:min-w-56">
+                    <InputLabel id="starter-browser-window-label">Window</InputLabel>
+                    <Select
+                      labelId="starter-browser-window-label"
+                      label="Window"
+                      value={selectedBrowserWindowId}
+                      onChange={(event) => {
+                        const raw = event.target.value;
+                        setSelectedBrowserWindowId(raw === "all" ? "all" : Number(raw));
+                      }}
+                      data-testid="starter-browser-window-select"
+                    >
+                      <MenuItem value="all">All Windows</MenuItem>
+                      {browserWindows.map((window) => (
+                        <MenuItem key={window.id} value={window.id}>
+                          Window {window.id}
+                          {window.focused ? " · Focused" : ""}
+                          {window.state ? ` · ${window.state}` : ""}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <TextField
+                    size="small"
+                    fullWidth
+                    label="Search tabs"
+                    value={browserTabSearch}
+                    onChange={(event) => setBrowserTabSearch(event.target.value)}
+                    inputProps={{ "data-testid": "starter-browser-tabs-search-input" }}
+                  />
+                </Stack>
+
+                <Stack spacing={1} sx={{ maxHeight: 280, overflowY: "auto", pr: 0.5 }}>
+                  {browserTabsLoading ? (
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <CircularProgress size={18} />
+                      <Typography variant="body2">Loading browser tabs...</Typography>
+                    </Stack>
+                  ) : null}
+                  {!browserTabsLoading && visibleBrowserTabs.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary">
+                      {browserWindows.length === 0
+                        ? "No browser windows found."
+                        : "No tabs matched the current browser-tab filters."}
+                    </Typography>
+                  ) : null}
+                  {visibleBrowserTabs.map((tab) => (
+                    <Card key={tab.id} variant="outlined">
+                      <CardContent>
+                        <Stack spacing={0.5}>
+                          <Typography variant="subtitle2">{tab.title}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {tab.url}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Window {tab.windowId}
+                            {tab.active ? " · Active" : ""}
+                            {tab.audible ? " · Audible" : ""}
+                            {tab.pinned ? " · Pinned" : ""}
+                            {tab.status ? ` · ${tab.status}` : ""}
+                          </Typography>
+                        </Stack>
+                      </CardContent>
+                      <CardActions>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          onClick={() => void onOpenBrowserTab(tab.id, tab.windowId)}
+                          disabled={busy || browserTabsLoading}
+                          data-testid={`starter-browser-tab-open-${tab.id}`}
+                        >
+                          Import Tab
+                        </Button>
+                      </CardActions>
+                    </Card>
+                  ))}
+                </Stack>
+              </Stack>
+            </CardContent>
+          </Card>
 
           <Divider />
 

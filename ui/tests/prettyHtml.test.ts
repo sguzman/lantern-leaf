@@ -102,4 +102,18 @@ describe("renderNativePrettyHtml", () => {
     expect(out).not.toContain("<img data-ll-html-anchor=");
     expect(out).toContain("<p data-ll-html-anchor=");
   });
+
+  it("rewrites relative links and images against browser-tab base urls", () => {
+    const html = `
+      <div data-ll-base-url="https://example.com/articles/start">
+        <p><a href="/docs/page-2">Next</a></p>
+        <img src="./cover.jpg" alt="Cover"/>
+      </div>
+    `;
+    const out = renderNativePrettyHtml(html, []);
+    expect(out).toContain('href="https://example.com/docs/page-2"');
+    expect(out).toContain('target="_blank"');
+    expect(out).toContain('src="https://example.com/articles/cover.jpg"');
+    expect(out).not.toContain("data-ll-base-url");
+  });
 });

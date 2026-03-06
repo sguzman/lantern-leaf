@@ -41,6 +41,11 @@ log_level = "debug"
 [storage]
 cache_dir = ".cache"
 
+[integration]
+browser_tabs_enabled = true
+browsr_base_url = "http://127.0.0.1:17373"
+browsr_timeout_ms = 8000
+
 [tts]
 tts_model_path = "/home/admin/Music/models/piper/en-US/female/en_US-amy-medium.onnx"
 tts_espeak_path = "/usr/share"

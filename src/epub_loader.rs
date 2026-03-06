@@ -3,7 +3,7 @@
 //! The loader converts supported book formats to plain text and also extracts
 //! image assets for rendering in the reading pane.
 
-use crate::cache::hash_dir;
+use crate::cache::{hash_dir, is_browser_tab_manifest, load_browser_tab_manifest};
 use crate::cancellation::CancellationToken;
 use anyhow::{Context, Result};
 use epub::doc::EpubDoc;
@@ -123,6 +123,34 @@ struct SourceContent {
 fn load_source_content(path: &Path, cancel: Option<&CancellationToken>) -> Result<SourceContent> {
     let start = Instant::now();
     ensure_not_cancelled(cancel, "load_source_text_start")?;
+    if is_browser_tab_manifest(path) {
+        let manifest = load_browser_tab_manifest(path)
+            .with_context(|| format!("Failed to load browser-tab manifest {}", path.display()))?;
+        let tts_text = fs::read_to_string(&manifest.text_path)
+            .with_context(|| format!("Failed to read browser-tab text {}", manifest.text_path.display()))?;
+        let html = fs::read_to_string(&manifest.html_path)
+            .with_context(|| format!("Failed to read browser-tab html {}", manifest.html_path.display()))?;
+        let wrapped_html = wrap_browser_tab_html(&html, &manifest.url);
+        info!(
+            path = %path.display(),
+            tab_id = manifest.tab_id,
+            url = %manifest.url,
+            html_truncated = manifest.html_truncated,
+            text_truncated = manifest.text_truncated,
+            "Loaded browser-tab dual-view payload"
+        );
+        return Ok(SourceContent {
+            tts_text: if tts_text.trim().is_empty() {
+                "No textual content found in this browser tab.".to_string()
+            } else {
+                tts_text
+            },
+            reading_markdown: None,
+            reading_html: Some(wrapped_html),
+            has_structured_markdown: true,
+        });
+    }
+
     if is_text_file(path) {
         info!(path = %path.display(), "Loading plain text content");
         let data = fs::read_to_string(path)
@@ -227,6 +255,7 @@ fn source_type_label(path: &Path) -> &'static str {
         .map(|ext| ext.to_ascii_lowercase())
         .as_deref()
     {
+        Some("lltab") => "browser_tab",
         Some("txt") => "txt",
         Some("md") | Some("markdown") => "markdown",
         Some("pdf") => "pdf",
@@ -256,6 +285,15 @@ fn markdown_to_plain_text(input: &str) -> String {
             }
         }
     }
+}
+
+fn wrap_browser_tab_html(html: &str, url: &str) -> String {
+    let escaped_url = url
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    format!(r#"<div data-ll-base-url="{escaped_url}">{html}</div>"#)
 }
 
 fn is_text_file(path: &Path) -> bool {
@@ -301,6 +339,7 @@ fn is_native_html_source(path: &Path) -> bool {
             .and_then(|ext| ext.to_str())
             .map(|ext| ext.to_ascii_lowercase()),
         Some(ext) if ext == "epub" || ext == "html" || ext == "htm"
+            || ext == "lltab"
     )
 }
 
@@ -1348,6 +1387,8 @@ fn quack_check_text_filename(config_path: &Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::browser_tabs::{BrowserTab, BrowserTabSnapshot, SnapshotTruncation, SnapshotTruncationEntry};
+    use crate::cache::{delete_recent_source_and_cache, persist_browser_tab_source};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_temp_file(name: &str, extension: &str) -> PathBuf {
@@ -1456,6 +1497,56 @@ mod tests {
         assert!(!loaded.tts_text.contains("Ignore table text"));
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn browser_tab_manifest_loads_native_html_and_plain_text() {
+        let snapshot = BrowserTabSnapshot {
+            tab_id: 909,
+            title: "Imported Article".to_string(),
+            url: "https://example.com/articles/start".to_string(),
+            lang: Some("en".to_string()),
+            ready_state: Some("complete".to_string()),
+            captured_at: Some("2026-03-06T20:00:00Z".to_string()),
+            html: Some(r#"<article><p><img src="./cover.jpg"/>Hello article.</p></article>"#.to_string()),
+            text: Some("Hello article.".to_string()),
+            selection: None,
+            truncation: SnapshotTruncation {
+                html: SnapshotTruncationEntry::default(),
+                text: SnapshotTruncationEntry::default(),
+                selection: SnapshotTruncationEntry::default(),
+            },
+        };
+        let tab = BrowserTab {
+            id: 909,
+            window_id: 21,
+            index: Some(0),
+            active: Some(true),
+            audible: Some(false),
+            pinned: Some(false),
+            status: Some("complete".to_string()),
+            title: "Imported Article".to_string(),
+            url: snapshot.url.clone(),
+            fav_icon_url: None,
+            last_accessed: Some(0.0),
+        };
+        let manifest_path =
+            persist_browser_tab_source(&snapshot, Some(&tab)).expect("persist browser tab source");
+
+        let loaded = load_book_content(&manifest_path).expect("load browser tab manifest");
+        assert!(loaded.has_structured_markdown);
+        assert!(loaded.reading_html.is_some());
+        assert!(loaded.reading_markdown.is_none());
+        assert_eq!(loaded.tts_text, "Hello article.");
+        assert!(
+            loaded
+                .reading_html
+                .as_deref()
+                .unwrap_or_default()
+                .contains(r#"data-ll-base-url="https://example.com/articles/start""#)
+        );
+
+        delete_recent_source_and_cache(&manifest_path).expect("cleanup browser tab source");
     }
 
     #[test]

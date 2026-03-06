@@ -7,6 +7,7 @@
 //! `sentence_text`, and `scroll_y` for resuming inside the page.
 
 use crate::config::{AppConfig, parse_config, serialize_config};
+use crate::browser_tabs::{BrowserTab, BrowserTabSnapshot};
 use epub::doc::EpubDoc;
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
@@ -20,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 pub const CACHE_DIR: &str = ".cache";
 const CACHE_APP_SUBDIR: &str = "lantern-leaf";
@@ -31,6 +32,10 @@ const CONTENT_LAYOUT_VERSION_FILE: &str = "content/layout-version.txt";
 const CONTENT_TTS_TEXT_FILE: &str = "content/tts-text.txt";
 const CONTENT_READING_MARKDOWN_FILE: &str = "content/reading-markdown.md";
 const CONTENT_READING_HTML_FILE: &str = "content/reading-html.html";
+const BROWSER_TABS_SUBDIR: &str = "browser-tabs";
+const BROWSER_TAB_MANIFEST_FILE: &str = "browser-tab.lltab";
+const BROWSER_TAB_HTML_FILE: &str = "snapshot.html";
+const BROWSER_TAB_TEXT_FILE: &str = "snapshot.txt";
 static CONTENT_DIGEST_CACHE: OnceLock<Mutex<HashMap<PathBuf, SourceDigestEntry>>> = OnceLock::new();
 static CACHE_LAYOUT_INIT: OnceLock<()> = OnceLock::new();
 
@@ -59,6 +64,27 @@ pub struct RecentBook {
     pub snippet: String,
     pub thumbnail_path: Option<PathBuf>,
     pub last_opened_unix_secs: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BrowserTabSourceManifest {
+    pub tab_id: u64,
+    pub window_id: Option<u64>,
+    pub title: String,
+    pub url: String,
+    pub lang: Option<String>,
+    pub ready_state: Option<String>,
+    pub captured_at: Option<String>,
+    pub favicon_url: Option<String>,
+    pub active: Option<bool>,
+    pub audible: Option<bool>,
+    pub pinned: Option<bool>,
+    pub html_path: PathBuf,
+    pub text_path: PathBuf,
+    #[serde(default)]
+    pub html_truncated: bool,
+    #[serde(default)]
+    pub text_truncated: bool,
 }
 
 pub fn cache_root() -> PathBuf {
@@ -511,10 +537,106 @@ pub fn persist_clipboard_text_source(text: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+pub fn persist_browser_tab_source(
+    snapshot: &BrowserTabSnapshot,
+    tab: Option<&BrowserTab>,
+) -> Result<PathBuf, String> {
+    let stable_key = snapshot.tab_id.to_string();
+    let mut hasher = Sha256::new();
+    hasher.update(stable_key.as_bytes());
+    let digest = format!("{:x}", hasher.finalize());
+    let dir = cache_root().join(BROWSER_TABS_SUBDIR).join(&digest);
+    fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+
+    let html_path = dir.join(BROWSER_TAB_HTML_FILE);
+    let text_path = dir.join(BROWSER_TAB_TEXT_FILE);
+    let manifest_path = dir.join(BROWSER_TAB_MANIFEST_FILE);
+
+    let html = snapshot
+        .html
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("<article><p>No structured HTML content was captured for this tab.</p></article>");
+    let text = snapshot
+        .text
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("No textual content found in this browser tab.");
+
+    fs::write(&html_path, html).map_err(|err| err.to_string())?;
+    fs::write(&text_path, text).map_err(|err| err.to_string())?;
+
+    let manifest = BrowserTabSourceManifest {
+        tab_id: snapshot.tab_id,
+        window_id: tab.map(|value| value.window_id),
+        title: snapshot.title.trim().to_string(),
+        url: snapshot.url.trim().to_string(),
+        lang: snapshot.lang.clone(),
+        ready_state: snapshot.ready_state.clone(),
+        captured_at: snapshot.captured_at.clone(),
+        favicon_url: tab.and_then(|value| value.fav_icon_url.clone()),
+        active: tab.and_then(|value| value.active),
+        audible: tab.and_then(|value| value.audible),
+        pinned: tab.and_then(|value| value.pinned),
+        html_path: html_path.clone(),
+        text_path: text_path.clone(),
+        html_truncated: snapshot.truncation.html.truncated,
+        text_truncated: snapshot.truncation.text.truncated,
+    };
+    let manifest_raw = toml::to_string(&manifest).map_err(|err| err.to_string())?;
+    fs::write(&manifest_path, manifest_raw).map_err(|err| err.to_string())?;
+
+    info!(
+        path = %manifest_path.display(),
+        tab_id = snapshot.tab_id,
+        title = %snapshot.title,
+        url = %snapshot.url,
+        html_chars = html.len(),
+        text_chars = text.len(),
+        html_truncated = snapshot.truncation.html.truncated,
+        text_truncated = snapshot.truncation.text.truncated,
+        "Persisted browser-tab cache snapshot"
+    );
+
+    Ok(manifest_path)
+}
+
+pub fn load_browser_tab_manifest(source_path: &Path) -> Option<BrowserTabSourceManifest> {
+    if !is_browser_tab_manifest(source_path) {
+        return None;
+    }
+    let raw = fs::read_to_string(source_path).ok()?;
+    let manifest = toml::from_str::<BrowserTabSourceManifest>(&raw).ok()?;
+    debug!(
+        path = %source_path.display(),
+        tab_id = manifest.tab_id,
+        url = %manifest.url,
+        "Loaded browser-tab manifest"
+    );
+    Some(manifest)
+}
+
+pub fn is_browser_tab_manifest(source_path: &Path) -> bool {
+    source_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("lltab"))
+        .unwrap_or(false)
+}
+
 pub fn delete_recent_source_and_cache(source_path: &Path) -> Result<(), String> {
     let cache_path = hash_dir(source_path);
-
-    delete_path_if_present(source_path)?;
+    if is_browser_tab_manifest(source_path) {
+        let browser_tab_dir = source_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| source_path.to_path_buf());
+        delete_path_if_present(&browser_tab_dir)?;
+    } else {
+        delete_path_if_present(source_path)?;
+    }
     delete_dir_if_present(&cache_path)?;
 
     Ok(())
@@ -716,6 +838,17 @@ pub fn normalized_dir(epub_path: &Path) -> PathBuf {
 }
 
 fn infer_recent_title(source_path: &Path) -> String {
+    if let Some(manifest) = load_browser_tab_manifest(source_path) {
+        let trimmed = manifest.title.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+        let url = manifest.url.trim();
+        if !url.is_empty() {
+            return url.to_string();
+        }
+    }
+
     if source_path
         .parent()
         .and_then(|p| p.file_name())
@@ -801,6 +934,10 @@ fn infer_clipboard_recent_title(source_path: &Path) -> Option<String> {
 }
 
 fn infer_recent_preview_lines(source_path: &Path) -> Vec<String> {
+    if let Some(manifest) = load_browser_tab_manifest(source_path) {
+        return preview_lines_from_text(&fs::read_to_string(manifest.text_path).unwrap_or_default());
+    }
+
     if source_path
         .parent()
         .and_then(|p| p.file_name())
@@ -877,6 +1014,10 @@ fn truncate_preview_line(line: &str, max_chars: usize) -> String {
 }
 
 fn infer_recent_thumbnail(source_path: &Path) -> Option<PathBuf> {
+    if is_browser_tab_manifest(source_path) {
+        return None;
+    }
+
     if !source_path
         .extension()
         .and_then(|ext| ext.to_str())
@@ -954,6 +1095,7 @@ pub fn save_epub_config(epub_path: &Path, config: &AppConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::browser_tabs::{BrowserTab, BrowserTabSnapshot, SnapshotTruncation, SnapshotTruncationEntry};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_source_path(ext: &str) -> PathBuf {
@@ -1179,5 +1321,52 @@ sentence_text = "legacy bookmark entry"
         assert_eq!(loaded, anchors);
 
         cleanup_source_and_cache(&source);
+    }
+
+    #[test]
+    fn browser_tab_manifest_roundtrip_and_delete_removes_artifacts() {
+        let snapshot = BrowserTabSnapshot {
+            tab_id: 77,
+            title: "Browser Article".to_string(),
+            url: "https://example.com/articles/77".to_string(),
+            lang: Some("en".to_string()),
+            ready_state: Some("complete".to_string()),
+            captured_at: Some("2026-03-06T20:00:00Z".to_string()),
+            html: Some("<article><p>Hello browser tab</p></article>".to_string()),
+            text: Some("Hello browser tab".to_string()),
+            selection: None,
+            truncation: SnapshotTruncation {
+                html: SnapshotTruncationEntry::default(),
+                text: SnapshotTruncationEntry::default(),
+                selection: SnapshotTruncationEntry::default(),
+            },
+        };
+        let tab = BrowserTab {
+            id: 77,
+            window_id: 5,
+            index: Some(0),
+            active: Some(true),
+            audible: Some(false),
+            pinned: Some(false),
+            status: Some("complete".to_string()),
+            title: "Browser Article".to_string(),
+            url: snapshot.url.clone(),
+            fav_icon_url: Some("https://example.com/favicon.ico".to_string()),
+            last_accessed: Some(1.0),
+        };
+
+        let manifest_path =
+            persist_browser_tab_source(&snapshot, Some(&tab)).expect("persist manifest");
+        let manifest = load_browser_tab_manifest(&manifest_path).expect("load manifest");
+        assert_eq!(manifest.tab_id, 77);
+        assert_eq!(manifest.window_id, Some(5));
+        assert_eq!(manifest.title, "Browser Article");
+        assert!(manifest.html_path.exists());
+        assert!(manifest.text_path.exists());
+        assert_eq!(infer_recent_title(&manifest_path), "Browser Article");
+        assert!(infer_recent_snippet(&manifest_path, "Browser Article").contains("Hello browser tab"));
+
+        delete_recent_source_and_cache(&manifest_path).expect("delete browser tab recent");
+        assert!(!manifest_path.exists());
     }
 }

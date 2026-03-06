@@ -21,3 +21,6 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 ts-rs = { version = "10.0.0", features = ["serde-compat"] }
 rodio = { version = "0.18", features = ["vorbis", "flac"] }
 sonic-rs-sys = "0.1.9"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread"] }
