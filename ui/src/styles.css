@@ -77,8 +77,9 @@ body {
 }
 
 .reader-native-html-content img {
-  max-width: 100%;
-  height: auto;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  height: auto !important;
 }
 
 .reader-native-html-content [data-ll-html-anchor].reader-pretty-highlight,

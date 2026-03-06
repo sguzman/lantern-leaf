@@ -103,6 +103,23 @@ describe("renderNativePrettyHtml", () => {
     expect(out).toContain("<p data-ll-html-anchor=");
   });
 
+  it("anchors leaf div text blocks for browser-like article paragraphs without anchoring wrappers", () => {
+    const html = `
+      <article>
+        <div class="wrapper">
+          <div>First paragraph inside a div block with enough text to anchor meaningfully.</div>
+          <div>Second paragraph inside another div block with enough text to anchor meaningfully.</div>
+        </div>
+      </article>
+    `;
+    const out = renderNativePrettyHtml(html, []);
+    expect(out).not.toContain('<article data-ll-html-anchor=');
+    expect(out).not.toContain('<div class="wrapper" data-ll-html-anchor=');
+    expect(out).toContain('First paragraph inside a div block');
+    expect(out).toContain('Second paragraph inside another div block');
+    expect((out.match(/data-ll-html-anchor="/g) ?? []).length).toBe(2);
+  });
+
   it("rewrites relative links and images against browser-tab base urls", () => {
     const html = `
       <div data-ll-base-url="https://example.com/articles/start">
@@ -172,5 +189,23 @@ describe("renderNativePrettyHtml", () => {
     expect(out).not.toContain("Site header");
     expect(out).not.toContain("Sidebar nav");
     expect(out).not.toContain("Site footer");
+  });
+
+  it("refines article shells down to the main body section when that section dominates the text", () => {
+    const html = `
+      <div data-ll-base-url="https://example.com/story" data-ll-browser-tab="1">
+        <article id="story">
+          <header>Header promo and share tools</header>
+          <section>
+            <div>${"Primary body text ".repeat(80)}</div>
+          </section>
+          <div id="recirculation">Related content and promos</div>
+        </article>
+      </div>
+    `;
+    const out = renderNativePrettyHtml(html, []);
+    expect(out).toContain("Primary body text");
+    expect(out).not.toContain("Header promo and share tools");
+    expect(out).not.toContain("Related content and promos");
   });
 });

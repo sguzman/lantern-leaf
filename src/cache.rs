@@ -15,7 +15,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, REFERER, USER_AGENT};
 use reqwest::Url;
-use scraper::{Html, Selector};
+use scraper::{ElementRef, Html, Selector};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
@@ -42,7 +42,7 @@ const BROWSER_TAB_MANIFEST_FILE: &str = "browser-tab.lltab";
 const BROWSER_TAB_HTML_FILE: &str = "snapshot.html";
 const BROWSER_TAB_TEXT_FILE: &str = "snapshot.txt";
 const BROWSER_TAB_ASSETS_SUBDIR: &str = "assets";
-const BROWSER_TAB_MANIFEST_VERSION: u32 = 2;
+const BROWSER_TAB_MANIFEST_VERSION: u32 = 3;
 const BROWSER_TAB_FETCH_USER_AGENT: &str =
     "LanternLeaf/2026.03 (browser-tab-import; local desktop reader)";
 static CONTENT_DIGEST_CACHE: OnceLock<Mutex<HashMap<PathBuf, SourceDigestEntry>>> = OnceLock::new();
@@ -776,18 +776,40 @@ struct BrowserTabCandidate {
 fn select_browser_tab_candidate(document: &Html, selector_raw: &str) -> Option<BrowserTabCandidate> {
     let selector = Selector::parse(selector_raw).ok()?;
     let element = document.select(&selector).next()?;
-    let text_len = element
+    let element = refine_browser_tab_element(element);
+    let text_len = browser_tab_element_text_len(&element);
+    Some(BrowserTabCandidate {
+        html: element.html(),
+        text_len,
+    })
+}
+
+fn refine_browser_tab_element<'a>(element: ElementRef<'a>) -> ElementRef<'a> {
+    let parent_len = browser_tab_element_text_len(&element);
+    let best_child = element
+        .children()
+        .filter_map(ElementRef::wrap)
+        .filter(|child| matches!(child.value().name(), "section" | "main" | "article" | "div"))
+        .map(|child| (browser_tab_element_text_len(&child), child))
+        .max_by_key(|(len, _)| *len);
+    if let Some((child_len, child)) = best_child
+        && child_len >= 400
+        && child_len * 2 >= parent_len
+    {
+        return child;
+    }
+    element
+}
+
+fn browser_tab_element_text_len(element: &ElementRef<'_>) -> usize {
+    element
         .text()
         .collect::<Vec<_>>()
         .join(" ")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-        .len();
-    Some(BrowserTabCandidate {
-        html: element.html(),
-        text_len,
-    })
+        .len()
 }
 
 fn collect_browser_tab_title(document: &Html) -> Option<String> {

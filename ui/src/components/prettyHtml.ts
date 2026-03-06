@@ -115,6 +115,24 @@ function focusBrowserTabContent(container: HTMLDivElement): void {
   if (!chosen) {
     return;
   }
+  const chosenTextLen = (chosen.textContent ?? "").trim().length;
+  const refinedChild = Array.from(chosen.children)
+    .filter((child): child is HTMLElement =>
+      child instanceof HTMLElement &&
+      ["section", "main", "article", "div"].includes(child.tagName.toLowerCase())
+    )
+    .map((child) => ({
+      child,
+      textLen: (child.textContent ?? "").trim().length
+    }))
+    .sort((left, right) => right.textLen - left.textLen)[0];
+  if (
+    refinedChild &&
+    refinedChild.textLen >= 400 &&
+    refinedChild.textLen * 2 >= chosenTextLen
+  ) {
+    chosen = refinedChild.child;
+  }
 
   const focused = document.createElement("div");
   focused.dataset.llBaseUrl = browserWrapper.dataset.llBaseUrl ?? "";
@@ -395,6 +413,31 @@ export function renderNativePrettyHtml(
     "blockquote",
     "pre",
   ]);
+  const anchorableBlockTags = new Set([
+    ...anchorTags,
+    "div",
+    "section",
+  ]);
+  const measureNodeText = (node: Element): number =>
+    (node.textContent ?? "").replace(/\s+/g, " ").trim().length;
+  const isLeafBlockAnchor = (element: Element): boolean => {
+    const tag = element.tagName.toLowerCase();
+    if (!["div", "section"].includes(tag)) {
+      return false;
+    }
+    const textLen = measureNodeText(element);
+    if (textLen < 48) {
+      return false;
+    }
+    const directBlockChildren = Array.from(element.children).filter((child) => {
+      const childTag = child.tagName.toLowerCase();
+      if (!anchorableBlockTags.has(childTag) && childTag !== "article") {
+        return false;
+      }
+      return measureNodeText(child) >= 24;
+    });
+    return directBlockChildren.length === 0;
+  };
   const sanitizeNode = (node: Node): void => {
     if (node.nodeType === Node.ELEMENT_NODE) {
       const element = node as Element;
@@ -465,7 +508,14 @@ export function renderNativePrettyHtml(
           baseUrl,
           resolveResourceTarget
         );
-        element.setAttribute("style", rewritten);
+        if (tag === "img") {
+          element.setAttribute(
+            "style",
+            rewritten.replace(/(?:^|;)\s*min-width\s*:[^;]+;?/gi, ";")
+          );
+        } else {
+          element.setAttribute("style", rewritten);
+        }
       }
       if (tag === "img") {
         const resolved = resolveResourceTarget(rawImgSrc) ?? "";
@@ -540,14 +590,14 @@ export function renderNativePrettyHtml(
           }
         }
       }
-      if (anchorTags.has(tag)) {
+      const children = [...node.childNodes];
+      for (const child of children) {
+        sanitizeNode(child);
+      }
+      if (anchorTags.has(tag) || isLeafBlockAnchor(element)) {
         element.setAttribute("data-ll-html-anchor", String(anchorIndex));
         anchorIndex += 1;
       }
-    }
-    const children = [...node.childNodes];
-    for (const child of children) {
-      sanitizeNode(child);
     }
   };
   sanitizeNode(container);
