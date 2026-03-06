@@ -1420,51 +1420,72 @@ export const ReaderShell = memo(function ReaderShell({
       return;
     }
     const anchorTexts = anchors.map((element) => normalizeSyncText(element.textContent ?? ""));
-    const hintAnchors = reader.sentence_anchor_map;
     const mapped: number[] = [];
     let scanStart = 0;
+    let confidentMatches = 0;
+    let fallbackMatches = 0;
+    let cappedLeaps = 0;
     for (let sentenceIdx = 0; sentenceIdx < reader.sentences.length; sentenceIdx += 1) {
       const sentence = reader.sentences[sentenceIdx];
       const normalizedSentence = normalizeSyncText(sentence);
       const sentencePrefix = normalizedSentence.slice(0, 120);
-      const hint = hintAnchors[sentenceIdx];
-      let localStart = scanStart;
-      let localEnd = anchorTexts.length - 1;
-      if (hint !== null && hint !== undefined && Number.isFinite(hint)) {
-        const h = Math.max(0, Math.min(anchorTexts.length - 1, hint));
-        localStart = Math.max(0, h - 40);
-        localEnd = Math.min(anchorTexts.length - 1, h + 40);
-      }
+      const shortPrefix = normalizedSentence.slice(0, 56);
+      const localStart = Math.max(0, scanStart - 2);
+      const localEnd = Math.min(anchorTexts.length - 1, scanStart + 56);
       let found = -1;
+      let foundScore = 0;
       if (sentencePrefix.length > 0) {
         for (let idx = localStart; idx <= localEnd; idx += 1) {
           const anchorText = anchorTexts[idx];
           if (!anchorText) {
             continue;
           }
-          if (
-            anchorText.includes(sentencePrefix) ||
-            sentencePrefix.includes(anchorText.slice(0, Math.min(64, anchorText.length)))
-          ) {
+          if (anchorText.includes(sentencePrefix)) {
             found = idx;
+            foundScore = 1;
             break;
+          }
+          let score = 0;
+          if (shortPrefix.length >= 24 && anchorText.includes(shortPrefix)) {
+            score = Math.max(score, 0.92);
+          }
+          const anchorPrefix = anchorText.slice(0, Math.min(72, anchorText.length));
+          if (anchorPrefix.length >= 24 && sentencePrefix.includes(anchorPrefix)) {
+            score = Math.max(score, 0.78);
+          }
+          if (score > foundScore) {
+            found = idx;
+            foundScore = score;
           }
         }
       }
-      if (found < 0) {
-        found =
-          hint !== null && hint !== undefined
-            ? hint
-            : mapped.length > 0
-              ? mapped[mapped.length - 1]
-              : scanStart;
+      const prev = mapped.length > 0 ? mapped[mapped.length - 1] : scanStart;
+      if (found < 0 || foundScore < 0.88) {
+        fallbackMatches += 1;
+        found = prev;
+      } else {
+        if (found - prev > 2 && foundScore < 0.99) {
+          cappedLeaps += 1;
+          found = prev;
+        } else {
+          confidentMatches += 1;
+        }
       }
       const clamped = Math.max(0, Math.min(anchors.length - 1, found));
       mapped.push(clamped);
-      scanStart = clamped;
+      scanStart = Math.max(scanStart, clamped);
+    }
+    if (import.meta.env.DEV) {
+      console.debug("reader pretty html sync map", {
+        sentences: reader.sentences.length,
+        anchors: anchors.length,
+        confidentMatches,
+        fallbackMatches,
+        cappedLeaps
+      });
     }
     htmlSentenceAnchorMapRef.current = mapped;
-  }, [hasPrettyHtml, reader.sentence_anchor_map, renderedNativeHtml, reader.sentences]);
+  }, [hasPrettyHtml, renderedNativeHtml, reader.sentences]);
   const themeLabel = reader.settings.theme === "night" ? "Day" : "Night";
   const themeIcon =
     reader.settings.theme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />;
