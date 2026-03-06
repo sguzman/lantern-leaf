@@ -15,6 +15,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, REFERER, USER_AGENT};
 use reqwest::Url;
+use scraper::{Html, Selector};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
@@ -612,12 +613,16 @@ pub fn persist_browser_tab_source(
         .unwrap_or("<article><p>No structured HTML content was captured for this tab.</p></article>");
     let prepared = prepare_browser_tab_bundle(html, snapshot.url.trim(), &asset_dir)
         .map_err(|err| err.to_string())?;
-    let text = snapshot
-        .text
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("No textual content found in this browser tab.");
+    let text = if !prepared.text.trim().is_empty() {
+        prepared.text.as_str()
+    } else {
+        snapshot
+            .text
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("No textual content found in this browser tab.")
+    };
 
     fs::write(&html_path, prepared.html).map_err(|err| err.to_string())?;
     fs::write(&text_path, text).map_err(|err| err.to_string())?;
@@ -663,6 +668,7 @@ pub fn persist_browser_tab_source(
 #[derive(Debug, Default)]
 struct PreparedBrowserTabBundle {
     html: String,
+    text: String,
     assets: Vec<BrowserTabAsset>,
 }
 
@@ -671,17 +677,153 @@ fn prepare_browser_tab_bundle(
     base_url: &str,
     asset_dir: &Path,
 ) -> anyhow::Result<PreparedBrowserTabBundle> {
+    let focused_html = focus_browser_tab_html(html, base_url);
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(8))
         .user_agent(BROWSER_TAB_FETCH_USER_AGENT)
         .build()?;
     let mut asset_map = HashMap::<String, BrowserTabAsset>::new();
-    let html_with_styles = inline_browser_tab_stylesheets(html, base_url, asset_dir, &client, &mut asset_map);
+    let html_with_styles =
+        inline_browser_tab_stylesheets(&focused_html, base_url, asset_dir, &client, &mut asset_map);
     collect_browser_tab_html_assets(&html_with_styles, base_url, asset_dir, &client, &mut asset_map);
+    let text = browser_tab_text_from_html(&html_with_styles);
     Ok(PreparedBrowserTabBundle {
         html: html_with_styles,
+        text,
         assets: asset_map.into_values().collect(),
     })
+}
+
+fn focus_browser_tab_html(raw_html: &str, page_url: &str) -> String {
+    let document = Html::parse_document(raw_html);
+    let head_styles = collect_browser_tab_head_nodes(&document, "style, link[rel~='stylesheet']");
+    let title = collect_browser_tab_title(&document);
+    let html_classes = collect_browser_tab_attr(&document, "html", "class");
+    let body_classes = collect_browser_tab_attr(&document, "body", "class");
+    let html_style = collect_browser_tab_attr(&document, "html", "style");
+    let body_style = collect_browser_tab_attr(&document, "body", "style");
+
+    let candidate_selectors = [
+        ".mw-parser-output",
+        ".mw-body-content",
+        "main article",
+        "main#content",
+        "article",
+        "[role='main']",
+        "main",
+        "#content",
+        ".entry-content",
+        ".post-content",
+        ".article-content",
+    ];
+    let focused = candidate_selectors
+        .iter()
+        .filter_map(|selector| select_browser_tab_candidate(&document, selector))
+        .find(|candidate| candidate.text_len >= 600)
+        .map(|candidate| candidate.html)
+        .unwrap_or_else(|| raw_html.to_string());
+
+    let mut classes = Vec::<String>::new();
+    classes.push("ll-browser-tab-root".to_string());
+    if let Some(value) = html_classes {
+        classes.extend(value.split_whitespace().map(str::to_string));
+    }
+    if let Some(value) = body_classes {
+        classes.extend(value.split_whitespace().map(str::to_string));
+    }
+    classes.sort();
+    classes.dedup();
+    let style = [html_style.as_deref(), body_style.as_deref()]
+        .into_iter()
+        .flatten()
+        .filter(|value| !value.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("; ");
+    let title_markup = title
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!("<h1>{}</h1>", escape_html_attr(&value)))
+        .unwrap_or_default();
+    let style_attr = if style.trim().is_empty() {
+        String::new()
+    } else {
+        format!(r#" style="{}""#, escape_html_attr(&style))
+    };
+    format!(
+        r#"<div data-ll-browser-tab-focused="1" data-ll-page-url="{}" class="{}"{}>{head_styles}{title_markup}{focused}</div>"#,
+        escape_html_attr(page_url),
+        classes.join(" "),
+        style_attr
+    )
+}
+
+struct BrowserTabCandidate {
+    html: String,
+    text_len: usize,
+}
+
+fn select_browser_tab_candidate(document: &Html, selector_raw: &str) -> Option<BrowserTabCandidate> {
+    let selector = Selector::parse(selector_raw).ok()?;
+    let element = document.select(&selector).next()?;
+    let text_len = element
+        .text()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .len();
+    Some(BrowserTabCandidate {
+        html: element.html(),
+        text_len,
+    })
+}
+
+fn collect_browser_tab_title(document: &Html) -> Option<String> {
+    let selector = Selector::parse("title").ok()?;
+    document
+        .select(&selector)
+        .next()
+        .map(|element| element.text().collect::<String>().trim().to_string())
+}
+
+fn collect_browser_tab_attr(document: &Html, selector_raw: &str, attr: &str) -> Option<String> {
+    let selector = Selector::parse(selector_raw).ok()?;
+    document
+        .select(&selector)
+        .next()
+        .and_then(|element| element.value().attr(attr))
+        .map(str::to_string)
+}
+
+fn collect_browser_tab_head_nodes(document: &Html, selector_raw: &str) -> String {
+    let selector = match Selector::parse(selector_raw) {
+        Ok(selector) => selector,
+        Err(_) => return String::new(),
+    };
+    document
+        .select(&selector)
+        .map(|element| element.html())
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn browser_tab_text_from_html(html: &str) -> String {
+    match html2text::from_read(html.as_bytes(), 10_000) {
+        Ok(text) => {
+            let normalized = text
+                .lines()
+                .map(|line| line.trim())
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if normalized.trim().is_empty() {
+                "No textual content found in this browser tab.".to_string()
+            } else {
+                normalized
+            }
+        }
+        Err(_) => "No textual content found in this browser tab.".to_string(),
+    }
 }
 
 fn inline_browser_tab_stylesheets(
@@ -1015,6 +1157,7 @@ pub fn rehydrate_browser_tab_manifest_assets(source_path: &Path) -> Result<(), S
     let prepared = prepare_browser_tab_bundle(&html, &manifest.url, &asset_dir)
         .map_err(|err| err.to_string())?;
     fs::write(&manifest.html_path, prepared.html).map_err(|err| err.to_string())?;
+    fs::write(&manifest.text_path, prepared.text).map_err(|err| err.to_string())?;
     manifest.asset_dir = (!prepared.assets.is_empty()).then_some(asset_dir);
     manifest.assets = prepared.assets;
     let raw = toml::to_string(&manifest).map_err(|err| err.to_string())?;

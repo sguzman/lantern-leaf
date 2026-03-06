@@ -74,6 +74,9 @@ function focusBrowserTabContent(container: HTMLDivElement): void {
   if (!browserWrapper) {
     return;
   }
+  if (container.querySelector("[data-ll-browser-tab-focused='1']")) {
+    return;
+  }
   const htmlRoot = container.querySelector("html");
   const bodyRoot = container.querySelector("body");
   const headRoot = container.querySelector("head");

@@ -145,6 +145,7 @@ export function StarterShell({
   const [calibreThumbOverrides, setCalibreThumbOverrides] = useState<Record<number, string>>({});
   const calibreThumbInFlightRef = useRef<Set<number>>(new Set());
   const calibreThumbFailedRef = useRef<Set<number>>(new Set());
+  const browserTabsWindowRef = useRef<number>(0);
 
   const recentsRowHeight = 132;
   const recentsOverscan = 8;
@@ -267,6 +268,7 @@ export function StarterShell({
 
   useEffect(() => {
     setBrowserTabsScrollTop(0);
+    browserTabsWindowRef.current = 0;
   }, [browserTabSearch, selectedBrowserWindowId]);
 
   useEffect(() => {
@@ -622,7 +624,16 @@ export function StarterShell({
                 <div
                   style={{ maxHeight: browserTabsViewportHeight }}
                   className="overflow-y-auto pr-1"
-                  onScroll={(event) => setBrowserTabsScrollTop(event.currentTarget.scrollTop)}
+                  onScroll={(event) => {
+                    const nextWindow = Math.floor(
+                      event.currentTarget.scrollTop / browserTabsRowHeight
+                    );
+                    if (nextWindow === browserTabsWindowRef.current) {
+                      return;
+                    }
+                    browserTabsWindowRef.current = nextWindow;
+                    setBrowserTabsScrollTop(nextWindow * browserTabsRowHeight);
+                  }}
                 >
                   <div>
                     {browserTabsVirtualWindow.topSpacerPx > 0 ? (
