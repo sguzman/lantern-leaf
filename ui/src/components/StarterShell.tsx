@@ -65,6 +65,19 @@ interface StarterShellProps {
   runtimeLogLevel: string;
 }
 
+function toUiErrorMessage(error: unknown, fallback: string): string {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) {
+      return message;
+    }
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return fallback;
+}
+
 function toThumbnailSrc(path: string | null | undefined): string | null {
   if (!path) {
     return null;
@@ -114,12 +127,14 @@ export function StarterShell({
   const [path, setPath] = useState("");
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   const [browserHealth, setBrowserHealth] = useState<BrowsrHealth | null>(null);
+  const [browserHealthError, setBrowserHealthError] = useState<string | null>(null);
   const [browserWindows, setBrowserWindows] = useState<BrowserWindowInfo[]>([]);
   const [browserTabs, setBrowserTabs] = useState<BrowserTabInfo[]>([]);
   const [browserTabsLoading, setBrowserTabsLoading] = useState(false);
   const [browserTabsError, setBrowserTabsError] = useState<string | null>(null);
   const [selectedBrowserWindowId, setSelectedBrowserWindowId] = useState<number | "all">("all");
   const [browserTabSearch, setBrowserTabSearch] = useState("");
+  const [browserTabsScrollTop, setBrowserTabsScrollTop] = useState(0);
   const [calibreSearch, setCalibreSearch] = useState("");
   const [recentsSearch, setRecentsSearch] = useState("");
   const [showCalibre, setShowCalibre] = useState(true);
@@ -134,6 +149,9 @@ export function StarterShell({
 
   const recentsRowHeight = 132;
   const recentsOverscan = 8;
+  const browserTabsRowHeight = 92;
+  const browserTabsOverscan = 6;
+  const browserTabsViewportHeight = 320;
   const calibreRowHeight = 58;
   const calibreViewportHeight = 384;
   const calibreOverscan = 10;
@@ -192,6 +210,22 @@ export function StarterShell({
     });
   }, [browserTabSearch, browserTabs, selectedBrowserWindowId]);
 
+  const browserTabsVirtualWindow = useMemo(() => {
+    return computeVirtualWindow(
+      visibleBrowserTabs,
+      browserTabsScrollTop,
+      browserTabsRowHeight,
+      browserTabsViewportHeight,
+      browserTabsOverscan
+    );
+  }, [
+    browserTabsOverscan,
+    browserTabsRowHeight,
+    browserTabsScrollTop,
+    browserTabsViewportHeight,
+    visibleBrowserTabs
+  ]);
+
   const virtualWindow = useMemo(() => {
     return computeVirtualWindow(
       filteredCalibre,
@@ -233,14 +267,19 @@ export function StarterShell({
   }, [recentsSearch, recentsSort]);
 
   useEffect(() => {
+    setBrowserTabsScrollTop(0);
+  }, [browserTabSearch, selectedBrowserWindowId]);
+
+  useEffect(() => {
     setLogLevelValue(runtimeLogLevel);
   }, [runtimeLogLevel]);
 
   const loadBrowserTabs = async (refresh = false): Promise<void> => {
     setBrowserTabsLoading(true);
     setBrowserTabsError(null);
+    setBrowserHealthError(null);
     try {
-      const [health, windows, tabs] = await Promise.all([
+      const [healthResult, windowsResult, tabsResult] = await Promise.allSettled([
         backendApi.browserTabsHealth(),
         backendApi.browserTabsListWindows(),
         backendApi.browserTabsListTabs(
@@ -249,13 +288,34 @@ export function StarterShell({
           refresh
         )
       ]);
-      setBrowserHealth(health);
-      setBrowserWindows(windows);
-      setBrowserTabs(tabs);
+
+      if (healthResult.status === "fulfilled") {
+        setBrowserHealth(healthResult.value);
+      } else {
+        setBrowserHealth(null);
+        setBrowserHealthError(
+          toUiErrorMessage(healthResult.reason, "[starter-browser-tabs] Browsr health failed")
+        );
+      }
+
+      if (windowsResult.status === "fulfilled") {
+        setBrowserWindows(windowsResult.value);
+      } else {
+        setBrowserWindows([]);
+      }
+
+      if (tabsResult.status === "fulfilled") {
+        setBrowserTabs(tabsResult.value);
+      } else {
+        setBrowserTabs([]);
+        setBrowserTabsError(
+          toUiErrorMessage(tabsResult.reason, "[starter-browser-tabs] Tab listing failed")
+        );
+      }
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : `[starter-browser-tabs] ${String(error)}`;
-      setBrowserTabsError(message);
+      setBrowserTabsError(
+        toUiErrorMessage(error, "[starter-browser-tabs] Browser tabs load failed")
+      );
     } finally {
       setBrowserTabsLoading(false);
     }
@@ -507,7 +567,7 @@ export function StarterShell({
                 >
                   {browserHealth
                     ? `Browsr ${browserHealth.ok ? "online" : "offline"} · extension ${browserHealth.extension_connected ? "connected" : "disconnected"}`
-                    : "Browsr status unavailable"}
+                    : browserHealthError ?? "Browsr status unavailable"}
                 </Typography>
 
                 {browserTabsError ? <Alert severity="error">{browserTabsError}</Alert> : null}
@@ -545,7 +605,21 @@ export function StarterShell({
                   />
                 </Stack>
 
-                <Stack spacing={1} sx={{ maxHeight: 280, overflowY: "auto", pr: 0.5 }}>
+                {!browserTabsLoading && visibleBrowserTabs.length > 0 ? (
+                  <Typography variant="caption" color="text.secondary">
+                    Showing {visibleBrowserTabs.length.toLocaleString()} tab{visibleBrowserTabs.length === 1 ? "" : "s"}
+                  </Typography>
+                ) : null}
+
+                <div
+                  style={{ maxHeight: browserTabsViewportHeight }}
+                  className="overflow-y-auto pr-1"
+                  onScroll={(event) => setBrowserTabsScrollTop(event.currentTarget.scrollTop)}
+                >
+                  <div>
+                    {browserTabsVirtualWindow.topSpacerPx > 0 ? (
+                      <div style={{ height: browserTabsVirtualWindow.topSpacerPx }} />
+                    ) : null}
                   {browserTabsLoading ? (
                     <Stack direction="row" spacing={1} alignItems="center">
                       <CircularProgress size={18} />
@@ -559,37 +633,51 @@ export function StarterShell({
                         : "No tabs matched the current browser-tab filters."}
                     </Typography>
                   ) : null}
-                  {visibleBrowserTabs.map((tab) => (
-                    <Card key={tab.id} variant="outlined">
-                      <CardContent>
-                        <Stack spacing={0.5}>
-                          <Typography variant="subtitle2">{tab.title}</Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {tab.url}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            Window {tab.windowId}
-                            {tab.active ? " · Active" : ""}
-                            {tab.audible ? " · Audible" : ""}
-                            {tab.pinned ? " · Pinned" : ""}
-                            {tab.status ? ` · ${tab.status}` : ""}
-                          </Typography>
-                        </Stack>
-                      </CardContent>
-                      <CardActions>
-                        <Button
-                          size="small"
-                          variant="contained"
-                          onClick={() => void onOpenBrowserTab(tab.id, tab.windowId)}
-                          disabled={busy || browserTabsLoading}
-                          data-testid={`starter-browser-tab-open-${tab.id}`}
-                        >
-                          Import Tab
-                        </Button>
-                      </CardActions>
-                    </Card>
+                  {browserTabsVirtualWindow.items.map((tab) => (
+                    <div key={tab.id} style={{ height: browserTabsRowHeight }}>
+                      <Card variant="outlined" className="h-full">
+                        <CardContent sx={{ py: 1.25, "&:last-child": { pb: 1.25 } }}>
+                          <Stack
+                            direction="row"
+                            spacing={1.5}
+                            alignItems="center"
+                            justifyContent="space-between"
+                          >
+                            <Stack spacing={0.35} className="min-w-0 flex-1">
+                              <Typography variant="subtitle2" noWrap title={tab.title}>
+                                {tab.title}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary" noWrap title={tab.url}>
+                                {tab.url}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary" noWrap>
+                                Window {tab.windowId}
+                                {tab.active ? " · Active" : ""}
+                                {tab.audible ? " · Audible" : ""}
+                                {tab.pinned ? " · Pinned" : ""}
+                                {tab.status ? ` · ${tab.status}` : ""}
+                              </Typography>
+                            </Stack>
+                            <Button
+                              size="small"
+                              variant="contained"
+                              onClick={() => void onOpenBrowserTab(tab.id, tab.windowId)}
+                              disabled={busy || browserTabsLoading}
+                              data-testid={`starter-browser-tab-open-${tab.id}`}
+                              sx={{ flexShrink: 0 }}
+                            >
+                              Import
+                            </Button>
+                          </Stack>
+                        </CardContent>
+                      </Card>
+                    </div>
                   ))}
-                </Stack>
+                    {browserTabsVirtualWindow.bottomSpacerPx > 0 ? (
+                      <div style={{ height: browserTabsVirtualWindow.bottomSpacerPx }} />
+                    ) : null}
+                  </div>
+                </div>
               </Stack>
             </CardContent>
           </Card>

@@ -723,10 +723,16 @@ export const ReaderShell = memo(function ReaderShell({
       if (!entry) {
         return;
       }
-      setTopBarWidth(entry.contentRect.width);
+      const nextWidth = entry.contentRect.width;
+      setTopBarWidth((current) =>
+        Math.abs(current - nextWidth) > 0.5 ? nextWidth : current
+      );
     });
     resizeObserver.observe(node);
-    setTopBarWidth(node.getBoundingClientRect().width);
+    const initialWidth = node.getBoundingClientRect().width;
+    setTopBarWidth((current) =>
+      Math.abs(current - initialWidth) > 0.5 ? initialWidth : current
+    );
 
     return () => resizeObserver.disconnect();
   }, []);
