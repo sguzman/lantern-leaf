@@ -1422,6 +1422,7 @@ export const ReaderShell = memo(function ReaderShell({
     const anchorTexts = anchors.map((element) => normalizeSyncText(element.textContent ?? ""));
     const mapped: number[] = [];
     let scanStart = 0;
+    const hintAnchors = reader.sentence_anchor_map;
     let confidentMatches = 0;
     let fallbackMatches = 0;
     let cappedLeaps = 0;
@@ -1430,8 +1431,15 @@ export const ReaderShell = memo(function ReaderShell({
       const normalizedSentence = normalizeSyncText(sentence);
       const sentencePrefix = normalizedSentence.slice(0, 120);
       const shortPrefix = normalizedSentence.slice(0, 56);
-      const localStart = Math.max(0, scanStart - 2);
-      const localEnd = Math.min(anchorTexts.length - 1, scanStart + 56);
+      const prev = mapped.length > 0 ? mapped[mapped.length - 1] : scanStart;
+      const hintRaw = hintAnchors[sentenceIdx];
+      const hint =
+        hintRaw !== null && hintRaw !== undefined && Number.isFinite(hintRaw)
+          ? Math.max(0, Math.min(anchorTexts.length - 1, hintRaw))
+          : prev;
+      const base = Math.max(prev, hint);
+      const localStart = Math.max(0, Math.min(prev, hint) - 18);
+      const localEnd = Math.min(anchorTexts.length - 1, base + 56);
       let found = -1;
       let foundScore = 0;
       if (sentencePrefix.length > 0) {
@@ -1459,10 +1467,10 @@ export const ReaderShell = memo(function ReaderShell({
           }
         }
       }
-      const prev = mapped.length > 0 ? mapped[mapped.length - 1] : scanStart;
       if (found < 0 || foundScore < 0.88) {
         fallbackMatches += 1;
-        found = prev;
+        const driftTarget = Math.max(prev, hint);
+        found = Math.min(prev + 1, driftTarget);
       } else {
         if (found - prev > 2 && foundScore < 0.99) {
           cappedLeaps += 1;
@@ -1485,7 +1493,7 @@ export const ReaderShell = memo(function ReaderShell({
       });
     }
     htmlSentenceAnchorMapRef.current = mapped;
-  }, [hasPrettyHtml, renderedNativeHtml, reader.sentences]);
+  }, [hasPrettyHtml, reader.sentence_anchor_map, renderedNativeHtml, reader.sentences]);
   const themeLabel = reader.settings.theme === "night" ? "Day" : "Night";
   const themeIcon =
     reader.settings.theme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />;
