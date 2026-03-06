@@ -1028,17 +1028,17 @@ export const ReaderShell = memo(function ReaderShell({
     () => computeReaderTypographyLayout(reader.settings),
     [reader.settings]
   );
-  const imageCandidatesKey = useMemo(() => reader.images.join("\n"), [reader.images]);
+  const imageCandidatesKey = useMemo(
+    () => reader.images.map((image) => `${image.raw_path}\t${image.local_path}`).join("\n"),
+    [reader.images]
+  );
   const readerImageCandidates = useMemo(
     () =>
-      imageCandidatesKey
-        .split("\n")
-        .filter((path) => path.length > 0)
-        .map((path) => ({
-          rawPath: path,
-          src: toReaderImageSrc(path)
-        })),
-    [imageCandidatesKey]
+      reader.images.map((image) => ({
+        rawPath: image.raw_path,
+        src: toReaderImageSrc(image.local_path)
+      })),
+    [reader.images]
   );
   const estimatedTotalWords = useMemo(() => {
     if (reader.stats.page_end_percent <= 0) {

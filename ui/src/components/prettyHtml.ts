@@ -52,6 +52,23 @@ function resolveRelativeUrl(raw: string, baseUrl: string | null): string | null 
   }
 }
 
+function rewriteCssUrls(
+  rawCss: string,
+  baseUrl: string | null,
+  resolveTarget: (target: string) => string | null
+): string {
+  return rawCss.replace(/url\(([^)]+)\)/gi, (_match, rawTarget) => {
+    const unwrapped = String(rawTarget ?? "")
+      .trim()
+      .replace(/^['"]|['"]$/g, "");
+    if (!unwrapped || unwrapped.startsWith("data:") || unwrapped.startsWith("#")) {
+      return `url(${unwrapped})`;
+    }
+    const resolved = resolveTarget(unwrapped) ?? resolveRelativeUrl(unwrapped, baseUrl) ?? unwrapped;
+    return `url("${resolved}")`;
+  });
+}
+
 export function renderNativePrettyHtml(
   html: string,
   imageCandidates: Array<{ rawPath: string; src: string }>
@@ -116,6 +133,7 @@ export function renderNativePrettyHtml(
     "small",
     "span",
     "strong",
+    "source",
     "sub",
     "sup",
     "table",
@@ -144,6 +162,7 @@ export function renderNativePrettyHtml(
   const allowedPerTagAttrs = new Map<string, Set<string>>([
     ["a", new Set(["href"])],
     ["img", new Set(["src", "alt", "width", "height", "loading"])],
+    ["source", new Set(["src", "srcset", "type", "media"])],
     ["td", new Set(["colspan", "rowspan"])],
     ["th", new Set(["colspan", "rowspan"])],
     ["style", new Set(["type", "media"])],
@@ -207,14 +226,6 @@ export function renderNativePrettyHtml(
     if (!normalizedTarget) {
       return null;
     }
-    if (
-      normalizedTarget.startsWith("http://") ||
-      normalizedTarget.startsWith("https://") ||
-      normalizedTarget.startsWith("data:") ||
-      normalizedTarget.startsWith("asset:")
-    ) {
-      return target;
-    }
     const targetBaseName = imageBaseName(normalizedTarget);
     const matched = unusedImages.find((candidate) => {
       const candidateNormalized = normalizeImageTarget(candidate.rawPath);
@@ -229,7 +240,26 @@ export function renderNativePrettyHtml(
     if (matched) {
       return matched.src;
     }
+    if (
+      normalizedTarget.startsWith("http://") ||
+      normalizedTarget.startsWith("https://") ||
+      normalizedTarget.startsWith("data:") ||
+      normalizedTarget.startsWith("asset:")
+    ) {
+      return target;
+    }
     return null;
+  };
+  const resolveResourceTarget = (target: string): string | null => {
+    const direct = resolveImageTarget(target);
+    if (direct) {
+      return direct;
+    }
+    const absolute = resolveRelativeUrl(target, baseUrl);
+    if (absolute) {
+      return resolveImageTarget(absolute) ?? absolute;
+    }
+    return isSafeScheme(target) ? target : null;
   };
   const isSafeScheme = (value: string): boolean =>
     value.startsWith("http://") ||
@@ -247,6 +277,21 @@ export function renderNativePrettyHtml(
       return fragment.startsWith("#") ? fragment : null;
     }
     return null;
+  };
+  const rewriteSrcset = (raw: string): string => {
+    return raw
+      .split(",")
+      .map((part) => {
+        const trimmed = part.trim();
+        if (!trimmed) {
+          return "";
+        }
+        const [target, descriptor] = trimmed.split(/\s+/, 2);
+        const resolved = resolveResourceTarget(target) ?? target;
+        return descriptor ? `${resolved} ${descriptor}` : resolved;
+      })
+      .filter((value) => value.length > 0)
+      .join(", ");
   };
 
   let anchorIndex = 0;
@@ -295,12 +340,17 @@ export function renderNativePrettyHtml(
         }
         element.removeAttribute(attr.name);
       }
+      if (element.hasAttribute("style")) {
+        const rewritten = rewriteCssUrls(
+          element.getAttribute("style") ?? "",
+          baseUrl,
+          resolveResourceTarget
+        );
+        element.setAttribute("style", rewritten);
+      }
       if (tag === "img") {
         const src = (element.getAttribute("src") ?? "").trim();
-        const resolved =
-          resolveImageTarget(src) ??
-          resolveRelativeUrl(src, baseUrl) ??
-          (isSafeScheme(src) ? src : "");
+        const resolved = resolveResourceTarget(src) ?? "";
         if (resolved) {
           element.setAttribute("src", resolved);
         } else {
@@ -310,14 +360,25 @@ export function renderNativePrettyHtml(
         if (!element.hasAttribute("loading")) {
           element.setAttribute("loading", "lazy");
         }
+      } else if (tag === "source") {
+        const src = (element.getAttribute("src") ?? "").trim();
+        const srcset = (element.getAttribute("srcset") ?? "").trim();
+        if (src) {
+          const resolved = resolveResourceTarget(src);
+          if (resolved) {
+            element.setAttribute("src", resolved);
+          } else {
+            element.removeAttribute("src");
+          }
+        }
+        if (srcset) {
+          element.setAttribute("srcset", rewriteSrcset(srcset));
+        }
       } else if (tag === "image") {
         const href =
           (element.getAttribute("href") ?? "").trim() ||
           (element.getAttribute("xlink:href") ?? "").trim();
-        const resolved =
-          resolveImageTarget(href) ??
-          resolveRelativeUrl(href, baseUrl) ??
-          (isSafeScheme(href) ? href : "");
+        const resolved = resolveResourceTarget(href) ?? "";
         if (resolved) {
           element.setAttribute("href", resolved);
           element.setAttribute("xlink:href", resolved);
@@ -327,7 +388,11 @@ export function renderNativePrettyHtml(
         }
       } else if (tag === "style") {
         const rawCss = element.textContent ?? "";
-        element.textContent = scopeCssToNativeContainer(rawCss);
+        element.textContent = rewriteCssUrls(
+          scopeCssToNativeContainer(rawCss),
+          baseUrl,
+          resolveResourceTarget
+        );
       } else if (tag === "link") {
         // Remove external/relative stylesheet links to avoid global style bleed.
         element.remove();

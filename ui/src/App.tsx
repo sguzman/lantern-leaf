@@ -219,7 +219,11 @@ export default function App() {
 
         <Container
           maxWidth={false}
-          className={readerMode ? "h-full overflow-hidden px-2 py-2 md:px-4 md:py-3" : "px-2 py-4 md:px-4 md:py-6"}
+          className={
+            readerMode
+              ? "h-full overflow-hidden px-2 py-2 md:px-4 md:py-3"
+              : "h-full overflow-y-auto px-2 py-4 md:px-4 md:py-6"
+          }
         >
           <Stack
             spacing={2}

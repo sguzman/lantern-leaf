@@ -18,6 +18,7 @@ export type { ReaderSettingsView } from "./ReaderSettingsView";
 export type { ReaderTtsView } from "./ReaderTtsView";
 export type { ReaderSettingsPatch } from "./ReaderSettingsPatch";
 export type { ReaderStats } from "./ReaderStats";
+export type { ReaderImageRef } from "./ReaderImageRef";
 export type { ReaderSnapshot } from "./ReaderSnapshot";
 export type { PrettyKind } from "./PrettyKind";
 export type { TtsPlaybackState } from "./TtsPlaybackState";

@@ -133,7 +133,7 @@ pub struct ReaderSnapshot {
     pub text_only_mode: bool,
     pub has_structured_markdown: bool,
     pub pretty_kind: PrettyKind,
-    pub images: Vec<String>,
+    pub images: Vec<ReaderImageRef>,
     pub tts_text_page: String,
     pub reading_markdown_page: Option<String>,
     pub reading_html_page: Option<String>,
@@ -148,6 +148,13 @@ pub struct ReaderSnapshot {
     pub tts: ReaderTtsView,
     pub stats: ReaderStats,
     pub panels: PanelState,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct ReaderImageRef {
+    pub raw_path: String,
+    pub local_path: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -248,6 +255,7 @@ pub struct ReaderSession {
 
 #[derive(Debug, Clone)]
 struct SessionImage {
+    raw_path: String,
     path: String,
 }
 
@@ -382,6 +390,7 @@ impl ReaderSession {
                 .map(|image| {
                     let path = fs::canonicalize(&image.path).unwrap_or(image.path);
                     SessionImage {
+                        raw_path: image.source_ref,
                         path: path.to_string_lossy().to_string(),
                     }
                 })
@@ -1254,13 +1263,19 @@ impl ReaderSession {
         self.highlighted_display_idx.map(|idx| page_base + idx)
     }
 
-    fn current_page_images(&self) -> Vec<String> {
+    fn current_page_images(&self) -> Vec<ReaderImageRef> {
         if self.images.is_empty() {
             return Vec::new();
         }
-        // Expose all extracted images so pretty view can resolve markdown/image
+        // Expose all extracted assets so pretty view can resolve image/css
         // references even when page char-offset mapping is imperfect.
-        self.images.iter().map(|image| image.path.clone()).collect()
+        self.images
+            .iter()
+            .map(|image| ReaderImageRef {
+                raw_path: image.raw_path.clone(),
+                local_path: image.path.clone(),
+            })
+            .collect()
     }
 
     fn tts_view(

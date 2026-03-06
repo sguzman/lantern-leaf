@@ -116,4 +116,31 @@ describe("renderNativePrettyHtml", () => {
     expect(out).toContain('src="https://example.com/articles/cover.jpg"');
     expect(out).not.toContain("data-ll-base-url");
   });
+
+  it("rewrites browser-tab css asset urls to cached local assets", () => {
+    const html = `
+      <div data-ll-base-url="https://example.com/articles/start">
+        <style>.hero{background-image:url("../img/hero.png")}</style>
+        <p style="background-image:url('./inline.png')">Body</p>
+        <img src="https://example.com/articles/cover.jpg" alt="Cover"/>
+      </div>
+    `;
+    const out = renderNativePrettyHtml(html, [
+      {
+        rawPath: "https://example.com/img/hero.png",
+        src: "asset:/cache/browser-tabs/assets/hero.png",
+      },
+      {
+        rawPath: "https://example.com/articles/inline.png",
+        src: "asset:/cache/browser-tabs/assets/inline.png",
+      },
+      {
+        rawPath: "https://example.com/articles/cover.jpg",
+        src: "asset:/cache/browser-tabs/assets/cover.jpg",
+      },
+    ]);
+    expect(out).toContain('background-image:url("asset:/cache/browser-tabs/assets/hero.png")');
+    expect(out).toContain('style="background-image:url(&quot;asset:/cache/browser-tabs/assets/inline.png&quot;)"');
+    expect(out).toContain('src="asset:/cache/browser-tabs/assets/cover.jpg"');
+  });
 });

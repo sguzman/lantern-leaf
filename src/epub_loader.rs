@@ -43,6 +43,7 @@ static LOAD_COUNT_WITH_MARKDOWN: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Clone)]
 pub struct BookImage {
     pub path: PathBuf,
+    pub source_ref: String,
     pub label: String,
     pub char_offset: usize,
 }
@@ -662,6 +663,17 @@ fn ensure_not_cancelled(cancel: Option<&CancellationToken>, stage: &'static str)
 
 fn collect_images(path: &Path) -> Result<Vec<BookImage>> {
     let start = Instant::now();
+    if is_browser_tab_manifest(path) {
+        let images = collect_browser_tab_assets(path)?;
+        info!(
+            path = %path.display(),
+            source_type = "browser_tab",
+            image_count = images.len(),
+            elapsed_ms = start.elapsed().as_millis(),
+            "Image extraction completed"
+        );
+        return Ok(images);
+    }
     if is_markdown(path) {
         let images = collect_markdown_images(path)?;
         info!(
@@ -691,6 +703,34 @@ fn collect_images(path: &Path) -> Result<Vec<BookImage>> {
         "Image extraction skipped for source type"
     );
     Ok(Vec::new())
+}
+
+fn collect_browser_tab_assets(path: &Path) -> Result<Vec<BookImage>> {
+    let manifest = load_browser_tab_manifest(path)
+        .with_context(|| format!("Failed to load browser-tab manifest {}", path.display()))?;
+    if manifest.assets.is_empty() {
+        return Ok(Vec::new());
+    }
+    let text_len = fs::read_to_string(&manifest.text_path)
+        .map(|value| value.len())
+        .unwrap_or(0)
+        .max(1);
+    let total = manifest.assets.len();
+    Ok(manifest
+        .assets
+        .iter()
+        .enumerate()
+        .map(|(idx, asset)| BookImage {
+            path: asset.local_path.clone(),
+            source_ref: asset.raw_path.clone(),
+            label: Path::new(&asset.raw_path)
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("asset")
+                .to_string(),
+            char_offset: ((idx + 1) * text_len) / (total + 1),
+        })
+        .collect())
 }
 
 fn collect_markdown_images(path: &Path) -> Result<Vec<BookImage>> {
@@ -733,6 +773,7 @@ fn collect_markdown_images(path: &Path) -> Result<Vec<BookImage>> {
         };
         images.push(BookImage {
             path: canonical,
+            source_ref: raw_target.to_string(),
             label,
             char_offset: captures.get(0).map(|m| m.start()).unwrap_or(0),
         });
@@ -745,6 +786,7 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
     #[derive(Debug, Clone)]
     struct ExtractedImage {
         output: PathBuf,
+        source_ref: String,
         label: String,
     }
 
@@ -793,6 +835,7 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
 
         let image = ExtractedImage {
             output: output.clone(),
+            source_ref: resource_path.to_string_lossy().to_string(),
             label: label.clone(),
         };
         extracted.push(image.clone());
@@ -901,6 +944,7 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
             }
             images.push(BookImage {
                 path: image.output.clone(),
+                source_ref: image.source_ref.clone(),
                 label: image.label.clone(),
                 char_offset,
             });

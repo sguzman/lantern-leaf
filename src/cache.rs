@@ -11,6 +11,9 @@ use crate::browser_tabs::{BrowserTab, BrowserTabSnapshot};
 use epub::doc::EpubDoc;
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
+use once_cell::sync::Lazy;
+use regex::Regex;
+use reqwest::Url;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
@@ -36,8 +39,41 @@ const BROWSER_TABS_SUBDIR: &str = "browser-tabs";
 const BROWSER_TAB_MANIFEST_FILE: &str = "browser-tab.lltab";
 const BROWSER_TAB_HTML_FILE: &str = "snapshot.html";
 const BROWSER_TAB_TEXT_FILE: &str = "snapshot.txt";
+const BROWSER_TAB_ASSETS_SUBDIR: &str = "assets";
 static CONTENT_DIGEST_CACHE: OnceLock<Mutex<HashMap<PathBuf, SourceDigestEntry>>> = OnceLock::new();
 static CACHE_LAYOUT_INIT: OnceLock<()> = OnceLock::new();
+static RE_LINK_TAG: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?is)<link\b[^>]*>"#).expect("valid browser tab link tag regex")
+});
+static RE_HTML_ATTR: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?is)\b([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*["']([^"']*)["']"#)
+        .expect("valid html attr regex")
+});
+static RE_IMG_SRC: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?is)<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["'][^>]*>"#)
+        .expect("valid browser tab image regex")
+});
+static RE_SVG_IMAGE_HREF: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?is)<image\b[^>]*?\b(?:xlink:href|href)\s*=\s*["']([^"']+)["'][^>]*>"#)
+        .expect("valid browser tab svg image regex")
+});
+static RE_SOURCE_SRC: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?is)<source\b[^>]*?\bsrc\s*=\s*["']([^"']+)["'][^>]*>"#)
+        .expect("valid browser tab source src regex")
+});
+static RE_SOURCE_SRCSET: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?is)<source\b[^>]*?\bsrcset\s*=\s*["']([^"']+)["'][^>]*>"#)
+        .expect("valid browser tab source srcset regex")
+});
+static RE_STYLE_ATTR: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?is)\bstyle\s*=\s*["']([^"']+)["']"#)
+        .expect("valid browser tab style attr regex")
+});
+static RE_STYLE_BLOCK: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?is)<style\b[^>]*>(.*?)</style>"#).expect("valid browser tab style block regex")
+});
+static RE_CSS_URL: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"(?is)url\(([^)]+)\)"#).expect("valid css url regex"));
 
 #[derive(Clone)]
 struct SourceDigestEntry {
@@ -82,9 +118,21 @@ pub struct BrowserTabSourceManifest {
     pub html_path: PathBuf,
     pub text_path: PathBuf,
     #[serde(default)]
+    pub asset_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub assets: Vec<BrowserTabAsset>,
+    #[serde(default)]
     pub html_truncated: bool,
     #[serde(default)]
     pub text_truncated: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BrowserTabAsset {
+    pub raw_path: String,
+    pub local_path: PathBuf,
+    #[serde(default)]
+    pub kind: String,
 }
 
 pub fn cache_root() -> PathBuf {
@@ -551,6 +599,7 @@ pub fn persist_browser_tab_source(
     let html_path = dir.join(BROWSER_TAB_HTML_FILE);
     let text_path = dir.join(BROWSER_TAB_TEXT_FILE);
     let manifest_path = dir.join(BROWSER_TAB_MANIFEST_FILE);
+    let asset_dir = dir.join(BROWSER_TAB_ASSETS_SUBDIR);
 
     let html = snapshot
         .html
@@ -558,6 +607,8 @@ pub fn persist_browser_tab_source(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("<article><p>No structured HTML content was captured for this tab.</p></article>");
+    let prepared = prepare_browser_tab_bundle(html, snapshot.url.trim(), &asset_dir)
+        .map_err(|err| err.to_string())?;
     let text = snapshot
         .text
         .as_deref()
@@ -565,7 +616,7 @@ pub fn persist_browser_tab_source(
         .filter(|value| !value.is_empty())
         .unwrap_or("No textual content found in this browser tab.");
 
-    fs::write(&html_path, html).map_err(|err| err.to_string())?;
+    fs::write(&html_path, prepared.html).map_err(|err| err.to_string())?;
     fs::write(&text_path, text).map_err(|err| err.to_string())?;
 
     let manifest = BrowserTabSourceManifest {
@@ -582,6 +633,8 @@ pub fn persist_browser_tab_source(
         pinned: tab.and_then(|value| value.pinned),
         html_path: html_path.clone(),
         text_path: text_path.clone(),
+        asset_dir: (!prepared.assets.is_empty()).then_some(asset_dir.clone()),
+        assets: prepared.assets,
         html_truncated: snapshot.truncation.html.truncated,
         text_truncated: snapshot.truncation.text.truncated,
     };
@@ -595,12 +648,314 @@ pub fn persist_browser_tab_source(
         url = %snapshot.url,
         html_chars = html.len(),
         text_chars = text.len(),
+        asset_count = manifest.assets.len(),
         html_truncated = snapshot.truncation.html.truncated,
         text_truncated = snapshot.truncation.text.truncated,
         "Persisted browser-tab cache snapshot"
     );
 
     Ok(manifest_path)
+}
+
+#[derive(Debug, Default)]
+struct PreparedBrowserTabBundle {
+    html: String,
+    assets: Vec<BrowserTabAsset>,
+}
+
+fn prepare_browser_tab_bundle(
+    html: &str,
+    base_url: &str,
+    asset_dir: &Path,
+) -> anyhow::Result<PreparedBrowserTabBundle> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()?;
+    let mut asset_map = HashMap::<String, BrowserTabAsset>::new();
+    let html_with_styles = inline_browser_tab_stylesheets(html, base_url, asset_dir, &client, &mut asset_map);
+    collect_browser_tab_html_assets(&html_with_styles, base_url, asset_dir, &client, &mut asset_map);
+    Ok(PreparedBrowserTabBundle {
+        html: html_with_styles,
+        assets: asset_map.into_values().collect(),
+    })
+}
+
+fn inline_browser_tab_stylesheets(
+    html: &str,
+    base_url: &str,
+    asset_dir: &Path,
+    client: &reqwest::blocking::Client,
+    asset_map: &mut HashMap<String, BrowserTabAsset>,
+) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut last = 0usize;
+    for full in RE_LINK_TAG.find_iter(html) {
+        let tag = full.as_str();
+        let attrs = parse_html_attrs(tag);
+        let rel = attrs
+            .get("rel")
+            .map(|value| value.to_ascii_lowercase())
+            .unwrap_or_default();
+        if !rel.split_whitespace().any(|value| value == "stylesheet") {
+            continue;
+        }
+        let Some(href) = attrs.get("href").cloned() else {
+            continue;
+        };
+        out.push_str(&html[last..full.start()]);
+        let replacement = resolve_browser_tab_url(&href, base_url)
+            .and_then(|stylesheet_url| fetch_stylesheet_text(client, &stylesheet_url))
+            .map(|(stylesheet_url, css)| {
+                let rewritten = rewrite_css_urls_for_import(
+                    &css,
+                    &stylesheet_url,
+                    asset_dir,
+                    client,
+                    asset_map,
+                );
+                format!(
+                    "<style data-ll-origin-href=\"{}\">{}</style>",
+                    escape_html_attr(&stylesheet_url),
+                    rewritten
+                )
+            })
+            .unwrap_or_default();
+        out.push_str(&replacement);
+        last = full.end();
+    }
+    out.push_str(&html[last..]);
+    out
+}
+
+fn parse_html_attrs(tag: &str) -> HashMap<String, String> {
+    RE_HTML_ATTR
+        .captures_iter(tag)
+        .filter_map(|caps| {
+            let name = caps.get(1)?.as_str().trim().to_ascii_lowercase();
+            let value = caps.get(2)?.as_str().to_string();
+            Some((name, value))
+        })
+        .collect()
+}
+
+fn collect_browser_tab_html_assets(
+    html: &str,
+    base_url: &str,
+    asset_dir: &Path,
+    client: &reqwest::blocking::Client,
+    asset_map: &mut HashMap<String, BrowserTabAsset>,
+) {
+    for captures in RE_IMG_SRC.captures_iter(html) {
+        if let Some(raw) = captures.get(1).map(|value| value.as_str()) {
+            let _ = fetch_browser_tab_asset(raw, base_url, "image", asset_dir, client, asset_map);
+        }
+    }
+    for captures in RE_SVG_IMAGE_HREF.captures_iter(html) {
+        if let Some(raw) = captures.get(1).map(|value| value.as_str()) {
+            let _ = fetch_browser_tab_asset(raw, base_url, "image", asset_dir, client, asset_map);
+        }
+    }
+    for captures in RE_SOURCE_SRC.captures_iter(html) {
+        if let Some(raw) = captures.get(1).map(|value| value.as_str()) {
+            let _ = fetch_browser_tab_asset(raw, base_url, "image", asset_dir, client, asset_map);
+        }
+    }
+    for captures in RE_SOURCE_SRCSET.captures_iter(html) {
+        if let Some(raw) = captures.get(1).map(|value| value.as_str()) {
+            for candidate in parse_srcset_urls(raw) {
+                let _ = fetch_browser_tab_asset(&candidate, base_url, "image", asset_dir, client, asset_map);
+            }
+        }
+    }
+    for captures in RE_STYLE_ATTR.captures_iter(html) {
+        if let Some(css) = captures.get(1).map(|value| value.as_str()) {
+            let _ = rewrite_css_urls_for_import(css, base_url, asset_dir, client, asset_map);
+        }
+    }
+    for captures in RE_STYLE_BLOCK.captures_iter(html) {
+        if let Some(css) = captures.get(1).map(|value| value.as_str()) {
+            let _ = rewrite_css_urls_for_import(css, base_url, asset_dir, client, asset_map);
+        }
+    }
+}
+
+fn rewrite_css_urls_for_import(
+    css: &str,
+    stylesheet_url: &str,
+    asset_dir: &Path,
+    client: &reqwest::blocking::Client,
+    asset_map: &mut HashMap<String, BrowserTabAsset>,
+) -> String {
+    RE_CSS_URL
+        .replace_all(css, |caps: &regex::Captures<'_>| {
+            let raw = caps
+                .get(1)
+                .map(|value| value.as_str())
+                .unwrap_or_default()
+                .trim()
+                .trim_matches('\'')
+                .trim_matches('"');
+            if raw.is_empty() || raw.starts_with("data:") || raw.starts_with('#') {
+                return format!("url({raw})");
+            }
+            let absolute = resolve_browser_tab_url(raw, stylesheet_url).unwrap_or_else(|| raw.to_string());
+            let _ = fetch_browser_tab_asset(&absolute, stylesheet_url, "image", asset_dir, client, asset_map);
+            format!("url(\"{}\")", absolute)
+        })
+        .into_owned()
+}
+
+fn fetch_stylesheet_text(
+    client: &reqwest::blocking::Client,
+    stylesheet_url: &str,
+) -> Option<(String, String)> {
+    let response = client.get(stylesheet_url).send().ok()?;
+    if !response.status().is_success() {
+        warn!(url = %stylesheet_url, status = %response.status(), "Browser tab stylesheet fetch failed");
+        return None;
+    }
+    let css = response.text().ok()?;
+    Some((stylesheet_url.to_string(), css))
+}
+
+fn fetch_browser_tab_asset(
+    raw: &str,
+    base_url: &str,
+    kind: &str,
+    asset_dir: &Path,
+    client: &reqwest::blocking::Client,
+    asset_map: &mut HashMap<String, BrowserTabAsset>,
+) -> Option<BrowserTabAsset> {
+    let absolute = resolve_browser_tab_url(raw, base_url)?;
+    if absolute.starts_with("data:") {
+        return None;
+    }
+    if let Some(existing) = asset_map.get(&absolute) {
+        return Some(existing.clone());
+    }
+    fs::create_dir_all(asset_dir).ok()?;
+    let response = client.get(&absolute).send().ok()?;
+    if !response.status().is_success() {
+        warn!(url = %absolute, status = %response.status(), kind, "Browser tab asset fetch failed");
+        return None;
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string());
+    let bytes = response.bytes().ok()?;
+    let output = browser_tab_asset_output_path(asset_dir, &absolute, content_type.as_deref());
+    if let Some(parent) = output.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    fs::write(&output, &bytes).ok()?;
+    let asset = BrowserTabAsset {
+        raw_path: absolute.clone(),
+        local_path: output,
+        kind: kind.to_string(),
+    };
+    asset_map.insert(absolute, asset.clone());
+    Some(asset)
+}
+
+fn resolve_browser_tab_url(raw: &str, base_url: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_matches('\'').trim_matches('"');
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+    if trimmed.starts_with("data:") {
+        return Some(trimmed.to_string());
+    }
+    if let Ok(url) = Url::parse(trimmed) {
+        return Some(url.to_string());
+    }
+    let base = Url::parse(base_url).ok()?;
+    base.join(trimmed).ok().map(|value| value.to_string())
+}
+
+fn parse_srcset_urls(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .filter_map(|part| {
+            let candidate = part.trim().split_whitespace().next()?.trim();
+            (!candidate.is_empty()).then_some(candidate.to_string())
+        })
+        .collect()
+}
+
+fn browser_tab_asset_output_path(
+    asset_dir: &Path,
+    raw_url: &str,
+    content_type: Option<&str>,
+) -> PathBuf {
+    let digest = {
+        let mut hasher = Sha256::new();
+        hasher.update(raw_url.as_bytes());
+        format!("{:x}", hasher.finalize())
+    };
+    let parsed = Url::parse(raw_url).ok();
+    let name = parsed
+        .as_ref()
+        .and_then(|url| {
+            url.path_segments()
+                .and_then(|mut segments| segments.next_back())
+                .filter(|segment| !segment.is_empty())
+                .map(|segment| segment.to_string())
+        })
+        .unwrap_or_else(|| "asset".to_string());
+    let safe_name = sanitize_browser_tab_asset_name(&name);
+    let ext = Path::new(&safe_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_string())
+        .or_else(|| browser_tab_extension_from_content_type(content_type).map(str::to_string));
+    let stem = Path::new(&safe_name)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("asset");
+    let file_name = if let Some(ext) = ext {
+        format!("{stem}-{digest}.{ext}")
+    } else {
+        format!("{stem}-{digest}")
+    };
+    asset_dir.join(file_name)
+}
+
+fn sanitize_browser_tab_asset_name(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let mut out = String::with_capacity(trimmed.len());
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        "asset".to_string()
+    } else {
+        out
+    }
+}
+
+fn browser_tab_extension_from_content_type(content_type: Option<&str>) -> Option<&'static str> {
+    let mime = content_type?.split(';').next()?.trim().to_ascii_lowercase();
+    match mime.as_str() {
+        "image/png" => Some("png"),
+        "image/jpeg" => Some("jpg"),
+        "image/jpg" => Some("jpg"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/svg+xml" => Some("svg"),
+        _ => None,
+    }
+}
+
+fn escape_html_attr(raw: &str) -> String {
+    raw.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 pub fn load_browser_tab_manifest(source_path: &Path) -> Option<BrowserTabSourceManifest> {
