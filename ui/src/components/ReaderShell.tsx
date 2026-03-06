@@ -873,6 +873,8 @@ export const ReaderShell = memo(function ReaderShell({
   const nativeHtmlCacheRef = useRef<{ key: string; html: string }>({ key: "", html: "" });
   const htmlSentenceAnchorMapRef = useRef<number[]>([]);
   const prettyHighlightedNodeRef = useRef<HTMLElement | null>(null);
+  const prettyLastAutoScrollAnchorRef = useRef<number | null>(null);
+  const prettyLastAutoScrollPageRef = useRef<number | null>(null);
 
   useEffect(() => {
     const node = topBarRef.current;
@@ -981,6 +983,13 @@ export const ReaderShell = memo(function ReaderShell({
       if (!reader.text_only_mode && reader.pretty_kind === "markdown" && reader.reading_markdown_page) {
         const anchorIdx = resolvePrettyAnchorIdx(idx);
         if (anchorIdx !== null && anchorIdx !== undefined) {
+          if (
+            !force &&
+            prettyLastAutoScrollPageRef.current === reader.current_page &&
+            prettyLastAutoScrollAnchorRef.current === anchorIdx
+          ) {
+            return;
+          }
           const anchor = container.querySelector(
             `[data-ll-md-anchor="${anchorIdx}"]`
           ) as HTMLElement | null;
@@ -991,6 +1000,8 @@ export const ReaderShell = memo(function ReaderShell({
               reader.settings.center_spoken_sentence,
               behavior
             );
+            prettyLastAutoScrollPageRef.current = reader.current_page;
+            prettyLastAutoScrollAnchorRef.current = anchorIdx;
             return;
           }
         }
@@ -998,6 +1009,13 @@ export const ReaderShell = memo(function ReaderShell({
       if (!reader.text_only_mode && reader.pretty_kind === "html" && reader.reading_html_page) {
         const anchorIdx = resolvePrettyAnchorIdx(idx);
         if (anchorIdx !== null && anchorIdx !== undefined) {
+          if (
+            !force &&
+            prettyLastAutoScrollPageRef.current === reader.current_page &&
+            prettyLastAutoScrollAnchorRef.current === anchorIdx
+          ) {
+            return;
+          }
           const anchor = container.querySelector(
             `[data-ll-html-anchor="${anchorIdx}"]`
           ) as HTMLElement | null;
@@ -1008,6 +1026,8 @@ export const ReaderShell = memo(function ReaderShell({
               reader.settings.center_spoken_sentence,
               behavior
             );
+            prettyLastAutoScrollPageRef.current = reader.current_page;
+            prettyLastAutoScrollAnchorRef.current = anchorIdx;
             return;
           }
         }
@@ -1025,6 +1045,7 @@ export const ReaderShell = memo(function ReaderShell({
     },
     [
       reader.highlighted_sentence_idx,
+      reader.current_page,
       reader.settings.auto_scroll_tts,
       reader.settings.center_spoken_sentence,
       reader.pretty_kind,
