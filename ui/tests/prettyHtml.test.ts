@@ -99,6 +99,7 @@ describe("renderNativePrettyHtml", () => {
     const out = renderNativePrettyHtml(html, []);
     expect(out).not.toContain("<section data-ll-html-anchor=");
     expect(out).not.toContain("<article data-ll-html-anchor=");
+    expect(out).not.toContain("<img data-ll-html-anchor=");
     expect(out).toContain("<p data-ll-html-anchor=");
   });
 });

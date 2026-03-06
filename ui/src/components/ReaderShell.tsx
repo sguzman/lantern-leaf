@@ -1151,18 +1151,10 @@ export const ReaderShell = memo(function ReaderShell({
     const idx = reader.highlighted_sentence_idx;
     const container = sentenceScrollRef.current;
     if (idx === null || idx === undefined || !container) {
-      if (prettyHighlightedNodeRef.current) {
-        prettyHighlightedNodeRef.current.classList.remove("reader-pretty-highlight");
-        prettyHighlightedNodeRef.current = null;
-      }
       return;
     }
     const anchorIdx = resolvePrettyAnchorIdx(idx);
     if (anchorIdx === null || anchorIdx === undefined) {
-      if (prettyHighlightedNodeRef.current) {
-        prettyHighlightedNodeRef.current.classList.remove("reader-pretty-highlight");
-        prettyHighlightedNodeRef.current = null;
-      }
       return;
     }
     const selector =
@@ -1176,11 +1168,24 @@ export const ReaderShell = memo(function ReaderShell({
       }
       target.classList.add("reader-pretty-highlight");
       prettyHighlightedNodeRef.current = target;
-    } else if (prettyHighlightedNodeRef.current) {
-      prettyHighlightedNodeRef.current.classList.remove("reader-pretty-highlight");
-      prettyHighlightedNodeRef.current = null;
+      return;
     }
+    const frame = requestAnimationFrame(() => {
+      const retryTarget = container.querySelector(selector) as HTMLElement | null;
+      if (!retryTarget) {
+        return;
+      }
+      if (prettyHighlightedNodeRef.current && prettyHighlightedNodeRef.current !== retryTarget) {
+        prettyHighlightedNodeRef.current.classList.remove("reader-pretty-highlight");
+      }
+      retryTarget.classList.add("reader-pretty-highlight");
+      prettyHighlightedNodeRef.current = retryTarget;
+    });
+    return () => cancelAnimationFrame(frame);
   }, [
+    reader.reading_markdown_page,
+    reader.reading_html_page,
+    reader.current_page,
     reader.highlighted_sentence_idx,
     reader.pretty_kind,
     reader.text_only_mode,

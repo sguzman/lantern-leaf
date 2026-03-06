@@ -231,7 +231,6 @@ export function renderNativePrettyHtml(
     "li",
     "blockquote",
     "pre",
-    "img",
   ]);
   const sanitizeNode = (node: Node): void => {
     if (node.nodeType === Node.ELEMENT_NODE) {
