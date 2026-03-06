@@ -919,6 +919,7 @@ export const ReaderShell = memo(function ReaderShell({
   }, [reader.search_query]);
 
   const searchMatchSet = useMemo(() => new Set(reader.search_matches), [reader.search_matches]);
+  const ttsEventTick = ttsStateEvent?.request_id ?? 0;
 
   const resolvePrettyAnchorIdx = useCallback(
     (idx: number): number | null => {
@@ -1140,12 +1141,49 @@ export const ReaderShell = memo(function ReaderShell({
     reader.settings.letter_spacing
   ]);
 
-  useEffect(() => {
+  const applyPrettyHighlight = useCallback((): boolean => {
     if (reader.text_only_mode) {
       if (prettyHighlightedNodeRef.current) {
         prettyHighlightedNodeRef.current.classList.remove("reader-pretty-highlight");
         prettyHighlightedNodeRef.current = null;
       }
+      return false;
+    }
+    const idx = reader.highlighted_sentence_idx;
+    const container = sentenceScrollRef.current;
+    if (idx === null || idx === undefined || !container) {
+      return false;
+    }
+    const anchorIdx = resolvePrettyAnchorIdx(idx);
+    if (anchorIdx === null || anchorIdx === undefined) {
+      return false;
+    }
+    const selector =
+      reader.pretty_kind === "html"
+        ? `[data-ll-html-anchor="${anchorIdx}"]`
+        : `[data-ll-md-anchor="${anchorIdx}"]`;
+    const target = container.querySelector(selector) as HTMLElement | null;
+    if (target) {
+      if (prettyHighlightedNodeRef.current && prettyHighlightedNodeRef.current !== target) {
+        prettyHighlightedNodeRef.current.classList.remove("reader-pretty-highlight");
+      }
+      target.classList.add("reader-pretty-highlight");
+      prettyHighlightedNodeRef.current = target;
+      return true;
+    }
+    return false;
+  }, [
+    reader.highlighted_sentence_idx,
+    reader.pretty_kind,
+    reader.text_only_mode,
+    resolvePrettyAnchorIdx
+  ]);
+
+  useEffect(() => {
+    if (applyPrettyHighlight()) {
+      return;
+    }
+    if (reader.text_only_mode) {
       return;
     }
     const idx = reader.highlighted_sentence_idx;
@@ -1161,15 +1199,6 @@ export const ReaderShell = memo(function ReaderShell({
       reader.pretty_kind === "html"
         ? `[data-ll-html-anchor="${anchorIdx}"]`
         : `[data-ll-md-anchor="${anchorIdx}"]`;
-    const target = container.querySelector(selector) as HTMLElement | null;
-    if (target) {
-      if (prettyHighlightedNodeRef.current && prettyHighlightedNodeRef.current !== target) {
-        prettyHighlightedNodeRef.current.classList.remove("reader-pretty-highlight");
-      }
-      target.classList.add("reader-pretty-highlight");
-      prettyHighlightedNodeRef.current = target;
-      return;
-    }
     const frame = requestAnimationFrame(() => {
       const retryTarget = container.querySelector(selector) as HTMLElement | null;
       if (!retryTarget) {
@@ -1183,6 +1212,8 @@ export const ReaderShell = memo(function ReaderShell({
     });
     return () => cancelAnimationFrame(frame);
   }, [
+    applyPrettyHighlight,
+    ttsEventTick,
     reader.reading_markdown_page,
     reader.reading_html_page,
     reader.current_page,
@@ -1191,6 +1222,26 @@ export const ReaderShell = memo(function ReaderShell({
     reader.text_only_mode,
     resolvePrettyAnchorIdx
   ]);
+
+  useEffect(() => {
+    if (reader.text_only_mode) {
+      return;
+    }
+    const container = sentenceScrollRef.current;
+    if (!container) {
+      return;
+    }
+    const observer = new MutationObserver(() => {
+      applyPrettyHighlight();
+    });
+    observer.observe(container, {
+      childList: true,
+      subtree: true,
+      attributes: false,
+      characterData: false
+    });
+    return () => observer.disconnect();
+  }, [applyPrettyHighlight, reader.text_only_mode, reader.current_page]);
 
   const panelTitle = useMemo(() => {
     if (reader.panels.show_settings) {
