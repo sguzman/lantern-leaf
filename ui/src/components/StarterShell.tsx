@@ -431,9 +431,18 @@ export function StarterShell({
       : null;
 
   return (
-    <Card className="w-full max-w-7xl rounded-3xl border border-slate-200 shadow-sm">
-      <CardContent>
-        <Stack spacing={2.5}>
+    <div className="w-full max-w-7xl">
+      <Stack spacing={2.5}>
+        <div
+          style={{
+            contentVisibility: "auto",
+            containIntrinsicSize: "720px",
+            contain: "layout paint style"
+          }}
+        >
+          <Card className="rounded-3xl border border-slate-200 shadow-sm">
+            <CardContent>
+              <Stack spacing={2.5}>
           <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
             <Typography variant="caption" color="text.secondary">
               Runtime log level:{" "}
@@ -681,10 +690,21 @@ export function StarterShell({
               </Stack>
             </CardContent>
           </Card>
+              </Stack>
+            </CardContent>
+          </Card>
+        </div>
 
-          <Divider />
+        <Divider />
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div
+            style={{
+              contentVisibility: "auto",
+              containIntrinsicSize: "900px",
+              contain: "layout paint style"
+            }}
+          >
             <Stack spacing={2.5}>
               <Stack direction="row" alignItems="center" justifyContent="space-between">
                 <Typography variant="h6" component="h2" fontWeight={700}>
@@ -845,7 +865,15 @@ export function StarterShell({
                 </div>
               ) : null}
             </Stack>
+          </div>
 
+          <div
+            style={{
+              contentVisibility: "auto",
+              containIntrinsicSize: "900px",
+              contain: "layout paint style"
+            }}
+          >
             <Stack spacing={2.5}>
               <Stack direction="row" alignItems="center" justifyContent="space-between">
                 <Typography variant="h6" component="h2" fontWeight={700}>
@@ -997,8 +1025,8 @@ export function StarterShell({
               ) : null}
             </Stack>
           </div>
-        </Stack>
-      </CardContent>
-    </Card>
+        </div>
+      </Stack>
+    </div>
   );
 }
