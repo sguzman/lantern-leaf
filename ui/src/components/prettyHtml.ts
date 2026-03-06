@@ -116,17 +116,63 @@ function focusBrowserTabContent(container: HTMLDivElement): void {
     return;
   }
   const chosenTextLen = (chosen.textContent ?? "").trim().length;
-  const refinedChild = Array.from(chosen.children)
-    .filter((child): child is HTMLElement =>
-      child instanceof HTMLElement &&
-      ["section", "main", "article", "div"].includes(child.tagName.toLowerCase())
-    )
+  const directChildren = Array.from(chosen.children).filter(
+    (child): child is HTMLElement => child instanceof HTMLElement
+  );
+  const refinedChild = directChildren
+    .filter((child) => ["section", "main", "article", "div"].includes(child.tagName.toLowerCase()))
     .map((child) => ({
       child,
       textLen: (child.textContent ?? "").trim().length
     }))
     .sort((left, right) => right.textLen - left.textLen)[0];
   if (
+    chosen.tagName.toLowerCase() === "article" &&
+    refinedChild &&
+    refinedChild.textLen >= 400 &&
+    refinedChild.textLen * 2 >= chosenTextLen
+  ) {
+    const rebuilt = chosen.cloneNode(false) as HTMLElement;
+    const noiseNeedles = [
+      "sponsor",
+      "comment",
+      "recirculation",
+      "editors-picks",
+      "edpick",
+      "bottom-sheet",
+      "share",
+      "newsletter",
+      "promo",
+      "subscribe",
+      "toolbar"
+    ];
+    const isNoise = (element: HTMLElement): boolean => {
+      if (["nav", "aside", "footer", "button"].includes(element.tagName.toLowerCase())) {
+        return true;
+      }
+      const attrs = `${element.id} ${element.className}`.toLowerCase();
+      if (noiseNeedles.some((needle) => attrs.includes(needle))) {
+        return true;
+      }
+      const text = (element.textContent ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+      return (
+        text.length < 200 &&
+        (text.includes("skip advertisement") ||
+          text.includes("advertisement") ||
+          text.includes("you have been granted access"))
+      );
+    };
+    const mainIdx = directChildren.indexOf(refinedChild.child);
+    directChildren.forEach((child, idx) => {
+      if (idx > mainIdx) {
+        return;
+      }
+      if (idx === mainIdx || !isNoise(child)) {
+        rebuilt.appendChild(child.cloneNode(true));
+      }
+    });
+    chosen = rebuilt;
+  } else if (
     refinedChild &&
     refinedChild.textLen >= 400 &&
     refinedChild.textLen * 2 >= chosenTextLen

@@ -1539,6 +1539,8 @@ async fn open_resolved_source(
         (guard.base_config.clone(), guard.normalizer.clone())
     };
 
+    let source_path = maybe_refresh_legacy_browser_tab_source(&base_config, &source_path).await;
+
     let source_path_for_task = source_path.clone();
     let normalizer_for_task = normalizer.clone();
     let open_cancel_for_task = cancel_token.clone();
@@ -1713,6 +1715,72 @@ async fn open_resolved_source(
                 );
             }
             Err(bridge_error("open_failed", err))
+        }
+    }
+}
+
+async fn maybe_refresh_legacy_browser_tab_source(
+    cfg: &config::AppConfig,
+    source_path: &Path,
+) -> PathBuf {
+    if !cache::is_browser_tab_manifest(source_path) {
+        return source_path.to_path_buf();
+    }
+    let Some(manifest) = cache::load_browser_tab_manifest(source_path) else {
+        return source_path.to_path_buf();
+    };
+    if manifest.raw_html_path.is_some() {
+        return source_path.to_path_buf();
+    }
+    if !cfg.browser_tabs_enabled {
+        return source_path.to_path_buf();
+    }
+    let client = match browsr_client_from_config(cfg) {
+        Ok(client) => client,
+        Err(err) => {
+            warn!(
+                path = %source_path.display(),
+                error = %err.message,
+                "Legacy browser-tab source is missing raw HTML snapshot and could not create browsr client"
+            );
+            return source_path.to_path_buf();
+        }
+    };
+    let tab_meta = client
+        .list_tabs(manifest.window_id, None, true)
+        .await
+        .ok()
+        .and_then(|tabs| tabs.into_iter().find(|tab| tab.id == manifest.tab_id));
+    let snapshot = match client.snapshot_tab(manifest.tab_id).await {
+        Ok(snapshot) => snapshot,
+        Err(err) => {
+            warn!(
+                path = %source_path.display(),
+                tab_id = manifest.tab_id,
+                error = %err,
+                "Legacy browser-tab source is missing raw HTML snapshot and live refresh failed"
+            );
+            return source_path.to_path_buf();
+        }
+    };
+    match cache::persist_browser_tab_source(&snapshot, tab_meta.as_ref()) {
+        Ok(refreshed_path) => {
+            info!(
+                path = %refreshed_path.display(),
+                tab_id = manifest.tab_id,
+                title = %snapshot.title,
+                "Refreshed legacy browser-tab source from live tab before open"
+            );
+            refreshed_path
+        }
+        Err(err) => {
+            warn!(
+                path = %source_path.display(),
+                tab_id = manifest.tab_id,
+                error = %err,
+                "Legacy browser-tab source refresh persist failed"
+            );
+            source_path.to_path_buf()
         }
     }
 }

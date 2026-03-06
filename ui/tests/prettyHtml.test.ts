@@ -191,11 +191,12 @@ describe("renderNativePrettyHtml", () => {
     expect(out).not.toContain("Site footer");
   });
 
-  it("refines article shells down to the main body section when that section dominates the text", () => {
+  it("keeps article preface while dropping obvious browser-tab chrome after the main body", () => {
     const html = `
       <div data-ll-base-url="https://example.com/story" data-ll-browser-tab="1">
         <article id="story">
-          <header>Header promo and share tools</header>
+          <div id="top-wrapper">Advertisement SKIP ADVERTISEMENT</div>
+          <header><h1>Story Title</h1><img src="/hero.jpg" alt="Hero"/></header>
           <section>
             <div>${"Primary body text ".repeat(80)}</div>
           </section>
@@ -203,9 +204,13 @@ describe("renderNativePrettyHtml", () => {
         </article>
       </div>
     `;
-    const out = renderNativePrettyHtml(html, []);
+    const out = renderNativePrettyHtml(html, [
+      { rawPath: "https://example.com/hero.jpg", src: "asset:/cache/browser-tabs/assets/hero.jpg" }
+    ]);
     expect(out).toContain("Primary body text");
-    expect(out).not.toContain("Header promo and share tools");
+    expect(out).toContain("Story Title");
+    expect(out).toContain('src="asset:/cache/browser-tabs/assets/hero.jpg"');
+    expect(out).not.toContain("Advertisement");
     expect(out).not.toContain("Related content and promos");
   });
 });

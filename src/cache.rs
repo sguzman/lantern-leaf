@@ -40,9 +40,10 @@ const CONTENT_READING_HTML_FILE: &str = "content/reading-html.html";
 const BROWSER_TABS_SUBDIR: &str = "browser-tabs";
 const BROWSER_TAB_MANIFEST_FILE: &str = "browser-tab.lltab";
 const BROWSER_TAB_HTML_FILE: &str = "snapshot.html";
+const BROWSER_TAB_RAW_HTML_FILE: &str = "snapshot-raw.html";
 const BROWSER_TAB_TEXT_FILE: &str = "snapshot.txt";
 const BROWSER_TAB_ASSETS_SUBDIR: &str = "assets";
-const BROWSER_TAB_MANIFEST_VERSION: u32 = 3;
+const BROWSER_TAB_MANIFEST_VERSION: u32 = 4;
 const BROWSER_TAB_FETCH_USER_AGENT: &str =
     "LanternLeaf/2026.03 (browser-tab-import; local desktop reader)";
 static CONTENT_DIGEST_CACHE: OnceLock<Mutex<HashMap<PathBuf, SourceDigestEntry>>> = OnceLock::new();
@@ -122,6 +123,8 @@ pub struct BrowserTabSourceManifest {
     pub active: Option<bool>,
     pub audible: Option<bool>,
     pub pinned: Option<bool>,
+    #[serde(default)]
+    pub raw_html_path: Option<PathBuf>,
     pub html_path: PathBuf,
     pub text_path: PathBuf,
     #[serde(default)]
@@ -604,6 +607,7 @@ pub fn persist_browser_tab_source(
     fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
 
     let html_path = dir.join(BROWSER_TAB_HTML_FILE);
+    let raw_html_path = dir.join(BROWSER_TAB_RAW_HTML_FILE);
     let text_path = dir.join(BROWSER_TAB_TEXT_FILE);
     let manifest_path = dir.join(BROWSER_TAB_MANIFEST_FILE);
     let asset_dir = dir.join(BROWSER_TAB_ASSETS_SUBDIR);
@@ -627,6 +631,7 @@ pub fn persist_browser_tab_source(
             .unwrap_or("No textual content found in this browser tab.")
     };
 
+    fs::write(&raw_html_path, html).map_err(|err| err.to_string())?;
     fs::write(&html_path, prepared.html).map_err(|err| err.to_string())?;
     fs::write(&text_path, text).map_err(|err| err.to_string())?;
 
@@ -643,6 +648,7 @@ pub fn persist_browser_tab_source(
         active: tab.and_then(|value| value.active),
         audible: tab.and_then(|value| value.audible),
         pinned: tab.and_then(|value| value.pinned),
+        raw_html_path: Some(raw_html_path.clone()),
         html_path: html_path.clone(),
         text_path: text_path.clone(),
         asset_dir: (!prepared.assets.is_empty()).then_some(asset_dir.clone()),
@@ -776,6 +782,11 @@ struct BrowserTabCandidate {
 fn select_browser_tab_candidate(document: &Html, selector_raw: &str) -> Option<BrowserTabCandidate> {
     let selector = Selector::parse(selector_raw).ok()?;
     let element = document.select(&selector).next()?;
+    if element.value().name() == "article"
+        && let Some(candidate) = refine_browser_tab_article_candidate(element)
+    {
+        return Some(candidate);
+    }
     let element = refine_browser_tab_element(element);
     let text_len = browser_tab_element_text_len(&element);
     Some(BrowserTabCandidate {
@@ -799,6 +810,101 @@ fn refine_browser_tab_element<'a>(element: ElementRef<'a>) -> ElementRef<'a> {
         return child;
     }
     element
+}
+
+fn refine_browser_tab_article_candidate(element: ElementRef<'_>) -> Option<BrowserTabCandidate> {
+    let parent_len = browser_tab_element_text_len(&element);
+    let children = element
+        .children()
+        .filter_map(ElementRef::wrap)
+        .collect::<Vec<_>>();
+    let (main_idx, main_len) = children
+        .iter()
+        .enumerate()
+        .filter(|(_, child)| matches!(child.value().name(), "section" | "main" | "article" | "div"))
+        .map(|(idx, child)| (idx, browser_tab_element_text_len(child)))
+        .max_by_key(|(_, len)| *len)?;
+    if main_len < 400 || main_len * 2 < parent_len {
+        return None;
+    }
+    let mut kept_children = String::new();
+    for (idx, child) in children.iter().enumerate() {
+        if idx > main_idx {
+            break;
+        }
+        if idx == main_idx || !browser_tab_child_is_noise(child) {
+            kept_children.push_str(&child.html());
+        }
+    }
+    if kept_children.trim().is_empty() {
+        return None;
+    }
+    let html = format!(
+        "{}{}</article>",
+        browser_tab_open_tag(&element),
+        kept_children
+    );
+    Some(BrowserTabCandidate {
+        text_len: parent_len.min(main_len + 800),
+        html,
+    })
+}
+
+fn browser_tab_open_tag(element: &ElementRef<'_>) -> String {
+    let mut out = format!("<{}", element.value().name());
+    for (name, value) in element.value().attrs() {
+        out.push(' ');
+        out.push_str(name);
+        out.push_str(r#"=""#);
+        out.push_str(&escape_html_attr(value));
+        out.push('"');
+    }
+    out.push('>');
+    out
+}
+
+fn browser_tab_child_is_noise(element: &ElementRef<'_>) -> bool {
+    let tag = element.value().name();
+    if matches!(tag, "nav" | "aside" | "footer" | "button") {
+        return true;
+    }
+    let id = element.value().attr("id").unwrap_or_default().to_ascii_lowercase();
+    let class_name = element
+        .value()
+        .attr("class")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let attrs = format!("{id} {class_name}");
+    if [
+        "sponsor",
+        "comment",
+        "recirculation",
+        "editors-picks",
+        "edpick",
+        "bottom-sheet",
+        "share",
+        "newsletter",
+        "promo",
+        "subscribe",
+        "toolbar",
+    ]
+    .iter()
+    .any(|needle| attrs.contains(needle))
+    {
+        return true;
+    }
+    let text = element
+        .text()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let lower = text.to_ascii_lowercase();
+    text.len() < 200
+        && (lower.contains("skip advertisement")
+            || lower.contains("advertisement")
+            || lower.contains("you have been granted access"))
 }
 
 fn browser_tab_element_text_len(element: &ElementRef<'_>) -> usize {
@@ -1184,16 +1290,24 @@ pub fn rehydrate_browser_tab_manifest_assets(source_path: &Path) -> Result<(), S
     if manifest.manifest_version >= BROWSER_TAB_MANIFEST_VERSION && !manifest.assets.is_empty() {
         return Ok(());
     }
-    let html = fs::read_to_string(&manifest.html_path).map_err(|err| err.to_string())?;
+    let raw_html_path = manifest
+        .raw_html_path
+        .clone()
+        .unwrap_or_else(|| manifest.html_path.clone());
+    let html = fs::read_to_string(&raw_html_path).map_err(|err| err.to_string())?;
     let asset_dir = manifest
         .asset_dir
         .clone()
         .unwrap_or_else(|| manifest.html_path.parent().unwrap_or(source_path).join(BROWSER_TAB_ASSETS_SUBDIR));
     let prepared = prepare_browser_tab_bundle(&html, &manifest.url, &asset_dir)
         .map_err(|err| err.to_string())?;
+    if manifest.raw_html_path.is_none() {
+        fs::write(&raw_html_path, &html).map_err(|err| err.to_string())?;
+    }
     fs::write(&manifest.html_path, prepared.html).map_err(|err| err.to_string())?;
     fs::write(&manifest.text_path, prepared.text).map_err(|err| err.to_string())?;
     manifest.manifest_version = BROWSER_TAB_MANIFEST_VERSION;
+    manifest.raw_html_path = Some(raw_html_path);
     manifest.asset_dir = (!prepared.assets.is_empty()).then_some(asset_dir);
     manifest.assets = prepared.assets;
     let raw = toml::to_string(&manifest).map_err(|err| err.to_string())?;
@@ -1954,6 +2068,7 @@ sentence_text = "legacy bookmark entry"
         assert_eq!(manifest.tab_id, 77);
         assert_eq!(manifest.window_id, Some(5));
         assert_eq!(manifest.title, "Browser Article");
+        assert!(manifest.raw_html_path.as_ref().is_some_and(|path| path.exists()));
         assert!(manifest.html_path.exists());
         assert!(manifest.text_path.exists());
         assert_eq!(infer_recent_title(&manifest_path), "Browser Article");
@@ -2032,6 +2147,7 @@ sentence_text = "legacy bookmark entry"
             active: Some(true),
             audible: Some(false),
             pinned: Some(false),
+            raw_html_path: Some(html_path.clone()),
             html_path: html_path.clone(),
             text_path: text_path.clone(),
             asset_dir: None,
@@ -2089,6 +2205,7 @@ sentence_text = "legacy bookmark entry"
             active: Some(true),
             audible: Some(false),
             pinned: Some(false),
+            raw_html_path: Some(html_path.clone()),
             html_path: html_path.clone(),
             text_path: text_path.clone(),
             asset_dir: Some(asset_dir.clone()),
