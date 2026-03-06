@@ -12,11 +12,21 @@ import {
 } from "@mui/material";
 
 import { ReaderShell } from "./components/ReaderShell";
+import { ReaderQuickActionsDock } from "./components/ReaderQuickActionsDock";
 import { StarterShell } from "./components/StarterShell";
-import { useAppStore } from "./store/appStore";
+import { useRenderDebugCounter } from "./perf/debug";
+import {
+  useAppHiddenStatusState,
+  useAppKeyboardBindings,
+  useAppShellState,
+  useAppThemeState,
+  useAppToastState,
+  useReaderScreenState,
+  useSessionMode,
+  useStarterScreenState
+} from "./store/selectors";
 import { highlightBorder, mapFontFamily, mapFontWeight, toCssRgba } from "./theme/mapping";
 import type { ThemeMode } from "./types";
-import { useShallow } from "zustand/react/shallow";
 
 function normalizeKey(key: string): string {
   if (key === " ") {
@@ -41,128 +51,36 @@ function matchesShortcut(event: KeyboardEvent, shortcut: string): boolean {
 }
 
 export default function App() {
+  useRenderDebugCounter("App");
+  const { bootstrap, loadingBootstrap, error, clearError } = useAppShellState();
+  const { bootstrapState, readerThemeSettings } = useAppThemeState();
   const {
-    bootstrap,
-    loadingBootstrap,
-    loadingRecents,
-    loadingCalibre,
-    busy,
-    error,
-    clearError,
-    toast,
-    dismissToast,
-    sourceOpenEvent,
-    calibreLoadEvent,
-    ttsStateEvent,
-    pdfTranscriptionEvent,
-    runtimeLogLevel,
+    bootstrapState: keyboardBootstrapState,
+    sessionMode,
     appSafeQuit,
-    bootstrapState,
-    session,
-    reader,
-    recents,
-    calibreBooks,
-    openSourcePath,
-    openClipboardText,
-    deleteRecent,
-    refreshRecents,
-    setRuntimeLogLevel,
-    toggleTheme,
-    loadCalibreBooks,
-    openCalibreBook,
-    closeReaderSession,
-    readerNextPage,
-    readerPrevPage,
-    readerSetPage,
-    readerSentenceClick,
-    readerNextSentence,
-    readerPrevSentence,
-    readerTtsPlay,
-    readerTtsPause,
-    readerTtsTogglePlayPause,
-    readerTtsPlayFromPageStart,
-    readerTtsPlayFromHighlight,
-    readerTtsSeekNext,
-    readerTtsSeekPrev,
-    readerTtsRepeatSentence,
-    readerTtsPrecomputePage,
-    readerToggleTextOnly,
-    readerSearchSetQuery,
-    readerSearchNext,
-    readerSearchPrev,
-    readerApplySettings,
     toggleSettingsPanel,
     toggleStatsPanel,
-    toggleTtsPanel
-  } = useAppStore(
-    useShallow((state) => ({
-      bootstrap: state.bootstrap,
-      loadingBootstrap: state.loadingBootstrap,
-      loadingRecents: state.loadingRecents,
-      loadingCalibre: state.loadingCalibre,
-      busy: state.busy,
-      error: state.error,
-      clearError: state.clearError,
-      toast: state.toast,
-      dismissToast: state.dismissToast,
-      sourceOpenEvent: state.sourceOpenEvent,
-      calibreLoadEvent: state.calibreLoadEvent,
-      ttsStateEvent: state.ttsStateEvent,
-      pdfTranscriptionEvent: state.pdfTranscriptionEvent,
-      runtimeLogLevel: state.runtimeLogLevel,
-      appSafeQuit: state.appSafeQuit,
-      bootstrapState: state.bootstrapState,
-      session: state.session,
-      reader: state.reader,
-      recents: state.recents,
-      calibreBooks: state.calibreBooks,
-      openSourcePath: state.openSourcePath,
-      openClipboardText: state.openClipboardText,
-      deleteRecent: state.deleteRecent,
-      refreshRecents: state.refreshRecents,
-      setRuntimeLogLevel: state.setRuntimeLogLevel,
-      toggleTheme: state.toggleTheme,
-      loadCalibreBooks: state.loadCalibreBooks,
-      openCalibreBook: state.openCalibreBook,
-      closeReaderSession: state.closeReaderSession,
-      readerNextPage: state.readerNextPage,
-      readerPrevPage: state.readerPrevPage,
-      readerSetPage: state.readerSetPage,
-      readerSentenceClick: state.readerSentenceClick,
-      readerNextSentence: state.readerNextSentence,
-      readerPrevSentence: state.readerPrevSentence,
-      readerTtsPlay: state.readerTtsPlay,
-      readerTtsPause: state.readerTtsPause,
-      readerTtsTogglePlayPause: state.readerTtsTogglePlayPause,
-      readerTtsPlayFromPageStart: state.readerTtsPlayFromPageStart,
-      readerTtsPlayFromHighlight: state.readerTtsPlayFromHighlight,
-      readerTtsSeekNext: state.readerTtsSeekNext,
-      readerTtsSeekPrev: state.readerTtsSeekPrev,
-      readerTtsRepeatSentence: state.readerTtsRepeatSentence,
-      readerTtsPrecomputePage: state.readerTtsPrecomputePage,
-      readerToggleTextOnly: state.readerToggleTextOnly,
-      readerSearchSetQuery: state.readerSearchSetQuery,
-      readerSearchNext: state.readerSearchNext,
-      readerSearchPrev: state.readerSearchPrev,
-      readerApplySettings: state.readerApplySettings,
-      toggleSettingsPanel: state.toggleSettingsPanel,
-      toggleStatsPanel: state.toggleStatsPanel,
-      toggleTtsPanel: state.toggleTtsPanel
-    }))
-  );
+    toggleTtsPanel,
+    readerTtsTogglePlayPause,
+    readerTtsSeekNext,
+    readerTtsSeekPrev,
+    readerTtsRepeatSentence
+  } = useAppKeyboardBindings();
+  const currentSessionMode = useSessionMode();
 
-  const activeThemeMode: ThemeMode = reader?.settings.theme ?? bootstrapState?.config.theme ?? "day";
+  const activeThemeMode: ThemeMode =
+    readerThemeSettings?.theme ?? bootstrapState?.config.theme ?? "day";
   const activeFontFamily = mapFontFamily(
-    reader?.settings.font_family ?? bootstrapState?.config.font_family
+    readerThemeSettings?.font_family ?? bootstrapState?.config.font_family
   );
   const activeFontWeight = mapFontWeight(
-    reader?.settings.font_weight ?? bootstrapState?.config.font_weight
+    readerThemeSettings?.font_weight ?? bootstrapState?.config.font_weight
   );
   const dayHighlight =
-    reader?.settings.day_highlight ??
+    readerThemeSettings?.day_highlight ??
     bootstrapState?.config.day_highlight ?? { r: 0.2, g: 0.4, b: 0.7, a: 0.15 };
   const nightHighlight =
-    reader?.settings.night_highlight ??
+    readerThemeSettings?.night_highlight ??
     bootstrapState?.config.night_highlight ??
     { r: 0.8, g: 0.8, b: 0.5, a: 0.2 };
   const activeHighlight = activeThemeMode === "night" ? nightHighlight : dayHighlight;
@@ -209,7 +127,7 @@ export default function App() {
   }, [activeHighlight, activeThemeMode]);
 
   useEffect(() => {
-    if (!bootstrapState) {
+    if (!keyboardBootstrapState) {
       return;
     }
 
@@ -221,52 +139,52 @@ export default function App() {
         return;
       }
 
-      if (matchesShortcut(event, bootstrapState.config.key_safe_quit)) {
+      if (matchesShortcut(event, keyboardBootstrapState.config.key_safe_quit)) {
         event.preventDefault();
         void appSafeQuit();
         return;
       }
 
-      if (!session || session.mode !== "reader") {
+      if (sessionMode !== "reader") {
         return;
       }
 
-      if (matchesShortcut(event, bootstrapState.config.key_toggle_settings)) {
+      if (matchesShortcut(event, keyboardBootstrapState.config.key_toggle_settings)) {
         event.preventDefault();
         void toggleSettingsPanel();
         return;
       }
-      if (matchesShortcut(event, bootstrapState.config.key_toggle_stats)) {
+      if (matchesShortcut(event, keyboardBootstrapState.config.key_toggle_stats)) {
         event.preventDefault();
         void toggleStatsPanel();
         return;
       }
-      if (matchesShortcut(event, bootstrapState.config.key_toggle_tts)) {
+      if (matchesShortcut(event, keyboardBootstrapState.config.key_toggle_tts)) {
         event.preventDefault();
         void toggleTtsPanel();
         return;
       }
-      if (matchesShortcut(event, bootstrapState.config.key_toggle_play_pause)) {
+      if (matchesShortcut(event, keyboardBootstrapState.config.key_toggle_play_pause)) {
         event.preventDefault();
         void readerTtsTogglePlayPause();
         return;
       }
-      if (matchesShortcut(event, bootstrapState.config.key_next_sentence)) {
+      if (matchesShortcut(event, keyboardBootstrapState.config.key_next_sentence)) {
         event.preventDefault();
         void readerTtsSeekNext();
         return;
       }
-      if (matchesShortcut(event, bootstrapState.config.key_prev_sentence)) {
+      if (matchesShortcut(event, keyboardBootstrapState.config.key_prev_sentence)) {
         event.preventDefault();
         void readerTtsSeekPrev();
         return;
       }
-      if (matchesShortcut(event, bootstrapState.config.key_repeat_sentence)) {
+      if (matchesShortcut(event, keyboardBootstrapState.config.key_repeat_sentence)) {
         event.preventDefault();
         void readerTtsRepeatSentence();
         return;
       }
-      if (matchesShortcut(event, bootstrapState.config.key_toggle_search)) {
+      if (matchesShortcut(event, keyboardBootstrapState.config.key_toggle_search)) {
         event.preventDefault();
         const searchInput = document.querySelector<HTMLInputElement>(
           'input[data-reader-search-input="1"]'
@@ -279,54 +197,25 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
-    bootstrapState,
+    keyboardBootstrapState,
     appSafeQuit,
-    session,
+    sessionMode,
     readerTtsTogglePlayPause,
     readerTtsSeekNext,
     readerTtsSeekPrev,
     readerTtsRepeatSentence,
-    readerTtsPrecomputePage,
     toggleSettingsPanel,
     toggleStatsPanel,
     toggleTtsPanel
   ]);
 
-  const readerMode = session?.mode === "reader" && Boolean(reader);
+  const readerMode = currentSessionMode === "reader";
 
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <main className="app-root h-screen overflow-hidden">
-        <div
-          data-testid="app-session-mode"
-          data-mode={session?.mode ?? "unknown"}
-          style={{ display: "none" }}
-        />
-        <div
-          data-testid="app-last-source-open-event"
-          data-phase={sourceOpenEvent?.phase ?? "none"}
-          data-request-id={sourceOpenEvent?.request_id ?? 0}
-          data-source-path={sourceOpenEvent?.source_path ?? ""}
-          data-message={sourceOpenEvent?.message ?? ""}
-          style={{ display: "none" }}
-        />
-        <div
-          data-testid="app-last-pdf-event"
-          data-phase={pdfTranscriptionEvent?.phase ?? "none"}
-          data-request-id={pdfTranscriptionEvent?.request_id ?? 0}
-          data-source-path={pdfTranscriptionEvent?.source_path ?? ""}
-          data-message={pdfTranscriptionEvent?.message ?? ""}
-          style={{ display: "none" }}
-        />
-        <div
-          data-testid="app-last-calibre-event"
-          data-phase={calibreLoadEvent?.phase ?? "none"}
-          data-request-id={calibreLoadEvent?.request_id ?? 0}
-          data-count={calibreLoadEvent?.count ?? -1}
-          data-message={calibreLoadEvent?.message ?? ""}
-          style={{ display: "none" }}
-        />
+        <AppHiddenStatus />
 
         <Container
           maxWidth={false}
@@ -345,80 +234,166 @@ export default function App() {
               </Alert>
             ) : null}
 
-            {readerMode && reader ? (
-              <div className="w-full flex-1 min-h-0 flex justify-center">
-                <ReaderShell
-                  reader={reader}
-                  busy={busy}
-                  onCloseSession={closeReaderSession}
-                  onPrevPage={readerPrevPage}
-                  onNextPage={readerNextPage}
-                  onPrevSentence={readerPrevSentence}
-                  onNextSentence={readerNextSentence}
-                  onSetPage={readerSetPage}
-                  onSentenceClick={readerSentenceClick}
-                  onToggleTextOnly={readerToggleTextOnly}
-                  onSearchQuery={readerSearchSetQuery}
-                  onSearchNext={readerSearchNext}
-                  onSearchPrev={readerSearchPrev}
-                  onToggleTheme={toggleTheme}
-                  onToggleSettingsPanel={toggleSettingsPanel}
-                  onToggleStatsPanel={toggleStatsPanel}
-                  onToggleTtsPanel={toggleTtsPanel}
-                  onTtsPlay={readerTtsPlay}
-                  onTtsPause={readerTtsPause}
-                  onTtsTogglePlayPause={readerTtsTogglePlayPause}
-                  onTtsPlayFromPageStart={readerTtsPlayFromPageStart}
-                  onTtsPlayFromHighlight={readerTtsPlayFromHighlight}
-                  onTtsSeekNext={readerTtsSeekNext}
-                  onTtsSeekPrev={readerTtsSeekPrev}
-                  onTtsRepeatSentence={readerTtsRepeatSentence}
-                  onTtsPrecomputePage={readerTtsPrecomputePage}
-                  onApplySettings={readerApplySettings}
-                  ttsStateEvent={ttsStateEvent}
-                />
-              </div>
-            ) : (
-              <StarterShell
-                bootstrap={bootstrapState}
-                recents={recents}
-                calibreBooks={calibreBooks}
-                busy={busy}
-                loadingRecents={loadingRecents}
-                loadingCalibre={loadingCalibre}
-                onOpenPath={openSourcePath}
-                onOpenClipboardText={openClipboardText}
-                onDeleteRecent={deleteRecent}
-                onRefreshRecents={refreshRecents}
-                onLoadCalibre={loadCalibreBooks}
-                onOpenCalibreBook={openCalibreBook}
-                sourceOpenEvent={sourceOpenEvent}
-                calibreLoadEvent={calibreLoadEvent}
-                pdfTranscriptionEvent={pdfTranscriptionEvent}
-                runtimeLogLevel={runtimeLogLevel}
-                onSetRuntimeLogLevel={setRuntimeLogLevel}
-                onToggleTheme={toggleTheme}
-              />
-            )}
+            {readerMode ? <ReaderScreen /> : <StarterScreen />}
           </Stack>
         </Container>
 
-        <Snackbar
-          key={toast?.id}
-          open={Boolean(toast)}
-          autoHideDuration={2800}
-          onClose={dismissToast}
-          anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        >
-          {toast ? (
-            <Alert severity={toast.severity} onClose={dismissToast} variant="filled">
-              {toast.message}
-            </Alert>
-          ) : (
-            <span />
-          )}
-        </Snackbar>
+        <AppToast />
       </main>
     </ThemeProvider>
+  );
+}
+
+function AppHiddenStatus() {
+  const { sessionMode, sourceOpenEvent, pdfTranscriptionEvent, calibreLoadEvent } =
+    useAppHiddenStatusState();
+  return (
+    <>
+      <div data-testid="app-session-mode" data-mode={sessionMode} style={{ display: "none" }} />
+      <div
+        data-testid="app-last-source-open-event"
+        data-phase={sourceOpenEvent?.phase ?? "none"}
+        data-request-id={sourceOpenEvent?.request_id ?? 0}
+        data-source-path={sourceOpenEvent?.source_path ?? ""}
+        data-message={sourceOpenEvent?.message ?? ""}
+        style={{ display: "none" }}
+      />
+      <div
+        data-testid="app-last-pdf-event"
+        data-phase={pdfTranscriptionEvent?.phase ?? "none"}
+        data-request-id={pdfTranscriptionEvent?.request_id ?? 0}
+        data-source-path={pdfTranscriptionEvent?.source_path ?? ""}
+        data-message={pdfTranscriptionEvent?.message ?? ""}
+        style={{ display: "none" }}
+      />
+      <div
+        data-testid="app-last-calibre-event"
+        data-phase={calibreLoadEvent?.phase ?? "none"}
+        data-request-id={calibreLoadEvent?.request_id ?? 0}
+        data-count={calibreLoadEvent?.count ?? -1}
+        data-message={calibreLoadEvent?.message ?? ""}
+        style={{ display: "none" }}
+      />
+    </>
+  );
+}
+
+function ReaderScreen() {
+  const {
+    reader,
+    busy,
+    ttsStateEvent,
+    closeReaderSession,
+    readerNextPage,
+    readerPrevPage,
+    readerSetPage,
+    readerSentenceClick,
+    readerNextSentence,
+    readerPrevSentence,
+    readerTtsPlay,
+    readerTtsPause,
+    readerTtsTogglePlayPause,
+    readerTtsPlayFromPageStart,
+    readerTtsPlayFromHighlight,
+    readerTtsSeekNext,
+    readerTtsSeekPrev,
+    readerTtsRepeatSentence,
+    readerTtsPrecomputePage,
+    readerToggleTextOnly,
+    readerSearchSetQuery,
+    readerSearchNext,
+    readerSearchPrev,
+    readerApplySettings,
+    toggleTheme,
+    toggleSettingsPanel,
+    toggleStatsPanel,
+    toggleTtsPanel
+  } = useReaderScreenState();
+
+  if (!reader) {
+    return null;
+  }
+
+  return (
+    <div className="w-full flex-1 min-h-0 flex justify-center">
+      <ReaderShell
+        reader={reader}
+        busy={busy}
+        onCloseSession={closeReaderSession}
+        onPrevPage={readerPrevPage}
+        onNextPage={readerNextPage}
+        onPrevSentence={readerPrevSentence}
+        onNextSentence={readerNextSentence}
+        onSetPage={readerSetPage}
+        onSentenceClick={readerSentenceClick}
+        onToggleTextOnly={readerToggleTextOnly}
+        onSearchQuery={readerSearchSetQuery}
+        onSearchNext={readerSearchNext}
+        onSearchPrev={readerSearchPrev}
+        onToggleTheme={toggleTheme}
+        onToggleSettingsPanel={toggleSettingsPanel}
+        onToggleStatsPanel={toggleStatsPanel}
+        onToggleTtsPanel={toggleTtsPanel}
+        onTtsPlay={readerTtsPlay}
+        onTtsPause={readerTtsPause}
+        onTtsTogglePlayPause={readerTtsTogglePlayPause}
+        onTtsPlayFromPageStart={readerTtsPlayFromPageStart}
+        onTtsPlayFromHighlight={readerTtsPlayFromHighlight}
+        onTtsSeekNext={readerTtsSeekNext}
+        onTtsSeekPrev={readerTtsSeekPrev}
+        onTtsRepeatSentence={readerTtsRepeatSentence}
+        onTtsPrecomputePage={readerTtsPrecomputePage}
+        onApplySettings={readerApplySettings}
+        ttsStateEvent={ttsStateEvent}
+      />
+      <ReaderQuickActionsDock />
+    </div>
+  );
+}
+
+function StarterScreen() {
+  const starter = useStarterScreenState();
+  return (
+    <StarterShell
+      bootstrap={starter.bootstrapState}
+      recents={starter.recents}
+      calibreBooks={starter.calibreBooks}
+      busy={starter.busy}
+      loadingRecents={starter.loadingRecents}
+      loadingCalibre={starter.loadingCalibre}
+      onOpenPath={starter.openSourcePath}
+      onOpenClipboardText={starter.openClipboardText}
+      onDeleteRecent={starter.deleteRecent}
+      onRefreshRecents={starter.refreshRecents}
+      onLoadCalibre={starter.loadCalibreBooks}
+      onOpenCalibreBook={starter.openCalibreBook}
+      sourceOpenEvent={starter.sourceOpenEvent}
+      calibreLoadEvent={starter.calibreLoadEvent}
+      pdfTranscriptionEvent={starter.pdfTranscriptionEvent}
+      runtimeLogLevel={starter.runtimeLogLevel}
+      onSetRuntimeLogLevel={starter.setRuntimeLogLevel}
+      onToggleTheme={starter.toggleTheme}
+    />
+  );
+}
+
+function AppToast() {
+  const { toast, dismissToast } = useAppToastState();
+  return (
+    <Snackbar
+      key={toast?.id}
+      open={Boolean(toast)}
+      autoHideDuration={2800}
+      onClose={dismissToast}
+      anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+    >
+      {toast ? (
+        <Alert severity={toast.severity} onClose={dismissToast} variant="filled">
+          {toast.message}
+        </Alert>
+      ) : (
+        <span />
+      )}
+    </Snackbar>
   );
 }

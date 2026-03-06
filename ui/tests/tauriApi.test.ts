@@ -60,7 +60,7 @@ describe("tauri command adapter", () => {
 
     await expect(api.backendApi.sourceOpenPath("")).rejects.toEqual({
       code: "invalid_input",
-      message: "Path cannot be empty"
+      message: "[invoke:source_open_path] Path cannot be empty"
     });
   });
 
@@ -71,7 +71,7 @@ describe("tauri command adapter", () => {
 
     await expect(api.backendApi.readerNextPage()).rejects.toEqual({
       code: "unknown_error",
-      message: "boom"
+      message: "[invoke:reader_next_page] boom"
     });
   });
 

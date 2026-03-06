@@ -27,6 +27,7 @@ import {
   type CalibreSort
 } from "./calibreList";
 import { backendApi } from "../api/tauri";
+import { recordPerfMeasure, useRenderDebugCounter } from "../perf/debug";
 import type {
   BootstrapState,
   CalibreBook,
@@ -101,6 +102,7 @@ export function StarterShell({
   pdfTranscriptionEvent,
   runtimeLogLevel
 }: StarterShellProps) {
+  useRenderDebugCounter("StarterShell");
   const [path, setPath] = useState("");
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   const [calibreSearch, setCalibreSearch] = useState("");
@@ -228,6 +230,8 @@ export function StarterShell({
     }
 
     const run = async (): Promise<void> => {
+      const startedAt = typeof performance !== "undefined" ? performance.now() : 0;
+      const pending: Array<[number, string]> = [];
       for (const book of candidates.slice(0, 18)) {
         calibreThumbInFlightRef.current.add(book.id);
         try {
@@ -239,21 +243,29 @@ export function StarterShell({
           if (cancelled) {
             continue;
           }
-          setCalibreThumbOverrides((current) => {
-            if (current[book.id] === thumbnail) {
-              return current;
-            }
-            return {
-              ...current,
-              [book.id]: thumbnail
-            };
-          });
+          pending.push([book.id, thumbnail]);
         } catch {
           calibreThumbFailedRef.current.add(book.id);
         } finally {
           calibreThumbInFlightRef.current.delete(book.id);
         }
       }
+      if (cancelled || pending.length === 0) {
+        return;
+      }
+      setCalibreThumbOverrides((current) => {
+        let changed = false;
+        const next = { ...current };
+        for (const [bookId, thumbnail] of pending) {
+          if (next[bookId] === thumbnail) {
+            continue;
+          }
+          next[bookId] = thumbnail;
+          changed = true;
+        }
+        return changed ? next : current;
+      });
+      recordPerfMeasure("StarterShell.thumbnailHydrationBatch", startedAt);
     };
 
     void run();

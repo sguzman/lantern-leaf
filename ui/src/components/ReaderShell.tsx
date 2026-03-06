@@ -4,25 +4,16 @@ import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 import GpsFixedIcon from "@mui/icons-material/GpsFixed";
 import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
-import GraphicEqIcon from "@mui/icons-material/GraphicEq";
 import SearchIcon from "@mui/icons-material/Search";
-import SpeedDialIcon from "@mui/material/SpeedDialIcon";
-import TextFieldsIcon from "@mui/icons-material/TextFields";
-import TuneIcon from "@mui/icons-material/Tune";
-import QueryStatsIcon from "@mui/icons-material/QueryStats";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
-  Box,
   Button,
   Card,
   CardContent,
-  ClickAwayListener,
   Divider,
-  Fab,
   FormControl,
   InputLabel,
   MenuItem,
-  Paper,
   Select,
   Slider,
   Stack,
@@ -35,7 +26,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, memo, type MouseEvent } from "react";
 
 import { computeReaderTopBarVisibility } from "./layoutPolicies";
-import { buildHtmlSentenceAnchorMap, normalizeSyncText } from "./htmlSync";
+import { recordPerfMeasure, useRenderDebugCounter } from "../perf/debug";
+import { buildHtmlSentenceAnchorMap } from "./htmlSync";
 import { renderNativePrettyHtml } from "./prettyHtml";
 import { computeReaderTypographyLayout } from "./readerTypography";
 import { TtsPlayerWidget } from "./TtsPlayerWidget";
@@ -89,18 +81,6 @@ interface NumericSettingControlProps {
   decimals?: number;
   testId?: string;
   onCommit: (value: number) => Promise<void>;
-}
-
-interface ReaderQuickActionsProps {
-  busy: boolean;
-  isTextOnly: boolean;
-  showSettings: boolean;
-  showStats: boolean;
-  showTts: boolean;
-  onToggleTextOnly: () => Promise<void>;
-  onToggleSettingsPanel: () => Promise<void>;
-  onToggleStatsPanel: () => Promise<void>;
-  onToggleTtsPanel: () => Promise<void>;
 }
 
 const FONT_FAMILY_OPTIONS: Array<{ value: FontFamily; label: string }> = [
@@ -492,11 +472,15 @@ function scrollSentenceIntoView(
   center: boolean,
   behavior: ScrollBehavior
 ): void {
-  const containerRect = container.getBoundingClientRect();
-  const sentenceRect = sentence.getBoundingClientRect();
   const currentTop = container.scrollTop;
-  const sentenceTop = sentenceRect.top - containerRect.top + currentTop;
-  const sentenceBottom = sentenceTop + sentenceRect.height;
+  let sentenceTop = sentence.offsetTop;
+  let parent = sentence.offsetParent as HTMLElement | null;
+  while (parent && parent !== container) {
+    sentenceTop += parent.offsetTop;
+    parent = parent.offsetParent as HTMLElement | null;
+  }
+  const sentenceHeight = sentence.offsetHeight;
+  const sentenceBottom = sentenceTop + sentenceHeight;
   const viewportTop = currentTop;
   const viewportBottom = viewportTop + container.clientHeight;
   const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
@@ -504,7 +488,7 @@ function scrollSentenceIntoView(
 
   let targetTop: number;
   if (center) {
-    targetTop = sentenceTop - (container.clientHeight - sentenceRect.height) / 2;
+    targetTop = sentenceTop - (container.clientHeight - sentenceHeight) / 2;
   } else if (sentenceTop < viewportTop + padding) {
     targetTop = sentenceTop - padding;
   } else if (sentenceBottom > viewportBottom - padding) {
@@ -663,150 +647,6 @@ function NumericSettingControl({
   );
 }
 
-const ReaderQuickActions = memo(function ReaderQuickActions({
-  busy,
-  isTextOnly,
-  showSettings,
-  showStats,
-  showTts,
-  onToggleTextOnly,
-  onToggleSettingsPanel,
-  onToggleStatsPanel,
-  onToggleTtsPanel
-}: ReaderQuickActionsProps) {
-  const [open, setOpen] = useState(false);
-
-  const actions = useMemo(
-    () => [
-      {
-        key: "text",
-        label: "Text-only",
-        icon: <TextFieldsIcon />,
-        active: isTextOnly,
-        onClick: onToggleTextOnly
-      },
-      {
-        key: "settings",
-        label: "Settings",
-        icon: <TuneIcon />,
-        active: showSettings,
-        onClick: onToggleSettingsPanel
-      },
-      {
-        key: "stats",
-        label: "Stats",
-        icon: <QueryStatsIcon />,
-        active: showStats,
-        onClick: onToggleStatsPanel
-      },
-      {
-        key: "tts",
-        label: "TTS Controls",
-        icon: <GraphicEqIcon />,
-        active: showTts,
-        onClick: onToggleTtsPanel
-      }
-    ],
-    [
-      isTextOnly,
-      onToggleSettingsPanel,
-      onToggleStatsPanel,
-      onToggleTextOnly,
-      onToggleTtsPanel,
-      showSettings,
-      showStats,
-      showTts
-    ]
-  );
-
-  const close = useCallback(() => setOpen(false), []);
-
-  return (
-    <ClickAwayListener onClickAway={close}>
-      <Box
-        sx={{
-          position: "fixed",
-          top: 16,
-          right: 16,
-          zIndex: (theme) => theme.zIndex.modal + 1
-        }}
-      >
-        <Stack direction="column" spacing={1} alignItems="flex-end">
-          <Fab
-            size="small"
-            color="primary"
-            onClick={(event) => {
-              event.stopPropagation();
-              setOpen((current) => !current);
-            }}
-            sx={{
-              transform: open ? "rotate(90deg)" : "rotate(0deg)",
-              transition: "transform 170ms cubic-bezier(0.2, 0, 0, 1)"
-            }}
-            data-testid="reader-quick-actions-speed-dial"
-          >
-            <SpeedDialIcon open={open} />
-          </Fab>
-
-          <Stack
-            spacing={1}
-            alignItems="flex-end"
-            sx={{
-              maxHeight: open ? 280 : 0,
-              opacity: open ? 1 : 0,
-              overflow: "hidden",
-              pointerEvents: open ? "auto" : "none",
-              transition:
-                "max-height 220ms cubic-bezier(0.2, 0, 0, 1), opacity 160ms ease-out"
-            }}
-          >
-            {actions.map((action, index) => (
-              <Stack
-                key={action.key}
-                direction="row"
-                spacing={1}
-                alignItems="center"
-                sx={{
-                  transform: open ? "translateY(0) scale(1)" : "translateY(-8px) scale(0.95)",
-                  opacity: open ? 1 : 0,
-                  transition: `transform 180ms cubic-bezier(0.2, 0, 0, 1) ${index * 28}ms, opacity 140ms ease-out ${index * 28}ms`
-                }}
-              >
-                <Paper
-                  elevation={3}
-                  sx={{
-                    px: 1.15,
-                    py: 0.45,
-                    bgcolor: "#ffffff",
-                    color: "#0f172a",
-                    border: "1px solid #cbd5e1",
-                    borderRadius: 1.25
-                  }}
-                >
-                  <Typography variant="caption" fontWeight={700}>
-                    {action.label}
-                  </Typography>
-                </Paper>
-                <Fab
-                  size="small"
-                  color={action.active ? "primary" : "default"}
-                  onClick={() => {
-                    setOpen(false);
-                    void action.onClick();
-                  }}
-                  disabled={busy}
-                  data-testid={`reader-speed-dial-${action.key}`}
-                >
-                  {action.icon}
-                </Fab>
-              </Stack>
-            ))}
-          </Stack>
-        </Stack>
-      </Box>
-    </ClickAwayListener>
-  );
-});
 
 export const ReaderShell = memo(function ReaderShell({
   reader,
@@ -838,6 +678,7 @@ export const ReaderShell = memo(function ReaderShell({
   onApplySettings,
   ttsStateEvent
 }: ReaderShellProps) {
+  useRenderDebugCounter("ReaderShell");
   const [pageInput, setPageInput] = useState(String(reader.current_page + 1));
   const [searchInput, setSearchInput] = useState(reader.search_query);
   const [statsTab, setStatsTab] = useState<"page" | "global" | "session">("page");
@@ -860,10 +701,16 @@ export const ReaderShell = memo(function ReaderShell({
   const [sessionSentencesRead, setSessionSentencesRead] = useState(0);
   const [sessionPagesFinished, setSessionPagesFinished] = useState(0);
   const nativeHtmlCacheRef = useRef<{ key: string; html: string }>({ key: "", html: "" });
-  const htmlSentenceAnchorMapRef = useRef<number[]>([]);
+  const prettyAnchorElementsRef = useRef<{
+    html: Map<number, HTMLElement>;
+    markdown: Map<number, HTMLElement>;
+  }>({ html: new Map(), markdown: new Map() });
+  const htmlSentenceAnchorCacheRef = useRef<{ key: string; map: number[] }>({ key: "", map: [] });
+  const prettyAnchorLookupKeyRef = useRef<string>("");
   const prettyHighlightedNodeRef = useRef<HTMLElement | null>(null);
   const prettyLastAutoScrollAnchorRef = useRef<number | null>(null);
   const prettyLastAutoScrollPageRef = useRef<number | null>(null);
+  const pendingScrollFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     const node = topBarRef.current;
@@ -893,12 +740,11 @@ export const ReaderShell = memo(function ReaderShell({
   }, [reader.search_query]);
 
   const searchMatchSet = useMemo(() => new Set(reader.search_matches), [reader.search_matches]);
-  const ttsEventTick = ttsStateEvent?.request_id ?? 0;
 
   const resolvePrettyAnchorIdx = useCallback(
     (idx: number): number | null => {
       if (reader.pretty_kind === "html") {
-        const anchors = htmlSentenceAnchorMapRef.current;
+        const anchors = htmlSentenceAnchorCacheRef.current.map;
         let anchorIdx = anchors[idx] ?? null;
         if (anchorIdx === null || anchorIdx === undefined) {
           for (let offset = 1; offset < anchors.length; offset += 1) {
@@ -939,6 +785,22 @@ export const ReaderShell = memo(function ReaderShell({
     [reader.pretty_kind, reader.sentence_anchor_map]
   );
 
+  const getPrettyAnchorNode = useCallback(
+    (anchorIdx: number): HTMLElement | null => {
+      const key = reader.pretty_kind === "html" ? "html" : "markdown";
+      return prettyAnchorElementsRef.current[key].get(anchorIdx) ?? null;
+    },
+    [reader.pretty_kind]
+  );
+
+  const activePrettyAnchorIdx = useMemo(() => {
+    const idx = reader.highlighted_sentence_idx;
+    if (idx === null || idx === undefined) {
+      return null;
+    }
+    return resolvePrettyAnchorIdx(idx);
+  }, [reader.highlighted_sentence_idx, resolvePrettyAnchorIdx]);
+
   const alignHighlightedSentence = useCallback(
     (behavior: ScrollBehavior, force = false) => {
       const idx = reader.highlighted_sentence_idx;
@@ -962,9 +824,7 @@ export const ReaderShell = memo(function ReaderShell({
           ) {
             return;
           }
-          const anchor = container.querySelector(
-            `[data-ll-md-anchor="${anchorIdx}"]`
-          ) as HTMLElement | null;
+          const anchor = getPrettyAnchorNode(anchorIdx);
           if (anchor) {
             scrollSentenceIntoView(
               container,
@@ -988,9 +848,7 @@ export const ReaderShell = memo(function ReaderShell({
           ) {
             return;
           }
-          const anchor = container.querySelector(
-            `[data-ll-html-anchor="${anchorIdx}"]`
-          ) as HTMLElement | null;
+          const anchor = getPrettyAnchorNode(anchorIdx);
           if (anchor) {
             scrollSentenceIntoView(
               container,
@@ -1018,6 +876,7 @@ export const ReaderShell = memo(function ReaderShell({
     [
       reader.highlighted_sentence_idx,
       reader.current_page,
+      getPrettyAnchorNode,
       reader.settings.auto_scroll_tts,
       reader.settings.center_spoken_sentence,
       reader.pretty_kind,
@@ -1069,14 +928,20 @@ export const ReaderShell = memo(function ReaderShell({
     if (!reader.settings.auto_scroll_tts) {
       return;
     }
-    const frame = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const behavior: ScrollBehavior =
-          reader.tts.state === "playing" ? "auto" : "smooth";
-        alignHighlightedSentence(behavior);
-      });
+    if (pendingScrollFrameRef.current !== null) {
+      cancelAnimationFrame(pendingScrollFrameRef.current);
+    }
+    pendingScrollFrameRef.current = requestAnimationFrame(() => {
+      pendingScrollFrameRef.current = null;
+      const behavior: ScrollBehavior = reader.tts.state === "playing" ? "auto" : "smooth";
+      alignHighlightedSentence(behavior);
     });
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      if (pendingScrollFrameRef.current !== null) {
+        cancelAnimationFrame(pendingScrollFrameRef.current);
+        pendingScrollFrameRef.current = null;
+      }
+    };
   }, [
     alignHighlightedSentence,
     reader.current_page,
@@ -1142,20 +1007,10 @@ export const ReaderShell = memo(function ReaderShell({
       }
       return false;
     }
-    const idx = reader.highlighted_sentence_idx;
-    const container = sentenceScrollRef.current;
-    if (idx === null || idx === undefined || !container) {
+    if (activePrettyAnchorIdx === null || activePrettyAnchorIdx === undefined) {
       return false;
     }
-    const anchorIdx = resolvePrettyAnchorIdx(idx);
-    if (anchorIdx === null || anchorIdx === undefined) {
-      return false;
-    }
-    const selector =
-      reader.pretty_kind === "html"
-        ? `[data-ll-html-anchor="${anchorIdx}"]`
-        : `[data-ll-md-anchor="${anchorIdx}"]`;
-    const target = container.querySelector(selector) as HTMLElement | null;
+    const target = getPrettyAnchorNode(activePrettyAnchorIdx);
     if (target) {
       if (prettyHighlightedNodeRef.current && prettyHighlightedNodeRef.current !== target) {
         prettyHighlightedNodeRef.current.classList.remove("reader-pretty-highlight");
@@ -1166,75 +1021,17 @@ export const ReaderShell = memo(function ReaderShell({
     }
     return false;
   }, [
-    reader.highlighted_sentence_idx,
-    reader.pretty_kind,
+    activePrettyAnchorIdx,
+    getPrettyAnchorNode,
     reader.text_only_mode,
-    resolvePrettyAnchorIdx
   ]);
 
   useEffect(() => {
-    if (applyPrettyHighlight()) {
-      return;
-    }
-    if (reader.text_only_mode) {
-      return;
-    }
-    const idx = reader.highlighted_sentence_idx;
-    const container = sentenceScrollRef.current;
-    if (idx === null || idx === undefined || !container) {
-      return;
-    }
-    const anchorIdx = resolvePrettyAnchorIdx(idx);
-    if (anchorIdx === null || anchorIdx === undefined) {
-      return;
-    }
-    const selector =
-      reader.pretty_kind === "html"
-        ? `[data-ll-html-anchor="${anchorIdx}"]`
-        : `[data-ll-md-anchor="${anchorIdx}"]`;
     const frame = requestAnimationFrame(() => {
-      const retryTarget = container.querySelector(selector) as HTMLElement | null;
-      if (!retryTarget) {
-        return;
-      }
-      if (prettyHighlightedNodeRef.current && prettyHighlightedNodeRef.current !== retryTarget) {
-        prettyHighlightedNodeRef.current.classList.remove("reader-pretty-highlight");
-      }
-      retryTarget.classList.add("reader-pretty-highlight");
-      prettyHighlightedNodeRef.current = retryTarget;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [
-    applyPrettyHighlight,
-    ttsEventTick,
-    reader.reading_markdown_page,
-    reader.reading_html_page,
-    reader.current_page,
-    reader.highlighted_sentence_idx,
-    reader.pretty_kind,
-    reader.text_only_mode,
-    resolvePrettyAnchorIdx
-  ]);
-
-  useEffect(() => {
-    if (reader.text_only_mode) {
-      return;
-    }
-    const container = sentenceScrollRef.current;
-    if (!container) {
-      return;
-    }
-    const observer = new MutationObserver(() => {
       applyPrettyHighlight();
     });
-    observer.observe(container, {
-      childList: true,
-      subtree: true,
-      attributes: false,
-      characterData: false
-    });
-    return () => observer.disconnect();
-  }, [applyPrettyHighlight, reader.text_only_mode, reader.current_page]);
+    return () => cancelAnimationFrame(frame);
+  }, [applyPrettyHighlight, activePrettyAnchorIdx, reader.current_page]);
 
   const panelTitle = useMemo(() => {
     if (reader.panels.show_settings) {
@@ -1399,23 +1196,86 @@ export const ReaderShell = memo(function ReaderShell({
     reader.source_path,
     readerImageCandidates
   ]);
+  const sentencesKey = useMemo(() => reader.sentences.join("\n"), [reader.sentences]);
+  const sentenceAnchorHintKey = useMemo(
+    () => reader.sentence_anchor_map.map((value) => (value ?? "null")).join(","),
+    [reader.sentence_anchor_map]
+  );
+  const prettyLookupKey = useMemo(() => {
+    if (hasPrettyHtml) {
+      return `html:${reader.source_path}:${reader.current_page}:${renderedNativeHtml}`;
+    }
+    if (hasPrettyMarkdown) {
+      return `markdown:${reader.source_path}:${reader.current_page}:${renderedMarkdownHtml}`;
+    }
+    return "";
+  }, [
+    hasPrettyHtml,
+    hasPrettyMarkdown,
+    reader.current_page,
+    reader.source_path,
+    renderedMarkdownHtml,
+    renderedNativeHtml
+  ]);
 
   useEffect(() => {
-    if (!hasPrettyHtml || !renderedNativeHtml) {
-      htmlSentenceAnchorMapRef.current = [];
+    if (!prettyLookupKey) {
+      prettyAnchorElementsRef.current.html.clear();
+      prettyAnchorElementsRef.current.markdown.clear();
+      prettyAnchorLookupKeyRef.current = "";
+      return;
+    }
+    if (prettyAnchorLookupKeyRef.current === prettyLookupKey) {
       return;
     }
     const container = sentenceScrollRef.current;
     if (!container) {
       return;
     }
-    const anchors = Array.from(
-      container.querySelectorAll("[data-ll-html-anchor]")
-    ) as HTMLElement[];
-    if (anchors.length === 0 || reader.sentences.length === 0) {
-      htmlSentenceAnchorMapRef.current = [];
+    const kind = hasPrettyHtml ? "html" : hasPrettyMarkdown ? "markdown" : null;
+    if (!kind) {
       return;
     }
+    const attribute = kind === "html" ? "data-ll-html-anchor" : "data-ll-md-anchor";
+    const anchors = Array.from(container.querySelectorAll(`[${attribute}]`)) as HTMLElement[];
+    const nextMap = new Map<number, HTMLElement>();
+    for (const element of anchors) {
+      const raw = element.getAttribute(attribute);
+      const parsed = raw === null ? Number.NaN : Number.parseInt(raw, 10);
+      if (Number.isFinite(parsed)) {
+        nextMap.set(parsed, element);
+      }
+    }
+    prettyAnchorElementsRef.current[kind] = nextMap;
+    if (kind === "html") {
+      prettyAnchorElementsRef.current.markdown.clear();
+    } else {
+      prettyAnchorElementsRef.current.html.clear();
+    }
+    prettyAnchorLookupKeyRef.current = prettyLookupKey;
+  }, [hasPrettyHtml, hasPrettyMarkdown, prettyLookupKey]);
+
+  useEffect(() => {
+    if (!hasPrettyHtml || !renderedNativeHtml) {
+      htmlSentenceAnchorCacheRef.current = { key: "", map: [] };
+      return;
+    }
+    const cacheKey = [
+      reader.source_path,
+      reader.current_page,
+      renderedNativeHtml,
+      sentencesKey,
+      sentenceAnchorHintKey
+    ].join("\n");
+    if (htmlSentenceAnchorCacheRef.current.key === cacheKey) {
+      return;
+    }
+    const anchors = Array.from(prettyAnchorElementsRef.current.html.values());
+    if (anchors.length === 0 || reader.sentences.length === 0) {
+      htmlSentenceAnchorCacheRef.current = { key: cacheKey, map: [] };
+      return;
+    }
+    const startedAt = typeof performance !== "undefined" ? performance.now() : 0;
     const anchorTexts = anchors.map((element) => element.textContent ?? "");
     const { map, diagnostics } = buildHtmlSentenceAnchorMap(
       anchorTexts,
@@ -1431,8 +1291,18 @@ export const ReaderShell = memo(function ReaderShell({
         cappedLeaps: diagnostics.cappedLeaps
       });
     }
-    htmlSentenceAnchorMapRef.current = map;
-  }, [hasPrettyHtml, reader.sentence_anchor_map, renderedNativeHtml, reader.sentences]);
+    recordPerfMeasure("ReaderShell.buildHtmlSentenceAnchorMap", startedAt);
+    htmlSentenceAnchorCacheRef.current = { key: cacheKey, map };
+  }, [
+    hasPrettyHtml,
+    reader.current_page,
+    reader.sentences,
+    reader.source_path,
+    reader.sentence_anchor_map,
+    renderedNativeHtml,
+    sentenceAnchorHintKey,
+    sentencesKey
+  ]);
   const themeLabel = reader.settings.theme === "night" ? "Day" : "Night";
   const themeIcon =
     reader.settings.theme === "night" ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />;
@@ -1614,18 +1484,6 @@ export const ReaderShell = memo(function ReaderShell({
               {themeLabel}
             </Button>
           </Stack>
-
-          <ReaderQuickActions
-            busy={busy}
-            isTextOnly={reader.text_only_mode}
-            showSettings={reader.panels.show_settings}
-            showStats={reader.panels.show_stats}
-            showTts={reader.panels.show_tts}
-            onToggleTextOnly={onToggleTextOnly}
-            onToggleSettingsPanel={onToggleSettingsPanel}
-            onToggleStatsPanel={onToggleStatsPanel}
-            onToggleTtsPanel={onToggleTtsPanel}
-          />
 
           <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
             <SearchIcon fontSize="small" />

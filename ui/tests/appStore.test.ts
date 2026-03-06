@@ -178,6 +178,7 @@ function createBackend(overrides: Partial<BackendApi> = {}) {
     readerCloseSession: async () => makeSessionState("starter"),
     loggingSetLevel: async () => "debug",
     calibreLoadBooks: async () => [] as CalibreBook[],
+    calibreLoadCachedBooks: async () => [] as CalibreBook[],
     calibreOpenBook: async () => defaultOpenResult,
     onSourceOpen: async (handler) => {
       hooks.source = handler;
