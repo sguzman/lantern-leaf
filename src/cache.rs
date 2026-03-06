@@ -13,6 +13,7 @@ use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, REFERER, USER_AGENT};
 use reqwest::Url;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -40,6 +41,8 @@ const BROWSER_TAB_MANIFEST_FILE: &str = "browser-tab.lltab";
 const BROWSER_TAB_HTML_FILE: &str = "snapshot.html";
 const BROWSER_TAB_TEXT_FILE: &str = "snapshot.txt";
 const BROWSER_TAB_ASSETS_SUBDIR: &str = "assets";
+const BROWSER_TAB_FETCH_USER_AGENT: &str =
+    "LanternLeaf/2026.03 (browser-tab-import; local desktop reader)";
 static CONTENT_DIGEST_CACHE: OnceLock<Mutex<HashMap<PathBuf, SourceDigestEntry>>> = OnceLock::new();
 static CACHE_LAYOUT_INIT: OnceLock<()> = OnceLock::new();
 static RE_LINK_TAG: Lazy<Regex> = Lazy::new(|| {
@@ -670,6 +673,7 @@ fn prepare_browser_tab_bundle(
 ) -> anyhow::Result<PreparedBrowserTabBundle> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(8))
+        .user_agent(BROWSER_TAB_FETCH_USER_AGENT)
         .build()?;
     let mut asset_map = HashMap::<String, BrowserTabAsset>::new();
     let html_with_styles = inline_browser_tab_stylesheets(html, base_url, asset_dir, &client, &mut asset_map);
@@ -732,7 +736,7 @@ fn parse_html_attrs(tag: &str) -> HashMap<String, String> {
         .captures_iter(tag)
         .filter_map(|caps| {
             let name = caps.get(1)?.as_str().trim().to_ascii_lowercase();
-            let value = caps.get(2)?.as_str().to_string();
+            let value = decode_html_entities(caps.get(2)?.as_str());
             Some((name, value))
         })
         .collect()
@@ -809,7 +813,9 @@ fn fetch_stylesheet_text(
     client: &reqwest::blocking::Client,
     stylesheet_url: &str,
 ) -> Option<(String, String)> {
-    let response = client.get(stylesheet_url).send().ok()?;
+    let response = browser_tab_request(client, stylesheet_url, stylesheet_url)
+        .send()
+        .ok()?;
     if !response.status().is_success() {
         warn!(url = %stylesheet_url, status = %response.status(), "Browser tab stylesheet fetch failed");
         return None;
@@ -834,7 +840,7 @@ fn fetch_browser_tab_asset(
         return Some(existing.clone());
     }
     fs::create_dir_all(asset_dir).ok()?;
-    let response = client.get(&absolute).send().ok()?;
+    let response = browser_tab_request(client, &absolute, base_url).send().ok()?;
     if !response.status().is_success() {
         warn!(url = %absolute, status = %response.status(), kind, "Browser tab asset fetch failed");
         return None;
@@ -860,7 +866,8 @@ fn fetch_browser_tab_asset(
 }
 
 fn resolve_browser_tab_url(raw: &str, base_url: &str) -> Option<String> {
-    let trimmed = raw.trim().trim_matches('\'').trim_matches('"');
+    let trimmed = decode_html_entities(raw);
+    let trimmed = trimmed.trim().trim_matches('\'').trim_matches('"');
     if trimmed.is_empty() || trimmed.starts_with('#') {
         return None;
     }
@@ -872,6 +879,27 @@ fn resolve_browser_tab_url(raw: &str, base_url: &str) -> Option<String> {
     }
     let base = Url::parse(base_url).ok()?;
     base.join(trimmed).ok().map(|value| value.to_string())
+}
+
+fn browser_tab_request<'a>(
+    client: &'a reqwest::blocking::Client,
+    url: &'a str,
+    referer: &'a str,
+) -> reqwest::blocking::RequestBuilder {
+    client
+        .get(url)
+        .header(USER_AGENT, BROWSER_TAB_FETCH_USER_AGENT)
+        .header(ACCEPT, "*/*")
+        .header(ACCEPT_LANGUAGE, "en-US,en;q=0.9")
+        .header(REFERER, decode_html_entities(referer))
+}
+
+fn decode_html_entities(raw: &str) -> String {
+    raw.replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
 }
 
 fn parse_srcset_urls(raw: &str) -> Vec<String> {
@@ -971,6 +999,33 @@ pub fn load_browser_tab_manifest(source_path: &Path) -> Option<BrowserTabSourceM
         "Loaded browser-tab manifest"
     );
     Some(manifest)
+}
+
+pub fn rehydrate_browser_tab_manifest_assets(source_path: &Path) -> Result<(), String> {
+    let mut manifest = load_browser_tab_manifest(source_path)
+        .ok_or_else(|| format!("Not a browser-tab manifest: {}", source_path.display()))?;
+    if !manifest.assets.is_empty() {
+        return Ok(());
+    }
+    let html = fs::read_to_string(&manifest.html_path).map_err(|err| err.to_string())?;
+    let asset_dir = manifest
+        .asset_dir
+        .clone()
+        .unwrap_or_else(|| manifest.html_path.parent().unwrap_or(source_path).join(BROWSER_TAB_ASSETS_SUBDIR));
+    let prepared = prepare_browser_tab_bundle(&html, &manifest.url, &asset_dir)
+        .map_err(|err| err.to_string())?;
+    fs::write(&manifest.html_path, prepared.html).map_err(|err| err.to_string())?;
+    manifest.asset_dir = (!prepared.assets.is_empty()).then_some(asset_dir);
+    manifest.assets = prepared.assets;
+    let raw = toml::to_string(&manifest).map_err(|err| err.to_string())?;
+    fs::write(source_path, raw).map_err(|err| err.to_string())?;
+    info!(
+        path = %source_path.display(),
+        asset_count = manifest.assets.len(),
+        url = %manifest.url,
+        "Rehydrated browser-tab cache assets from stored snapshot"
+    );
+    Ok(())
 }
 
 pub fn is_browser_tab_manifest(source_path: &Path) -> bool {
@@ -1451,6 +1506,9 @@ pub fn save_epub_config(epub_path: &Path, config: &AppConfig) {
 mod tests {
     use super::*;
     use crate::browser_tabs::{BrowserTab, BrowserTabSnapshot, SnapshotTruncation, SnapshotTruncationEntry};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_source_path(ext: &str) -> PathBuf {
@@ -1723,5 +1781,93 @@ sentence_text = "legacy bookmark entry"
 
         delete_recent_source_and_cache(&manifest_path).expect("delete browser tab recent");
         assert!(!manifest_path.exists());
+    }
+
+    #[test]
+    fn browser_tab_asset_rehydrate_decodes_html_entities_and_fetches_assets() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let addr = listener.local_addr().expect("local addr");
+        let server = thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().expect("accept");
+                let mut buffer = [0_u8; 4096];
+                let read = stream.read(&mut buffer).expect("read");
+                let request = String::from_utf8_lossy(&buffer[..read]);
+                let first_line = request.lines().next().unwrap_or_default().to_string();
+                let path = first_line
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_string();
+                let (status, content_type, body) = if path.starts_with("/site.css?lang=en&modules=site.styles") {
+                    (
+                        "200 OK",
+                        "text/css; charset=utf-8",
+                        ".hero{background-image:url('/img.png')}".as_bytes().to_vec(),
+                    )
+                } else if path == "/img.png" {
+                    ("200 OK", "image/png", vec![137, 80, 78, 71, 13, 10, 26, 10])
+                } else {
+                    ("404 Not Found", "text/plain", b"missing".to_vec())
+                };
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes()).expect("write headers");
+                stream.write_all(&body).expect("write body");
+            }
+        });
+
+        let dir = cache_root().join("test-sources").join(format!(
+            "browser-tab-rehydrate-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&dir).expect("create dir");
+        let html_path = dir.join("snapshot.html");
+        let text_path = dir.join("snapshot.txt");
+        let manifest_path = dir.join("browser-tab.lltab");
+        fs::write(
+            &html_path,
+            format!(
+                r#"<html><head><link rel="stylesheet" href="http://{addr}/site.css?lang=en&amp;modules=site.styles"></head><body><article class="hero"><img src="http://{addr}/img.png"></article></body></html>"#
+            ),
+        )
+        .expect("write html");
+        fs::write(&text_path, "hello").expect("write text");
+
+        let manifest = BrowserTabSourceManifest {
+            tab_id: 1,
+            window_id: Some(1),
+            title: "Example".to_string(),
+            url: format!("http://{addr}/article"),
+            lang: Some("en".to_string()),
+            ready_state: Some("complete".to_string()),
+            captured_at: None,
+            favicon_url: None,
+            active: Some(true),
+            audible: Some(false),
+            pinned: Some(false),
+            html_path: html_path.clone(),
+            text_path: text_path.clone(),
+            asset_dir: None,
+            assets: Vec::new(),
+            html_truncated: false,
+            text_truncated: false,
+        };
+        fs::write(&manifest_path, toml::to_string(&manifest).expect("manifest toml"))
+            .expect("write manifest");
+
+        rehydrate_browser_tab_manifest_assets(&manifest_path).expect("rehydrate");
+        let hydrated = load_browser_tab_manifest(&manifest_path).expect("reload manifest");
+        let hydrated_html = fs::read_to_string(&html_path).expect("hydrated html");
+        assert!(!hydrated.assets.is_empty());
+        assert!(hydrated_html.contains("<style data-ll-origin-href="));
+
+        let _ = fs::remove_dir_all(&dir);
+        server.join().expect("join server");
     }
 }

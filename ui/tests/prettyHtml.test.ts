@@ -143,4 +143,34 @@ describe("renderNativePrettyHtml", () => {
     expect(out).toContain('style="background-image:url(&quot;asset:/cache/browser-tabs/assets/inline.png&quot;)"');
     expect(out).toContain('src="asset:/cache/browser-tabs/assets/cover.jpg"');
   });
+
+  it("focuses browser tabs to the main reading surface instead of full site chrome", () => {
+    const html = `
+      <div data-ll-base-url="https://en.wikipedia.org/wiki/Example" data-ll-browser-tab="1">
+        <html class="skin-vector-2022">
+          <head>
+            <style>body.skin-vector-2022 .mw-parser-output p{font-size:18px}</style>
+          </head>
+          <body class="mediawiki">
+            <header>Site header</header>
+            <nav>Sidebar nav</nav>
+            <main id="content">
+              <div class="mw-body-content">
+                <div class="mw-parser-output">
+                  <p>${"Article body ".repeat(80)}</p>
+                </div>
+              </div>
+            </main>
+            <footer>Site footer</footer>
+          </body>
+        </html>
+      </div>
+    `;
+    const out = renderNativePrettyHtml(html, []);
+    expect(out).toContain("Article body");
+    expect(out).toContain("ll-browser-tab-root");
+    expect(out).not.toContain("Site header");
+    expect(out).not.toContain("Sidebar nav");
+    expect(out).not.toContain("Site footer");
+  });
 });

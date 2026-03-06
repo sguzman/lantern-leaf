@@ -69,14 +69,91 @@ function rewriteCssUrls(
   });
 }
 
+function focusBrowserTabContent(container: HTMLDivElement): void {
+  const browserWrapper = container.querySelector<HTMLElement>("[data-ll-browser-tab='1']");
+  if (!browserWrapper) {
+    return;
+  }
+  const htmlRoot = container.querySelector("html");
+  const bodyRoot = container.querySelector("body");
+  const headRoot = container.querySelector("head");
+  const candidateSelectors = [
+    ".mw-parser-output",
+    ".mw-body-content",
+    "main article",
+    "main#content",
+    "article",
+    "[role='main']",
+    "main",
+    "#content",
+    ".entry-content",
+    ".post-content",
+    ".article-content"
+  ];
+  let chosen: HTMLElement | null = null;
+  for (const selector of candidateSelectors) {
+    const candidate = container.querySelector<HTMLElement>(selector);
+    if (!candidate) {
+      continue;
+    }
+    const textLen = (candidate.textContent ?? "").trim().length;
+    if (textLen < 600) {
+      continue;
+    }
+    chosen = candidate;
+    break;
+  }
+  if (!chosen) {
+    return;
+  }
+
+  const focused = document.createElement("div");
+  focused.dataset.llBaseUrl = browserWrapper.dataset.llBaseUrl ?? "";
+  focused.dataset.llBrowserTab = "1";
+
+  const title = container.querySelector("title")?.textContent?.trim();
+  if (title) {
+    const heading = document.createElement("h1");
+    heading.textContent = title;
+    focused.appendChild(heading);
+  }
+
+  const readingRoot = document.createElement("div");
+  const classes = [
+    "ll-browser-tab-root",
+    ...(htmlRoot?.className?.split(/\s+/) ?? []),
+    ...(bodyRoot?.className?.split(/\s+/) ?? [])
+  ].filter(Boolean);
+  readingRoot.className = Array.from(new Set(classes)).join(" ");
+  const inlineStyle = [htmlRoot?.getAttribute("style"), bodyRoot?.getAttribute("style")]
+    .filter(Boolean)
+    .join("; ");
+  if (inlineStyle.trim()) {
+    readingRoot.setAttribute("style", inlineStyle);
+  }
+
+  const styles = headRoot ? Array.from(headRoot.querySelectorAll("style")) : [];
+  for (const style of styles) {
+    readingRoot.appendChild(style.cloneNode(true));
+  }
+  readingRoot.appendChild(chosen.cloneNode(true));
+  focused.appendChild(readingRoot);
+
+  browserWrapper.replaceWith(focused);
+}
+
 export function renderNativePrettyHtml(
   html: string,
   imageCandidates: Array<{ rawPath: string; src: string }>
 ): string {
   const container = document.createElement("div");
   container.innerHTML = html;
+  focusBrowserTabContent(container);
   let baseUrl: string | null =
     container.querySelector<HTMLElement>("[data-ll-base-url]")?.dataset.llBaseUrl ?? null;
+  const scopedRoot = container.querySelector("[data-ll-browser-tab='1']")
+    ? ".reader-native-html-content .ll-browser-tab-root"
+    : ".reader-native-html-content";
   const wrappers = Array.from(container.querySelectorAll<HTMLElement>("[data-ll-base-url]"));
   for (const wrapper of wrappers) {
     while (wrapper.firstChild) {
@@ -116,6 +193,7 @@ export function renderNativePrettyHtml(
     "symbol",
     "use",
     "path",
+    "picture",
     "rect",
     "circle",
     "ellipse",
@@ -162,6 +240,7 @@ export function renderNativePrettyHtml(
   const allowedPerTagAttrs = new Map<string, Set<string>>([
     ["a", new Set(["href"])],
     ["img", new Set(["src", "alt", "width", "height", "loading"])],
+    ["picture", new Set([])],
     ["source", new Set(["src", "srcset", "type", "media"])],
     ["td", new Set(["colspan", "rowspan"])],
     ["th", new Set(["colspan", "rowspan"])],
@@ -207,9 +286,9 @@ export function renderNativePrettyHtml(
             return trimmed;
           }
           const normalized = trimmed
-            .replace(/\bhtml\b/g, scope)
-            .replace(/\bbody\b/g, scope)
-            .replace(/\:root\b/g, scope);
+            .replace(/\bhtml\b/g, scopedRoot)
+            .replace(/\bbody\b/g, scopedRoot)
+            .replace(/\:root\b/g, scopedRoot);
           if (normalized.includes(scope)) {
             return normalized;
           }
@@ -311,6 +390,37 @@ export function renderNativePrettyHtml(
     if (node.nodeType === Node.ELEMENT_NODE) {
       const element = node as Element;
       const tag = element.tagName.toLowerCase();
+      const rawImgSrc = tag === "img"
+        ? (
+            element.getAttribute("src") ??
+            element.getAttribute("data-src") ??
+            element.getAttribute("data-lazy-src") ??
+            element.getAttribute("data-original") ??
+            ""
+          ).trim()
+        : "";
+      const rawImgSrcset = tag === "img"
+        ? (
+            element.getAttribute("srcset") ??
+            element.getAttribute("data-srcset") ??
+            element.getAttribute("data-lazy-srcset") ??
+            ""
+          ).trim()
+        : "";
+      const rawSourceSrc = tag === "source"
+        ? (
+            element.getAttribute("src") ??
+            element.getAttribute("data-src") ??
+            ""
+          ).trim()
+        : "";
+      const rawSourceSrcset = tag === "source"
+        ? (
+            element.getAttribute("srcset") ??
+            element.getAttribute("data-srcset") ??
+            ""
+          ).trim()
+        : "";
       if (!allowTags.has(tag)) {
         if (tag === "script" || tag === "iframe" || tag === "object" || tag === "embed") {
           element.remove();
@@ -349,30 +459,30 @@ export function renderNativePrettyHtml(
         element.setAttribute("style", rewritten);
       }
       if (tag === "img") {
-        const src = (element.getAttribute("src") ?? "").trim();
-        const resolved = resolveResourceTarget(src) ?? "";
+        const resolved = resolveResourceTarget(rawImgSrc) ?? "";
         if (resolved) {
           element.setAttribute("src", resolved);
         } else {
           element.remove();
           return;
         }
+        if (rawImgSrcset) {
+          element.setAttribute("srcset", rewriteSrcset(rawImgSrcset));
+        }
         if (!element.hasAttribute("loading")) {
           element.setAttribute("loading", "lazy");
         }
       } else if (tag === "source") {
-        const src = (element.getAttribute("src") ?? "").trim();
-        const srcset = (element.getAttribute("srcset") ?? "").trim();
-        if (src) {
-          const resolved = resolveResourceTarget(src);
+        if (rawSourceSrc) {
+          const resolved = resolveResourceTarget(rawSourceSrc);
           if (resolved) {
             element.setAttribute("src", resolved);
           } else {
             element.removeAttribute("src");
           }
         }
-        if (srcset) {
-          element.setAttribute("srcset", rewriteSrcset(srcset));
+        if (rawSourceSrcset) {
+          element.setAttribute("srcset", rewriteSrcset(rawSourceSrcset));
         }
       } else if (tag === "image") {
         const href =

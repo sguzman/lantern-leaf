@@ -8,7 +8,6 @@ import {
   Alert,
   Button,
   Card,
-  CardActions,
   CardContent,
   CircularProgress,
   Divider,
@@ -644,42 +643,33 @@ export function StarterShell({
                   ) : null}
                   {browserTabsVirtualWindow.items.map((tab) => (
                     <div key={tab.id} style={{ height: browserTabsRowHeight }}>
-                      <Card variant="outlined" className="h-full">
-                        <CardContent sx={{ py: 1.25, "&:last-child": { pb: 1.25 } }}>
-                          <Stack
-                            direction="row"
-                            spacing={1.5}
-                            alignItems="center"
-                            justifyContent="space-between"
-                          >
-                            <Stack spacing={0.35} className="min-w-0 flex-1">
-                              <Typography variant="subtitle2" noWrap title={tab.title}>
-                                {tab.title}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary" noWrap title={tab.url}>
-                                {tab.url}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary" noWrap>
-                                Window {tab.windowId}
-                                {tab.active ? " · Active" : ""}
-                                {tab.audible ? " · Audible" : ""}
-                                {tab.pinned ? " · Pinned" : ""}
-                                {tab.status ? ` · ${tab.status}` : ""}
-                              </Typography>
-                            </Stack>
-                            <Button
-                              size="small"
-                              variant="contained"
-                              onClick={() => void onOpenBrowserTab(tab.id, tab.windowId)}
-                              disabled={busy || browserTabsLoading}
-                              data-testid={`starter-browser-tab-open-${tab.id}`}
-                              sx={{ flexShrink: 0 }}
-                            >
-                              Import
-                            </Button>
-                          </Stack>
-                        </CardContent>
-                      </Card>
+                      <div className="flex h-full items-center justify-between rounded-2xl border border-slate-200 bg-white/70 px-4 py-3">
+                        <Stack spacing={0.35} className="min-w-0 flex-1">
+                          <Typography variant="subtitle2" noWrap title={tab.title}>
+                            {tab.title}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" noWrap title={tab.url}>
+                            {tab.url}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" noWrap>
+                            Window {tab.windowId}
+                            {tab.active ? " · Active" : ""}
+                            {tab.audible ? " · Audible" : ""}
+                            {tab.pinned ? " · Pinned" : ""}
+                            {tab.status ? ` · ${tab.status}` : ""}
+                          </Typography>
+                        </Stack>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          onClick={() => void onOpenBrowserTab(tab.id, tab.windowId)}
+                          disabled={busy || browserTabsLoading}
+                          data-testid={`starter-browser-tab-open-${tab.id}`}
+                          sx={{ flexShrink: 0 }}
+                        >
+                          Import
+                        </Button>
+                      </div>
                     </div>
                   ))}
                     {browserTabsVirtualWindow.bottomSpacerPx > 0 ? (
@@ -799,38 +789,35 @@ export function StarterShell({
                       const recentThumbnailSrc = toThumbnailSrc(recent.thumbnail_path);
                       return (
                         <div key={recent.source_path} style={{ height: recentsRowHeight }}>
-                          <Card
-                            variant="outlined"
-                            className="h-full rounded-2xl border-slate-200 shadow-none"
+                          <div
+                            className="flex h-full items-center justify-between rounded-2xl border border-slate-200 bg-white/70 px-4 py-3"
                             data-testid="starter-recent-card"
                             data-recent-path={recent.source_path}
                           >
-                            <CardContent className="pb-3">
-                              <Stack direction="row" spacing={1.25} alignItems="center">
-                                {recentThumbnailSrc ? (
-                                  <img
-                                    src={recentThumbnailSrc}
-                                    alt={recent.display_title}
-                                    className="h-11 w-9 shrink-0 rounded border border-slate-200 object-cover"
-                                    loading="lazy"
-                                  />
-                                ) : null}
-                                <Stack spacing={0.75} className="min-w-0">
-                                  <Typography variant="subtitle1" fontWeight={700} noWrap>
-                                    {recent.display_title}
-                                  </Typography>
-                                  <Typography
-                                    variant="caption"
-                                    color="text.secondary"
-                                    noWrap
-                                    className="truncate"
-                                  >
-                                    {recent.snippet}
-                                  </Typography>
-                                </Stack>
+                            <Stack direction="row" spacing={1.25} alignItems="center" className="min-w-0 flex-1">
+                              {recentThumbnailSrc ? (
+                                <img
+                                  src={recentThumbnailSrc}
+                                  alt={recent.display_title}
+                                  className="h-11 w-9 shrink-0 rounded border border-slate-200 object-cover"
+                                  loading="lazy"
+                                />
+                              ) : null}
+                              <Stack spacing={0.75} className="min-w-0">
+                                <Typography variant="subtitle1" fontWeight={700} noWrap>
+                                  {recent.display_title}
+                                </Typography>
+                                <Typography
+                                  variant="caption"
+                                  color="text.secondary"
+                                  noWrap
+                                  className="truncate"
+                                >
+                                  {recent.snippet}
+                                </Typography>
                               </Stack>
-                            </CardContent>
-                            <CardActions className="px-4 pb-4 pt-0">
+                            </Stack>
+                            <Stack direction="row" spacing={1}>
                               <Button
                                 size="small"
                                 variant="contained"
@@ -853,8 +840,8 @@ export function StarterShell({
                               >
                                 Delete
                               </Button>
-                            </CardActions>
-                          </Card>
+                            </Stack>
+                          </div>
                         </div>
                       );
                     })}

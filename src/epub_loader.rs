@@ -125,6 +125,9 @@ fn load_source_content(path: &Path, cancel: Option<&CancellationToken>) -> Resul
     let start = Instant::now();
     ensure_not_cancelled(cancel, "load_source_text_start")?;
     if is_browser_tab_manifest(path) {
+        if let Err(err) = crate::cache::rehydrate_browser_tab_manifest_assets(path) {
+            warn!(path = %path.display(), "Browser-tab asset rehydrate failed: {err}");
+        }
         let manifest = load_browser_tab_manifest(path)
             .with_context(|| format!("Failed to load browser-tab manifest {}", path.display()))?;
         let tts_text = fs::read_to_string(&manifest.text_path)
@@ -294,7 +297,7 @@ fn wrap_browser_tab_html(html: &str, url: &str) -> String {
         .replace('"', "&quot;")
         .replace('<', "&lt;")
         .replace('>', "&gt;");
-    format!(r#"<div data-ll-base-url="{escaped_url}">{html}</div>"#)
+    format!(r#"<div data-ll-base-url="{escaped_url}" data-ll-browser-tab="1">{html}</div>"#)
 }
 
 fn is_text_file(path: &Path) -> bool {
