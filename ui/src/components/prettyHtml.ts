@@ -94,18 +94,24 @@ function focusBrowserTabContent(container: HTMLDivElement): void {
     ".article-content"
   ];
   let chosen: HTMLElement | null = null;
+  let fallback: HTMLElement | null = null;
+  let fallbackTextLen = 0;
   for (const selector of candidateSelectors) {
     const candidate = container.querySelector<HTMLElement>(selector);
     if (!candidate) {
       continue;
     }
     const textLen = (candidate.textContent ?? "").trim().length;
-    if (textLen < 600) {
-      continue;
+    if (textLen >= 600) {
+      chosen = candidate;
+      break;
     }
-    chosen = candidate;
-    break;
+    if (textLen > fallbackTextLen) {
+      fallback = candidate;
+      fallbackTextLen = textLen;
+    }
   }
+  chosen ??= fallback;
   if (!chosen) {
     return;
   }

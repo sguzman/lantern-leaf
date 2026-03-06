@@ -42,6 +42,7 @@ const BROWSER_TAB_MANIFEST_FILE: &str = "browser-tab.lltab";
 const BROWSER_TAB_HTML_FILE: &str = "snapshot.html";
 const BROWSER_TAB_TEXT_FILE: &str = "snapshot.txt";
 const BROWSER_TAB_ASSETS_SUBDIR: &str = "assets";
+const BROWSER_TAB_MANIFEST_VERSION: u32 = 2;
 const BROWSER_TAB_FETCH_USER_AGENT: &str =
     "LanternLeaf/2026.03 (browser-tab-import; local desktop reader)";
 static CONTENT_DIGEST_CACHE: OnceLock<Mutex<HashMap<PathBuf, SourceDigestEntry>>> = OnceLock::new();
@@ -108,6 +109,8 @@ pub struct RecentBook {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BrowserTabSourceManifest {
+    #[serde(default)]
+    pub manifest_version: u32,
     pub tab_id: u64,
     pub window_id: Option<u64>,
     pub title: String,
@@ -628,6 +631,7 @@ pub fn persist_browser_tab_source(
     fs::write(&text_path, text).map_err(|err| err.to_string())?;
 
     let manifest = BrowserTabSourceManifest {
+        manifest_version: BROWSER_TAB_MANIFEST_VERSION,
         tab_id: snapshot.tab_id,
         window_id: tab.map(|value| value.window_id),
         title: snapshot.title.trim().to_string(),
@@ -716,11 +720,19 @@ fn focus_browser_tab_html(raw_html: &str, page_url: &str) -> String {
         ".post-content",
         ".article-content",
     ];
-    let focused = candidate_selectors
+    let candidates = candidate_selectors
         .iter()
         .filter_map(|selector| select_browser_tab_candidate(&document, selector))
+        .collect::<Vec<_>>();
+    let focused = candidates
+        .iter()
         .find(|candidate| candidate.text_len >= 600)
-        .map(|candidate| candidate.html)
+        .or_else(|| {
+            candidates
+                .iter()
+                .max_by_key(|candidate| candidate.text_len)
+        })
+        .map(|candidate| candidate.html.clone())
         .unwrap_or_else(|| raw_html.to_string());
 
     let mut classes = Vec::<String>::new();
@@ -1136,6 +1148,7 @@ pub fn load_browser_tab_manifest(source_path: &Path) -> Option<BrowserTabSourceM
     let manifest = toml::from_str::<BrowserTabSourceManifest>(&raw).ok()?;
     debug!(
         path = %source_path.display(),
+        manifest_version = manifest.manifest_version,
         tab_id = manifest.tab_id,
         url = %manifest.url,
         "Loaded browser-tab manifest"
@@ -1146,7 +1159,7 @@ pub fn load_browser_tab_manifest(source_path: &Path) -> Option<BrowserTabSourceM
 pub fn rehydrate_browser_tab_manifest_assets(source_path: &Path) -> Result<(), String> {
     let mut manifest = load_browser_tab_manifest(source_path)
         .ok_or_else(|| format!("Not a browser-tab manifest: {}", source_path.display()))?;
-    if !manifest.assets.is_empty() {
+    if manifest.manifest_version >= BROWSER_TAB_MANIFEST_VERSION && !manifest.assets.is_empty() {
         return Ok(());
     }
     let html = fs::read_to_string(&manifest.html_path).map_err(|err| err.to_string())?;
@@ -1158,15 +1171,17 @@ pub fn rehydrate_browser_tab_manifest_assets(source_path: &Path) -> Result<(), S
         .map_err(|err| err.to_string())?;
     fs::write(&manifest.html_path, prepared.html).map_err(|err| err.to_string())?;
     fs::write(&manifest.text_path, prepared.text).map_err(|err| err.to_string())?;
+    manifest.manifest_version = BROWSER_TAB_MANIFEST_VERSION;
     manifest.asset_dir = (!prepared.assets.is_empty()).then_some(asset_dir);
     manifest.assets = prepared.assets;
     let raw = toml::to_string(&manifest).map_err(|err| err.to_string())?;
     fs::write(source_path, raw).map_err(|err| err.to_string())?;
     info!(
         path = %source_path.display(),
+        manifest_version = manifest.manifest_version,
         asset_count = manifest.assets.len(),
         url = %manifest.url,
-        "Rehydrated browser-tab cache assets from stored snapshot"
+        "Rehydrated browser-tab cache bundle from stored snapshot"
     );
     Ok(())
 }
@@ -1983,6 +1998,7 @@ sentence_text = "legacy bookmark entry"
         fs::write(&text_path, "hello").expect("write text");
 
         let manifest = BrowserTabSourceManifest {
+            manifest_version: BROWSER_TAB_MANIFEST_VERSION,
             tab_id: 1,
             window_id: Some(1),
             title: "Example".to_string(),
@@ -2012,5 +2028,69 @@ sentence_text = "legacy bookmark entry"
 
         let _ = fs::remove_dir_all(&dir);
         server.join().expect("join server");
+    }
+
+    #[test]
+    fn browser_tab_rehydrate_upgrades_legacy_manifest_text_even_with_existing_assets() {
+        let dir = cache_root().join("test-sources").join(format!(
+            "browser-tab-upgrade-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&dir).expect("create dir");
+        let html_path = dir.join("snapshot.html");
+        let text_path = dir.join("snapshot.txt");
+        let manifest_path = dir.join("browser-tab.lltab");
+        let asset_dir = dir.join("assets");
+        fs::create_dir_all(&asset_dir).expect("create asset dir");
+        let asset_path = asset_dir.join("placeholder.png");
+        fs::write(&asset_path, [137_u8, 80, 78, 71, 13, 10, 26, 10]).expect("write asset");
+        fs::write(
+            &html_path,
+            r#"<html><head><title>Example</title></head><body><nav>Site menu</nav><article><p>First article sentence.</p><p>Second article sentence.</p></article></body></html>"#,
+        )
+        .expect("write html");
+        fs::write(&text_path, "Site menu\nLegacy text").expect("write text");
+
+        let manifest = BrowserTabSourceManifest {
+            manifest_version: 0,
+            tab_id: 2,
+            window_id: Some(1),
+            title: "Example".to_string(),
+            url: "https://example.com/article".to_string(),
+            lang: Some("en".to_string()),
+            ready_state: Some("complete".to_string()),
+            captured_at: None,
+            favicon_url: None,
+            active: Some(true),
+            audible: Some(false),
+            pinned: Some(false),
+            html_path: html_path.clone(),
+            text_path: text_path.clone(),
+            asset_dir: Some(asset_dir.clone()),
+            assets: vec![BrowserTabAsset {
+                raw_path: "https://example.com/placeholder.png".to_string(),
+                local_path: asset_path,
+                kind: "image".to_string(),
+            }],
+            html_truncated: false,
+            text_truncated: false,
+        };
+        fs::write(&manifest_path, toml::to_string(&manifest).expect("manifest toml"))
+            .expect("write manifest");
+
+        rehydrate_browser_tab_manifest_assets(&manifest_path).expect("rehydrate");
+        let hydrated = load_browser_tab_manifest(&manifest_path).expect("reload manifest");
+        let hydrated_text = fs::read_to_string(&text_path).expect("hydrated text");
+        let hydrated_html = fs::read_to_string(&html_path).expect("hydrated html");
+
+        assert_eq!(hydrated.manifest_version, BROWSER_TAB_MANIFEST_VERSION);
+        assert!(!hydrated_text.contains("Site menu"));
+        assert!(hydrated_text.contains("First article sentence."));
+        assert!(hydrated_html.contains("data-ll-browser-tab-focused=\"1\""));
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

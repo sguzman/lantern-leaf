@@ -1135,6 +1135,8 @@ export const ReaderShell = memo(function ReaderShell({
     isPrettyTextMode && reader.pretty_kind === "markdown" && Boolean(reader.reading_markdown_page);
   const hasPrettyHtml =
     isPrettyTextMode && reader.pretty_kind === "html" && Boolean(reader.reading_html_page);
+  const isBrowserTabPrettyHtml =
+    hasPrettyHtml && reader.source_path.toLowerCase().endsWith(".lltab");
   const prettyUnavailable = isPrettyTextMode && !hasPrettyMarkdown && !hasPrettyHtml;
   const showSentenceList = reader.text_only_mode || prettyUnavailable;
   const ttsSentenceLabel = useMemo(
@@ -1511,20 +1513,11 @@ export const ReaderShell = memo(function ReaderShell({
               >
                 <Stack spacing={0.75}>
                   {hasPrettyHtml ? (
-                    <div
-                      style={{
-                        maxWidth: "72ch",
-                        marginInline: "auto",
-                        padding: "10px 12px",
-                        border: "1px solid rgba(148, 163, 184, 0.36)",
-                        borderRadius: 12,
-                        background: "rgba(255, 255, 255, 0.82)",
-                        boxShadow: "0 1px 2px rgba(15, 23, 42, 0.06)"
-                      }}
-                    >
+                    <div style={{ width: "100%" }}>
                       <div
                         className="reader-native-html-content"
                         data-testid="reader-pretty-native-html"
+                        data-reader-browser-tab={isBrowserTabPrettyHtml ? "1" : "0"}
                         onClick={handlePrettyContentClick}
                         dangerouslySetInnerHTML={{ __html: renderedNativeHtml }}
                       />

@@ -72,6 +72,8 @@ body {
 
 .reader-native-html-content {
   display: block;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 .reader-native-html-content img {
@@ -79,11 +81,12 @@ body {
   height: auto;
 }
 
-.reader-native-html-content .reader-pretty-highlight,
+.reader-native-html-content [data-ll-html-anchor].reader-pretty-highlight,
 .reader-markdown-content .reader-pretty-highlight {
-  background: var(--reader-highlight-bg);
-  outline: 1px solid var(--reader-highlight-border);
+  background: var(--reader-highlight-bg) !important;
+  outline: 2px solid var(--reader-highlight-border) !important;
   border-radius: 0.2rem;
+  scroll-margin-block: 24vh;
 }
 
 .reader-md-missing-image {
