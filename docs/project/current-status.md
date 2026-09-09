@@ -136,7 +136,7 @@ Gate 3 native PDF visual stability begins only after Gate 2 real-desktop signoff
 
 ## Caliberate / Calibre library integration
 
-**A7.1 ACCEPTED — FINAL REAL-DESKTOP PRETTY HIGHLIGHT/FOLLOW SIGNOFF PENDING**
+**GOAL 0008 A8 REOPENED — AUDIO WORKS; SOURCE IDENTITY + AUDIO-BOUNDARY UI SYNC REQUIRED**
 
 Accepted integration:
 
@@ -194,3 +194,8 @@ The first A7 implementation is not integrated. It correctly replaces text-keyed/
 ### A7/A7.1 accepted correction
 
 A7/A7.1 is integrated. Native pretty TTS synchronization now uses ordered canonical display-sentence targets, refuses proportional/distant HTML fallback for unmapped spoken sentences, carries durable source-aware follow targets, derives automatic follow only from canonical cursor transitions, supports explicit Jump-to-highlight re-arming, and retains bounded variable-height virtualization. Windows CI run `34403241270` is green. The remaining Gate 2.5 evidence is one sustained real-desktop highlight/viewport-follow run on the same large EPUB.
+
+
+### A8 real-desktop diagnosis
+
+A7/A7.1 did not solve real spoken-sentence synchronization. Windows audio remains correct and native performance remains good, but pretty highlight/follow is effectively absent; text-only only partially follows and lags. Director inspection finds no egui repaint scheduling for background TTS progress, duration-timer-based cursor advancement instead of real audio sentence boundaries, and native EPUB identity still reconstructed after ingestion by matching independently transformed `html2text` and pretty-block streams. A8 moves canonical sentence identity into source ingestion and carries it through audio and rendering, with semantic audio-boundary events and active-TTS repaint scheduling.

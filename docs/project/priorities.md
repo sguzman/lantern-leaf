@@ -27,7 +27,7 @@ These priorities are ordered. They may be revised by ChatGPT/director as verifie
 - click-to-play;
 - bookmarks/config/search/navigation.
 
-## P2.5 — Connect LanternLeaf to Caliberate as a first-class library service — A7.1 ACCEPTED, FINAL HIGHLIGHT/FOLLOW SIGNOFF
+## P2.5 — Connect LanternLeaf to Caliberate as a first-class library service — A8 SOURCE-BORN IDENTITY + AUDIO-BOUNDARY SYNC
 
 - use Caliberate's versioned HTTP/JSON API rather than direct database coupling;
 - default local provider target `http://127.0.0.1:8181`;
@@ -137,3 +137,13 @@ A7/A7.1 accepted:
 - explicit Jump-to-highlight is repaired;
 - 128-transition production-rule coverage plus large alignment/virtualization regressions are green;
 - final requirement: sustained real-desktop audible-sentence highlight and viewport-follow verification on the same large EPUB.
+
+
+A8 correction priority:
+- preserve fast/snappy native EPUB rendering and working Windows audio/voices;
+- create canonical sentence identity once during EPUB/native HTML ingestion and carry it into TTS and pretty provenance;
+- make actual audio sentence-start boundaries authoritative for visual cursor transitions;
+- add active-TTS egui repaint scheduling so UI progress does not depend on user input;
+- stop using native EPUB render-time sentence-string alignment as the production identity mechanism;
+- validate through a real multi-chapter EPUB ingestion fixture plus 100+ simulated audio-boundary transitions;
+- no human QA until A8 director acceptance.
