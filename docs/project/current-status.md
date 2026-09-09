@@ -136,7 +136,7 @@ Gate 3 native PDF visual stability begins only after Gate 2 real-desktop signoff
 
 ## Caliberate / Calibre library integration
 
-**GOAL 0008 A8 REOPENED — AUDIO WORKS; SOURCE IDENTITY + AUDIO-BOUNDARY UI SYNC REQUIRED**
+**GOAL 0008 A8.1 — AUDIO BOUNDARY/REPAINT GOOD; TRUE SOURCE-BORN PROVENANCE STILL REQUIRED**
 
 Accepted integration:
 
@@ -199,3 +199,8 @@ A7/A7.1 is integrated. Native pretty TTS synchronization now uses ordered canoni
 ### A8 real-desktop diagnosis
 
 A7/A7.1 did not solve real spoken-sentence synchronization. Windows audio remains correct and native performance remains good, but pretty highlight/follow is effectively absent; text-only only partially follows and lags. Director inspection finds no egui repaint scheduling for background TTS progress, duration-timer-based cursor advancement instead of real audio sentence boundaries, and native EPUB identity still reconstructed after ingestion by matching independently transformed `html2text` and pretty-block streams. A8 moves canonical sentence identity into source ingestion and carries it through audio and rendering, with semantic audio-boundary events and active-TTS repaint scheduling.
+
+
+### A8.1 director review
+
+The first A8 branch is not integrated. Rodio first-sample markers, semantic SentenceStarted events, removal of duration-timer cursor advancement, and active egui repaint scheduling are good. The central source-identity requirement was not met: EPUB provenance is still assigned by re-extracting block text and post-hoc matching it against a separately generated canonical sentence stream, with no neutral structured provenance model. The real EPUB and simulated-boundary tests also do not satisfy the required end-to-end/window/control coverage. A8.1 preserves the good A8 runtime work and replaces the fake provenance layer with one-pass structured extraction plus explicit canonical IDs on audio boundaries.
