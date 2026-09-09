@@ -1995,3 +1995,299 @@ Required observation:
 8. switching text-only <-> pretty during playback preserves the same highlighted canonical sentence.
 
 This is the first A8 human run. Do not request intermediate manual tests during implementation.
+
+
+## Director correction continuation — attempt A8.1: true source-born provenance and end-to-end boundary identity
+
+### Director decision on first A8 implementation
+
+**REJECTED. Do not integrate worker terminal head `0b5ede68f3ee7b207db6cd179ee79f02d53937a2` as-is.**
+
+Authoritative first-A8 implementation:
+
+`b60cfbbb3483f0f9e52491f9ee766e190b7d4f49`
+
+Authoritative Windows CI:
+
+`34411324619` — green.
+
+The first A8 implementation contains important correct work that A8.1 must preserve:
+
+- real Rodio sentence sources are wrapped with first-sample markers;
+- runtime visual progression no longer uses predicted-duration sleeps as the authoritative cursor clock;
+- semantic `SentenceStarted` events bypass generic Progress/StateChanged coalescing;
+- active TTS/command-in-flight state schedules egui repaint every ~24 ms;
+- A5/A6 native performance and Windows TTS behavior remain intact.
+
+However, the central A8 identity contract is not satisfied.
+
+### Rejection reason 1 — “source-born provenance” is still post-hoc string alignment
+
+Current `annotate_native_html_sentence_provenance` does:
+
+```text
+canonical_text -> split_sentences
+HTML regex over h1..h6/p/li/blockquote
+each block inner HTML -> html2text -> split_sentences
+normalize each local sentence
+search forward through canonical sentence strings
+inject data-ll-sentence-ids afterwards
+```
+
+For EPUB, `load_epub_source_content` still first produces:
+
+```text
+reading_html
+-> html2text whole document
+-> tts_text
+-> annotate_native_html_sentence_provenance(reading_html, tts_text)
+```
+
+So identity is not created once from the source. It is inferred later by comparing two independently transformed string streams, exactly the architecture A8 prohibited.
+
+Moving the aligner from egui into the loader does not make the identity source-born.
+
+A8.1 must remove this as the primary EPUB/native-HTML path.
+
+### Rejection reason 2 — no neutral structured provenance model was added
+
+`LoadedBook` still fundamentally exposes:
+
+- `tts_text`;
+- `reading_html`;
+- `reading_markdown`;
+- image metadata;
+
+with no first-class neutral canonical sentence/block provenance structure carrying IDs/ranges/chapter identity.
+
+Embedding guessed `data-ll-sentence-ids` attributes into HTML is not a substitute for the required core model.
+
+A8.1 must introduce a core/source representation, conceptually:
+
+```text
+StructuredDocument
+  blocks[]
+    block_id
+    chapter/spine identity
+    block kind
+    rich/plain text provenance
+    canonical_sentence_ids[]
+  sentences[]
+    CanonicalSentenceId
+    display_text
+    source block/span provenance
+```
+
+Exact types/names are implementation detail.
+
+The canonical display/TTS stream and pretty projection must both derive from this same representation.
+
+### Rejection reason 3 — native HTML is internally inconsistent
+
+The native `.html/.htm` source path currently builds canonical TTS text through Pandoc:
+
+```text
+tts_text = load_with_pandoc(path, "plain")
+```
+
+but `load_native_pretty_html` annotates HTML using a *different* independently generated `html2text` stream.
+
+Thus the injected sentence IDs for native HTML are not even guaranteed to refer to the actual canonical TTS sentence stream used by the session.
+
+A8.1 must unify native HTML ingestion under the same source-born structured extraction or explicitly scope direct provenance to EPUB while native HTML uses a clearly labeled degraded alignment fallback. It may not claim exact source-born identity while generating IDs from a different canonicalizer.
+
+### Rejection reason 4 — audio boundary callback does not carry the canonical identity it already prepared
+
+`PreparedSentence` now stores `display_idx`, but the real Rodio marker callback emits only an audio index:
+
+```text
+marker(audio_index)
+-> boundary_tx.send(plan_start_idx + audio_index)
+-> runtime reacquires ReaderSession
+-> apply_tts_audio_boundary(audio_idx)
+-> remap through the current mutable normalization plan
+```
+
+A8 required each prepared audio item to retain and carry its originating canonical display identity across the actual audio boundary.
+
+A8.1 should make the boundary payload explicit, e.g. conceptually:
+
+```text
+AudioSentenceBoundary {
+    request_id/context,
+    audio_idx,
+    canonical_display_id
+}
+```
+
+and derive it from the prepared item/plan at queue time.
+
+The audio callback remains tiny/nonblocking. It must not need to rediscover the canonical ID from a mutable current plan after the source has begun playing.
+
+Also ensure the marker fires only when an actual first sample is yielded; polling an empty source must not produce a false SentenceStarted boundary.
+
+### Rejection reason 5 — “real EPUB fixture” does not satisfy A8 fixture requirements
+
+The current generated EPUB fixture is valid and multi-spine, but it is too weak for the A8 synchronization contract.
+
+It currently has only a handful of sentences and does not include the required combination of:
+
+- enough sentences to cross multiple TTS plan/prepare windows;
+- nested inline markup splitting a sentence across spans;
+- HTML entities as source entities;
+- distant identical sentence duplicates with exact identity assertions;
+- image plus additional structured block variety such as quote/list;
+- end-to-end assertions that a representative canonical ID is the *same identity* through source structured provenance -> ReaderSession -> TTS audio item -> pretty projection.
+
+Current assertions largely prove that `data-ll-sentence-ids` exists and that some anchors exist. That can pass even when the IDs were produced by post-hoc matching.
+
+A8.1 must upgrade this fixture so the test would fail if any downstream string realignment were substituted for direct provenance.
+
+### Rejection reason 6 — the 128-boundary test is not the required runtime/audio integration test
+
+The current test `simulated_sentence_boundaries_drive_canonical_cursor_for_128_items` directly calls:
+
+```rust
+session.apply_tts_audio_boundary(...)
+```
+
+over two separate 64-sentence pages.
+
+That proves the session setter works. It does not prove the TTS runtime's boundary channel, batching/window transitions, event publication, and playback-control semantics.
+
+The A8 contract required a deterministic simulated audio-boundary integration path with at least 100 boundaries plus:
+
+- pause freezes boundaries;
+- resume retains current ID until the next real boundary;
+- repeat replays the same canonical ID;
+- Next starts the selected next canonical ID;
+- Prev starts the selected previous canonical ID;
+- crossing TTS prepare/normalization windows does not alter identity;
+- text-only and pretty consume the same canonical ID.
+
+A8.1 must implement that production-path test using the actual runtime boundary message handling, without wall-clock sleeps as the semantic driver.
+
+### A8.1-A — one-pass structured extraction
+
+For EPUB, parse the chapter/spine HTML into an ordered structured representation once.
+
+During that traversal:
+
+1. preserve block/chapter order and rich span structure;
+2. build each block's canonical plain/display text;
+3. sentence-split that same block text in source order;
+4. assign CanonicalSentenceIds immediately;
+5. record source block + local text/span ranges;
+6. append the same sentence display text into the canonical session stream;
+7. preserve the same IDs in pretty block projection.
+
+Do not generate a separate whole-document `html2text` stream and then match block sentences back to it.
+
+If using html5ever/DOM traversal, the walker should own both text extraction and provenance. Regex matching of arbitrary nested HTML is not acceptable as the source-of-truth parser.
+
+### A8.1-B — preserve rich text while sharing canonical IDs
+
+The pretty renderer still needs formatting.
+
+The core structured representation should retain enough style/span/source information, or enough stable source offsets/block identity, that egui can reconstruct rich pretty blocks while preserving the same canonical sentence IDs.
+
+A sentence may span multiple inline elements:
+
+```html
+<p>The <em>same sentence</em> crosses <strong>several</strong> spans.</p>
+```
+
+That must still become one canonical sentence ID whose highlight range covers the correct visual text across those spans.
+
+### A8.1-C — explicit boundary identity
+
+Queue prepared audio with its canonical display ID.
+
+The first-sample marker must emit that identity directly. Runtime/session updates should validate that the boundary belongs to the active request/window, then set the canonical cursor from that ID.
+
+Do not use nearest/fallback audio->display remapping for a semantic SentenceStarted event.
+
+Normalization may map one display sentence to multiple audio sentences. In that case:
+
+- every audio item carries the same originating display ID;
+- repeated audio items for the same display ID do not visually advance;
+- only the first audio item carrying the next display ID causes the visual sentence transition.
+
+### A8.1-D — production-path simulated boundary driver
+
+Add a controllable simulated playback/boundary source.
+
+Tests must be able to say:
+
+```text
+emit boundary(item 0)
+assert canonical ID X
+pause
+attempt boundary(item 1)
+assert no transition while paused
+resume
+assert still X
+emit boundary(item 1)
+assert canonical ID Y
+...
+```
+
+Use this through the runtime boundary path, not by directly calling the session method.
+
+Exercise at least 128 boundaries across more than one bounded TTS window in the same logical EPUB page/stream.
+
+### A8.1-E — stronger real EPUB fixture
+
+Upgrade the project-owned EPUB fixture to include:
+
+- at least 2 spine chapters;
+- >128 canonical sentences, enough to cross multiple 64-sentence normalization windows and multiple 8-sentence prepare batches;
+- a sentence split across nested inline tags;
+- literal source entities such as `&amp;`, `&nbsp;`, smart entities where valid;
+- two or more identical full sentences separated by many blocks/chapter distance;
+- headings, list items, blockquote, image;
+- whitespace/newline variations.
+
+Assert:
+
+1. exact expected canonical sentence count/order;
+2. each sampled CanonicalSentenceId has expected chapter/block/range provenance;
+3. distant duplicate sentences have different IDs and different source targets;
+4. canonical TTS/display text was produced from the structured document itself;
+5. TTS audio-plan items carry those same sampled IDs;
+6. pretty projection carries the same sampled IDs;
+7. no render-time `align_canonical_sentences` call is needed for native EPUB;
+8. coverage is complete for the fixture.
+
+### A8.1-F — retain the good A8 pieces
+
+Preserve and revalidate:
+
+- Rodio first-sample boundary mechanism;
+- no duration-sleep cursor advancement;
+- SentenceStarted event kind;
+- semantic events not generically coalesced;
+- 24 ms active-TTS repaint scheduling;
+- A7 durable source-aware follow state and bounded variable-height renderer;
+- A5/A5.1 snapshot-free hot paths and canonical session authority;
+- A6 Windows TTS/voice behavior;
+- Caliberate and legacy Calibre behavior.
+
+### A8.1 acceptance gates
+
+1. EPUB canonical sentence identity is created directly during one structured source traversal, not by comparing canonical strings to re-extracted block strings.
+2. A neutral core structured sentence/block provenance model exists and is used by both TTS/session and pretty projection.
+3. Native EPUB production pretty sync requires no post-hoc string aligner.
+4. Prepared audio items and first-sample boundary messages carry canonical display ID explicitly.
+5. SentenceStarted updates do not rely on mutable-plan nearest/fallback remapping.
+6. A real >128-sentence multi-chapter EPUB fixture proves direct identity continuity through ingestion -> session -> TTS item -> pretty target.
+7. Runtime-level simulated boundary test proves 128+ boundaries plus pause/resume/repeat/next/prev/window behavior.
+8. Active-TTS egui repaint policy and A8 audio-marker behavior remain green.
+9. Full workspace tests and Windows CI/Windows TTS probes pass.
+10. No human QA until director acceptance.
+
+### Human QA
+
+No human QA during A8.1.
+
+After director acceptance, repeat the A8 real-book synchronization test. No additional setup or manual ceremony.

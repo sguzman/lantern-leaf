@@ -27,7 +27,7 @@ These priorities are ordered. They may be revised by ChatGPT/director as verifie
 - click-to-play;
 - bookmarks/config/search/navigation.
 
-## P2.5 — Connect LanternLeaf to Caliberate as a first-class library service — A8 SOURCE-BORN IDENTITY + AUDIO-BOUNDARY SYNC
+## P2.5 — Connect LanternLeaf to Caliberate as a first-class library service — A8.1 TRUE SOURCE PROVENANCE
 
 - use Caliberate's versioned HTTP/JSON API rather than direct database coupling;
 - default local provider target `http://127.0.0.1:8181`;
@@ -147,3 +147,13 @@ A8 correction priority:
 - stop using native EPUB render-time sentence-string alignment as the production identity mechanism;
 - validate through a real multi-chapter EPUB ingestion fixture plus 100+ simulated audio-boundary transitions;
 - no human QA until A8 director acceptance.
+
+
+A8.1 correction priority:
+- preserve first-sample Rodio markers, semantic SentenceStarted events, no duration-timer cursor stepping, and 24 ms active-TTS repaint scheduling;
+- replace post-hoc regex/html2text sentence matching with one-pass structured EPUB extraction that creates canonical IDs directly;
+- add a neutral structured sentence/block provenance model shared by session/TTS/pretty;
+- carry canonical display ID explicitly in prepared audio and boundary messages;
+- upgrade the real EPUB fixture to >128 sentences with nested spans/entities/distant duplicates/image/quote and exact identity assertions;
+- add runtime-level controllable 128+ boundary tests with pause/resume/repeat/next/prev/window semantics;
+- no human QA until A8.1 director acceptance.
