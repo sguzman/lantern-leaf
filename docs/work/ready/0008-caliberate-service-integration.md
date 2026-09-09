@@ -1666,3 +1666,332 @@ No human QA during A7.1.
 7. First A7 canonical mapping/no-proportional-fallback/virtualization work remains intact.
 8. Windows CI again passes normal workspace tests and existing Windows TTS/QA probes.
 9. No human QA until director acceptance.
+
+
+## Director correction continuation — attempt A8: source-born sentence identity and audio-boundary-driven UI synchronization
+
+### Triggering real-desktop evidence
+
+A7/A7.1 failed real-desktop signoff on the same large Caliberate EPUB.
+
+Human observation:
+
+- Windows audio is now reliable and sounds correct.
+- Pretty view has effectively no working spoken-sentence highlight or synchronization.
+- Explicit Jump-to-highlight does not visibly recover the pretty view.
+- Text-only mode is the closest to functioning: it sometimes follows, but the visible state lags audible speech by multiple lines before catching up.
+
+This disproves the assumption that post-hoc canonical->pretty alignment plus cursor-transition follow state was sufficient.
+
+### Director diagnosis
+
+#### 1. egui has no TTS-driven repaint cadence
+
+Production `eframe::App::update` calls `handle_tts_runtime_events()`, but the repository contains no `request_repaint` / `request_repaint_after` path for active TTS.
+
+The TTS runtime emits events from background threads. Without an egui wake/repaint contract, the UI is allowed to remain visually stale until unrelated input/window activity causes another frame.
+
+This directly explains why text-only can trail audible speech and then catch up several lines later.
+
+#### 2. The visual cursor is timed by predicted durations, not actual audio boundaries
+
+The real TTS path queues a batch of sentence sources into one Rodio sink.
+
+The runtime then iterates:
+
+```text
+for predicted sentence duration:
+    sleep/poll until duration expires
+    apply TtsSeekNext
+    emit Progress/cursor event
+```
+
+The cursor is therefore advanced according to WAV duration bookkeeping and thread timing, not an event emitted when Rodio actually begins rendering the next sentence.
+
+This creates unavoidable drift potential from:
+
+- device/output buffering;
+- decoder/sink scheduling;
+- pause/resume timing;
+- time stretching;
+- OS audio behavior;
+- thread scheduling.
+
+Predicted durations may remain useful for estimates, but they cannot be the authoritative sentence-start clock.
+
+#### 3. A7 still reconstructs EPUB sentence identity after ingestion
+
+Current native EPUB loading does:
+
+```text
+EPUB chapter HTML
+   ├─ preserve as reading_html
+   └─ independently pass whole HTML through html2text -> tts_text
+```
+
+Later the egui pretty renderer independently parses `reading_html` into `PrettyBlock` values.
+
+A7 then tries to infer identity afterward:
+
+```text
+canonical sentences from tts_text
+        vs.
+sentences split from pretty block text
+        -> normalized exact match
+        -> bounded lookahead (12)
+```
+
+This is structurally brittle even though duplicate occurrence handling is better than the pre-A7 HashMap.
+
+A sufficiently large divergence between html2text's stream and the pretty parser's stream can leave `pretty_cursor` stranded. All later canonical sentences may then remain unmapped. That is fully consistent with a real EPUB showing no practical pretty highlight at all.
+
+### A8 architectural rule
+
+**For EPUB/native HTML, sentence identity must be created once from the source and carried through the complete pipeline. Do not rediscover sentence identity in the renderer.**
+
+Target lineage:
+
+```text
+EPUB / native HTML
+        |
+        v
+shared structured text extraction
+        |
+        +-- CanonicalSentenceId 0
+        |       text / provenance
+        |       source block identity
+        |       source-local text range
+        |
+        +-- CanonicalSentenceId 1
+        |       ...
+        |
+        +-- structured reading blocks carrying same IDs
+        |
+        +-- TTS display/audio mapping carrying same IDs
+        |
+        +-- pretty renderer highlights same IDs
+        |
+        +-- audio stream emits SentenceStarted(ID)
+        |
+        +-- egui wakes and renders that exact ID
+```
+
+Text may still be normalized for synthesis. Audio windows may still split/transform sentences. None of those transformations may erase the canonical display sentence identity.
+
+### A8-A — source-born structured sentence provenance for EPUB/native HTML
+
+Extend the core loading/session model with a neutral structured sentence/provenance representation.
+
+Names are implementation detail, but conceptually each canonical display sentence needs:
+
+```text
+CanonicalSentenceId
+text
+source/chapter identity
+stable structured block identity
+local text range / span provenance when representable
+```
+
+Requirements:
+
+- build this representation during EPUB/native HTML ingestion, not in egui;
+- use one ordered structured extraction as the source for both canonical display/TTS text and pretty rendering provenance;
+- preserve chapter order;
+- preserve repeated sentence occurrences as distinct IDs;
+- preserve enough span/block information to highlight the correct occurrence inside rich text;
+- neutral/core data must not depend on egui types;
+- pretty UI may adapt neutral structured blocks/provenance into egui `PrettyBlock`/LayoutJob data;
+- TTS normalization may produce one-or-more audio sentences for a canonical display sentence, but each audio item retains its originating canonical display ID.
+
+For native EPUB, A8 acceptance forbids using `align_canonical_sentences` as the primary production mapping path. The renderer should receive source-born provenance directly.
+
+A7's aligner may remain only as an explicit degraded fallback for formats that genuinely have independent dual-source transformations, with diagnostics identifying that fallback.
+
+### A8-B — make mapping coverage observable
+
+On source load / pretty projection, record:
+
+- canonical sentence count;
+- structured sentence provenance count;
+- directly mappable pretty sentence count;
+- unmapped count;
+- coverage ratio;
+- duplicate occurrence count if useful;
+- degraded/fallback mapping usage.
+
+For native EPUB, near-zero/low direct coverage must never silently look like “no highlight.”
+
+If coverage is below a defensible threshold, surface a concise native diagnostic/status warning.
+
+Do not fix low coverage by remote proportional jumps.
+
+### A8-C — audio-boundary sentence events
+
+Replace predicted-duration cursor advancement as the authoritative synchronization mechanism.
+
+The audio playback layer must emit a semantic event at the real sentence boundary, conceptually:
+
+```text
+SentenceStarted {
+    request_id,
+    canonical_display_id,
+    audio_item_index,
+    page/window metadata
+}
+```
+
+Requirements:
+
+- event must originate from the actual playback source/sink boundary, e.g. when the first sample of the sentence source is consumed, or an equivalent reliable audio-boundary mechanism;
+- do not lock ReaderSession or perform UI work on the audio callback/thread;
+- callback/marker should only emit a small nonblocking event/message;
+- runtime worker receives the boundary event and updates the canonical ReaderSession cursor;
+- visual cursor transition is emitted immediately from that authoritative boundary;
+- predicted durations remain only for estimates/latency diagnostics/fallback monitoring, not sentence identity timing;
+- pause must stop boundary progression;
+- resume must not synthesize a fake sentence transition;
+- Repeat/Next/Prev must establish the correct next boundary identity;
+- batch prefetching remains allowed.
+
+If Rodio does not expose a suitable boundary callback directly, wrapping each queued sentence source with a first-sample marker or inserting a zero-duration marker source is acceptable. Do not poll elapsed time as the primary clock.
+
+### A8-D — do not coalesce semantic sentence-start events away
+
+`TtsEventBatcher` currently coalesces `Progress` / `StateChanged` events by request ID.
+
+A semantic sentence-start event must have explicit handling:
+
+- it may not be silently replaced by unrelated progress/state traffic;
+- the UI must be able to obtain the latest actually audible canonical sentence;
+- if multiple starts occur before one frame, stale already-finished starts may be collapsed to the newest **only under an explicit cursor-semantic rule**, not by generic event-kind coalescing;
+- diagnostics should count skipped/coalesced sentence-start transitions if this ever happens.
+
+### A8-E — egui repaint contract during active TTS
+
+Make native UI updates independent of mouse/keyboard/window activity.
+
+At minimum:
+
+- while TTS is active or a TTS command is in flight, egui must schedule repaint often enough to process sentence-start events promptly;
+- a bounded `ctx.request_repaint_after(...)` policy in native egui is acceptable;
+- target should be on the order of 16–33 ms during active playback, not a permanent busy loop;
+- idle reader should return to event-driven/low-work rendering;
+- the repaint policy itself is lightweight and does not authorize heavy work on the GUI thread.
+
+Add a pure/testable policy helper where practical, proving:
+
+- active Playing -> repaint scheduled;
+- command-start race before first Playing event -> repaint scheduled;
+- Paused/Idle with no pending operation -> no continuous repaint.
+
+### A8-F — single canonical ID across text-only and pretty
+
+Text-only and pretty modes must consume the same current canonical display ID.
+
+Requirements:
+
+- text-only highlight changes on the audio sentence-start event, not on a duration timer;
+- pretty highlight consumes the same ID;
+- switching pretty <-> text-only while audio is playing must show the same canonical display sentence;
+- no separate “audio index as UI index” fallback;
+- when a normalized display sentence expands to multiple audio items, visual highlight remains on that canonical display ID until the first audio item for the next canonical ID actually starts.
+
+### A8-G — real ingestion regression, not synthetic alignment only
+
+A8 automated evidence must include a project-owned **valid EPUB fixture** that travels through the actual production ingestion path.
+
+Fixture requirements:
+
+- multiple EPUB chapters/spine items;
+- nested inline markup splitting words/sentences across spans;
+- headings;
+- repeated identical sentences at distant positions;
+- HTML entities;
+- whitespace/newline differences;
+- at least one image/list/quote or other structured block;
+- enough sentences to cross multiple TTS prepare windows.
+
+Test pipeline:
+
+```text
+valid EPUB bytes
+-> EpubDoc/native ingestion
+-> structured canonical sentence provenance
+-> ReaderSession
+-> TTS plan/audio-item IDs
+-> pretty projection IDs
+```
+
+Assert exact identity continuity for a representative sequence, including distant duplicates.
+
+Keep the large 10k+/1.5k structural performance regressions, but they do not substitute for this real EPUB ingestion test.
+
+### A8-H — simulated audio-boundary integration test
+
+Add a deterministic simulated playback source capable of emitting explicit sentence-start boundaries without sleeping wall-clock time.
+
+Prove at least 100 sequential boundaries:
+
+- canonical session highlight advances exactly once per boundary;
+- text-only projection equals boundary canonical ID;
+- pretty projection resolves the same canonical ID;
+- no duration-based TtsSeekNext occurs independently;
+- pause freezes progression;
+- resume continues at the same current ID until next real boundary;
+- Repeat replays same canonical ID;
+- Next/Prev start the selected canonical ID;
+- batch/window boundary does not alter identity.
+
+### A8-I — preserve accepted performance/backend work
+
+Preserve:
+
+- fast native EPUB opening;
+- A5 bounded native pretty rendering and Arc-backed state;
+- A5.1 single canonical ReaderSession;
+- snapshot-free TTS/persistence hot paths;
+- A6 Windows backend and voice switching;
+- Caliberate/legacy Calibre provider behavior;
+- existing Piper support as a backend even though interactive Windows-QA Piper switching remains deferred;
+- PDF work remains out of scope.
+
+Do not:
+
+- reintroduce whole-book egui layout;
+- put heavy work on the GUI thread;
+- use WebView/Tauri;
+- use proportional HTML anchors for spoken-sentence sync;
+- merely increase A7's alignment lookahead;
+- merely shorten the duration polling interval;
+- treat `request_repaint_after` alone as the complete fix.
+
+### A8 acceptance gates
+
+1. Native EPUB sentence identity is source-born and shared through core ingestion, TTS, and pretty provenance.
+2. Native EPUB production pretty sync does not depend on render-time canonical sentence string alignment.
+3. TTS visual cursor advances from actual audio sentence-start boundaries, not predicted-duration sleep completion.
+4. Semantic sentence-start events are not lost to generic event coalescing.
+5. egui repaint scheduling processes active TTS updates without user input.
+6. Text-only and pretty consume the same canonical display sentence ID.
+7. Valid multi-chapter EPUB fixture proves identity across real ingestion, duplicates, entities, nested markup, and multiple TTS windows.
+8. Simulated boundary test proves 100+ exact cursor transitions plus pause/resume/repeat/next/prev semantics.
+9. Existing A3-A7 performance/backend/provider regressions remain green.
+10. Windows CI passes normal workspace validation and Windows TTS probes.
+11. No human QA until director acceptance.
+
+### Human QA contract for A8
+
+After director acceptance only, use the same real EPUB.
+
+Required observation:
+
+1. start Windows TTS and do not touch mouse/keyboard for a sustained stretch;
+2. text-only highlight must update sentence-by-sentence without waiting for incidental UI activity;
+3. pretty view must visibly highlight the audible sentence;
+4. viewport follows that same sentence without random movement;
+5. Pause freezes the visible sentence;
+6. Resume does not jump until actual next sentence audio begins;
+7. Next/Prev/Repeat preserve exact visible/audible identity;
+8. switching text-only <-> pretty during playback preserves the same highlighted canonical sentence.
+
+This is the first A8 human run. Do not request intermediate manual tests during implementation.
