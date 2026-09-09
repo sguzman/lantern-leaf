@@ -260,6 +260,7 @@ pub struct ReaderSession {
     tts_text: String,
     reading_markdown: Option<String>,
     reading_html: Option<String>,
+    structured_document: Option<crate::epub_loader::StructuredDocument>,
     has_structured_markdown: bool,
     pdf_geometry_mode: Option<crate::epub_loader::PdfGeometryMode>,
     pdf_sync_strategy: Option<crate::epub_loader::PdfSyncStrategy>,
@@ -291,6 +292,10 @@ pub struct ReaderSession {
 }
 
 impl ReaderSession {
+    pub fn structured_document(&self) -> Option<&crate::epub_loader::StructuredDocument> {
+        self.structured_document.as_ref()
+    }
+
     /// Lightweight constructor for test-only sessions without IO.
     pub fn from_pages_for_test(
         source_path: PathBuf,
@@ -311,6 +316,7 @@ impl ReaderSession {
             tts_text,
             reading_markdown: None,
             reading_html: None,
+            structured_document: None,
             has_structured_markdown: false,
             pdf_geometry_mode: None,
             pdf_sync_strategy: None,
@@ -1345,6 +1351,35 @@ impl ReaderSession {
         if sentence_count == 0 {
             return Vec::new();
         }
+        if let Some(document) = self.structured_document.as_ref() {
+            let page_base = self
+                .page_sentence_counts
+                .iter()
+                .take(page_idx)
+                .sum::<usize>();
+            let mut anchors = vec![None; sentence_count];
+            for sentence in document
+                .sentences
+                .iter()
+                .filter(|sentence| sentence.canonical_display_id >= page_base)
+                .take(sentence_count)
+            {
+                let local_idx = sentence.canonical_display_id.saturating_sub(page_base);
+                if let Some(slot) = anchors.get_mut(local_idx) {
+                    *slot = Some(sentence.block_id);
+                }
+            }
+            let mapped = anchors.iter().filter(|value| value.is_some()).count();
+            tracing::debug!(
+                path = %self.source_path.display(),
+                page = page_idx + 1,
+                sentence_count,
+                mapped,
+                source = "structured-document-provenance",
+                "Using structured source sentence provenance"
+            );
+            return anchors;
+        }
         let has_native_html = self.config.native_html_pretty_enabled && self.reading_html.is_some();
         if !has_native_html
             && let Some(cached) =
@@ -2025,6 +2060,7 @@ mod tests {
             tts_text: pages.join("\n\n"),
             reading_markdown: None,
             reading_html: None,
+            structured_document: None,
             has_structured_markdown: false,
             pdf_geometry_mode: None,
             pdf_sync_strategy: None,

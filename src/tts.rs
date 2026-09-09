@@ -126,7 +126,29 @@ impl TtsEngine {
         speed: f32,
         volume: f32,
         start_paused: bool,
-        sentence_started: Option<Arc<dyn Fn(usize) + Send + Sync>>,
+        sentence_started: Option<Arc<dyn Fn(TtsSentenceBoundary) + Send + Sync>>,
+    ) -> Result<TtsPlayback> {
+        let ids: Vec<usize> = (0..files.len()).collect();
+        self.play_files_with_sentence_ids(
+            files,
+            &ids,
+            pause_after,
+            speed,
+            volume,
+            start_paused,
+            sentence_started,
+        )
+    }
+
+    pub fn play_files_with_sentence_ids(
+        &self,
+        files: &[PathBuf],
+        canonical_display_ids: &[usize],
+        pause_after: std::time::Duration,
+        speed: f32,
+        volume: f32,
+        start_paused: bool,
+        sentence_started: Option<Arc<dyn Fn(TtsSentenceBoundary) + Send + Sync>>,
     ) -> Result<TtsPlayback> {
         let (_stream, handle) = OutputStream::try_default().context("Opening audio output")?;
         let sink = Sink::try_new(&handle).context("Creating sink")?;
@@ -148,7 +170,13 @@ impl TtsEngine {
             speed,
             "Starting TTS playback"
         );
-        playback.append_files_with_sentence_starts(files, pause_after, speed, sentence_started)?;
+        playback.append_files_with_sentence_ids(
+            files,
+            canonical_display_ids,
+            pause_after,
+            speed,
+            sentence_started,
+        )?;
         if !start_paused {
             playback.play();
         }
@@ -374,6 +402,12 @@ pub struct TtsPlayback {
     sentence_durations: Vec<std::time::Duration>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TtsSentenceBoundary {
+    pub audio_idx: usize,
+    pub canonical_display_id: usize,
+}
+
 impl TtsPlayback {
     pub fn pause(&self) {
         debug!("Pausing playback");
@@ -412,7 +446,19 @@ impl TtsPlayback {
         files: &[PathBuf],
         pause_after: std::time::Duration,
         speed: f32,
-        sentence_started: Option<Arc<dyn Fn(usize) + Send + Sync>>,
+        sentence_started: Option<Arc<dyn Fn(TtsSentenceBoundary) + Send + Sync>>,
+    ) -> Result<Vec<std::time::Duration>> {
+        let ids: Vec<usize> = (0..files.len()).collect();
+        self.append_files_with_sentence_ids(files, &ids, pause_after, speed, sentence_started)
+    }
+
+    pub fn append_files_with_sentence_ids(
+        &mut self,
+        files: &[PathBuf],
+        canonical_display_ids: &[usize],
+        pause_after: std::time::Duration,
+        speed: f32,
+        sentence_started: Option<Arc<dyn Fn(TtsSentenceBoundary) + Send + Sync>>,
     ) -> Result<Vec<std::time::Duration>> {
         let speed = if speed <= f32::EPSILON { 1.0 } else { speed };
         let mut appended_durations = Vec::with_capacity(files.len());
@@ -427,6 +473,10 @@ impl TtsPlayback {
                 self.sink.append(SentenceStartSource::new(
                     source,
                     sentence_index,
+                    canonical_display_ids
+                        .get(sentence_index)
+                        .copied()
+                        .unwrap_or(sentence_index),
                     sentence_started.clone(),
                 ));
             } else {
@@ -443,6 +493,10 @@ impl TtsPlayback {
                 self.sink.append(SentenceStartSource::new(
                     buffer,
                     sentence_index,
+                    canonical_display_ids
+                        .get(sentence_index)
+                        .copied()
+                        .unwrap_or(sentence_index),
                     sentence_started.clone(),
                 ));
             }
@@ -468,18 +522,21 @@ impl TtsPlayback {
 struct SentenceStartSource<S> {
     inner: S,
     sentence_index: usize,
-    marker: Option<Arc<dyn Fn(usize) + Send + Sync>>,
+    canonical_display_id: usize,
+    marker: Option<Arc<dyn Fn(TtsSentenceBoundary) + Send + Sync>>,
 }
 
 impl<S> SentenceStartSource<S> {
     fn new(
         inner: S,
         sentence_index: usize,
-        marker: Option<Arc<dyn Fn(usize) + Send + Sync>>,
+        canonical_display_id: usize,
+        marker: Option<Arc<dyn Fn(TtsSentenceBoundary) + Send + Sync>>,
     ) -> Self {
         Self {
             inner,
             sentence_index,
+            canonical_display_id,
             marker,
         }
     }
@@ -493,10 +550,16 @@ where
     type Item = S::Item;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(marker) = self.marker.take() {
-            marker(self.sentence_index);
+        let item = self.inner.next();
+        if item.is_some()
+            && let Some(marker) = self.marker.take()
+        {
+            marker(TtsSentenceBoundary {
+                audio_idx: self.sentence_index,
+                canonical_display_id: self.canonical_display_id,
+            });
         }
-        self.inner.next()
+        item
     }
 }
 

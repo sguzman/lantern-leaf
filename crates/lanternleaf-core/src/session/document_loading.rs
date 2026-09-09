@@ -56,6 +56,7 @@ impl ReaderSession {
         }
         let reading_markdown = loaded.reading_markdown;
         let reading_html = loaded.reading_html;
+        let structured_document = loaded.structured_document;
         let has_structured_markdown = loaded.has_structured_markdown;
         let cached_pdf_sync = crate::cache::load_pdf_sync_meta(&source_path);
         let pdf_geometry_mode = loaded.pdf_geometry_mode.or_else(|| {
@@ -85,6 +86,7 @@ impl ReaderSession {
             tts_text: loaded.tts_text,
             reading_markdown,
             reading_html,
+            structured_document,
             has_structured_markdown,
             pdf_geometry_mode,
             pdf_sync_strategy,

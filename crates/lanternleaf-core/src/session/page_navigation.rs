@@ -139,11 +139,14 @@ impl ReaderSession {
         if !self.markdown_pages.is_empty() && self.markdown_pages.len() < self.pages.len() {
             self.markdown_pages.resize(self.pages.len(), String::new());
         }
-        self.raw_page_sentences = self
-            .pages
-            .iter()
-            .map(|page| text_utils::split_sentences(page))
-            .collect();
+        self.raw_page_sentences = if let Some(document) = self.structured_document.as_ref() {
+            structured_sentences_by_page(&self.pages, document)
+        } else {
+            self.pages
+                .iter()
+                .map(|page| text_utils::split_sentences(page))
+                .collect()
+        };
         self.page_sentence_counts = self.raw_page_sentences.iter().map(Vec::len).collect();
         self.sentence_anchor_maps = self
             .raw_page_sentences
@@ -311,4 +314,43 @@ impl ReaderSession {
             .map(Vec::len)
             .unwrap_or(0)
     }
+}
+
+fn structured_sentences_by_page(
+    pages: &[String],
+    document: &crate::epub_loader::StructuredDocument,
+) -> Vec<Vec<String>> {
+    let mut output = Vec::with_capacity(pages.len());
+    let mut cursor = 0usize;
+    for page in pages {
+        let normalized_page = page.split_whitespace().collect::<Vec<_>>().join(" ");
+        let mut normalized_cursor = 0usize;
+        let mut page_sentences = Vec::new();
+        while let Some(sentence) = document.sentences.get(cursor) {
+            let normalized_sentence = sentence
+                .display_text
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            let Some(offset) = normalized_page[normalized_cursor..].find(&normalized_sentence) else {
+                break;
+            };
+            normalized_cursor = normalized_cursor
+                .saturating_add(offset)
+                .saturating_add(normalized_sentence.len());
+            page_sentences.push(sentence.display_text.clone());
+            cursor = cursor.saturating_add(1);
+        }
+        output.push(page_sentences);
+    }
+    if cursor < document.sentences.len() {
+        if let Some(last) = output.last_mut() {
+            last.extend(
+                document.sentences[cursor..]
+                    .iter()
+                    .map(|sentence| sentence.display_text.clone()),
+            );
+        }
+    }
+    output
 }

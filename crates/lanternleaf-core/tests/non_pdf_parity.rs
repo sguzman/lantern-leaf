@@ -36,29 +36,37 @@ fn pandoc_available() -> bool {
 
 fn build_epub_fixture() -> PathBuf {
     let path = temp_path("epub");
-    let entries = [
-        ("mimetype", "application/epub+zip"),
+    let chapter_one_sentences = (0..70)
+        .map(|idx| format!("Chapter one sentence {idx} remains source-addressable."))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let chapter_two_sentences = (70..140)
+        .map(|idx| format!("Chapter two sentence {idx} remains source-addressable."))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let chapter1 = format!(
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>Chapter One</h1><p>EPUB alpha appears here. The <em>nested sentence crosses</em> <strong>inline spans</strong> safely.</p><p>Entities &amp; nonbreaking&nbsp;space stay in the source stream.</p><blockquote><p>The quoted structure remains one source block.</p></blockquote><ul><li>Native list item one.</li><li>Native list item two.</li></ul><img src=\"missing.png\" alt=\"fixture image\"/><p>The repeated distant sentence is identical.</p><p>{chapter_one_sentences}</p></body></html>"
+    );
+    let chapter2 = format!(
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>Chapter Two</h1><p>EPUB beta appears here. EPUB alpha appears again for search navigation.</p><p>{chapter_two_sentences}</p><p>The repeated distant sentence is identical.</p><blockquote><p>Another structured quote closes the second chapter.</p></blockquote></body></html>"
+    );
+    let entries: Vec<(&str, String)> = vec![
+        ("mimetype", "application/epub+zip".to_string()),
         (
             "META-INF/container.xml",
-            "<?xml version=\"1.0\"?><container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\"><rootfiles><rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles></container>",
+            "<?xml version=\"1.0\"?><container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\"><rootfiles><rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles></container>".to_string(),
         ),
         (
             "OEBPS/content.opf",
-            "<?xml version=\"1.0\"?><package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\" unique-identifier=\"uid\"><metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>LanternLeaf Fixture</dc:title><dc:language>en</dc:language><dc:identifier id=\"uid\">urn:lanternleaf:0006</dc:identifier></metadata><manifest><item id=\"c1\" href=\"chapter1.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"c2\" href=\"chapter2.xhtml\" media-type=\"application/xhtml+xml\"/></manifest><spine><itemref idref=\"c1\"/><itemref idref=\"c2\"/></spine></package>",
+            "<?xml version=\"1.0\"?><package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\" unique-identifier=\"uid\"><metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>LanternLeaf Fixture</dc:title><dc:language>en</dc:language><dc:identifier id=\"uid\">urn:lanternleaf:0006</dc:identifier></metadata><manifest><item id=\"c1\" href=\"chapter1.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"c2\" href=\"chapter2.xhtml\" media-type=\"application/xhtml+xml\"/></manifest><spine><itemref idref=\"c1\"/><itemref idref=\"c2\"/></spine></package>".to_string(),
         ),
-        (
-            "OEBPS/chapter1.xhtml",
-            "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>Chapter One</h1><p>EPUB alpha appears here. The first chapter has an internal link to chapter two.</p><p>The repeated search term appears in chapter one.</p><p>Unicode café remains readable.</p></body></html>",
-        ),
-        (
-            "OEBPS/chapter2.xhtml",
-            "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>Chapter Two</h1><p>EPUB beta appears here. EPUB alpha appears again for search navigation.</p><p>The repeated search term appears again.</p><ul><li>Native list item.</li></ul></body></html>",
-        ),
+        ("OEBPS/chapter1.xhtml", chapter1),
+        ("OEBPS/chapter2.xhtml", chapter2),
     ];
     let mut bytes = Vec::new();
     let mut central = Vec::new();
     let entry_count = entries.len();
-    for (name, content) in entries.iter().copied() {
+    for (name, content) in entries.iter() {
         let name = name.as_bytes();
         let data = content.as_bytes();
         let offset = bytes.len() as u32;
@@ -131,10 +139,41 @@ fn assert_session_contract(path: &Path, expected_kind: session::PrettyKind, conf
     let initial = reader.snapshot(session::PanelState::default(), &normalizer);
     assert_eq!(initial.pretty_kind, expected_kind);
     assert!(!initial.canonical_sentences.is_empty());
-    assert_eq!(
-        initial.canonical_sentences.len(),
-        text_utils::split_sentences(&initial.canonical_sentences.join(" ")).len()
-    );
+    let is_epub = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("epub"));
+    if expected_kind == session::PrettyKind::Html && is_epub {
+        let provenance = reader
+            .structured_document()
+            .expect("EPUB/native HTML must retain structured source provenance");
+        assert!(
+            provenance.sentences.len() > 128,
+            "the real EPUB fixture must cross multiple bounded TTS windows; got {}",
+            provenance.sentences.len()
+        );
+        assert_eq!(provenance.sentences.len(), initial.canonical_sentences.len());
+        assert_eq!(provenance.sentences[0].canonical_display_id, 0);
+        assert!(provenance.sentences.iter().any(|sentence| sentence.chapter_index == 1));
+        let duplicates = provenance
+            .sentences
+            .iter()
+            .filter(|sentence| sentence.display_text == "The repeated distant sentence is identical.")
+            .collect::<Vec<_>>();
+        assert_eq!(duplicates.len(), 2);
+        assert_ne!(duplicates[0].canonical_display_id, duplicates[1].canonical_display_id);
+        assert_ne!(duplicates[0].block_id, duplicates[1].block_id);
+        assert!(provenance.blocks.iter().any(|block| block.kind == "blockquote"));
+        assert!(provenance.blocks.iter().any(|block| block.kind == "img"));
+        assert!(provenance.blocks.iter().any(|block| block.kind == "li"));
+        assert!(!initial.reading_html_page.as_deref().unwrap_or_default().contains("data-ll-sentence-ids"));
+    }
+    if expected_kind != session::PrettyKind::Html {
+        assert_eq!(
+            initial.canonical_sentences.len(),
+            text_utils::split_sentences(&initial.canonical_sentences.join(" ")).len()
+        );
+    }
     assert_eq!(initial.sentence_anchor_map.len(), initial.sentences.len());
     assert_eq!(
         initial.page_sentence_counts.iter().sum::<usize>(),
@@ -158,13 +197,6 @@ fn assert_session_contract(path: &Path, expected_kind: session::PrettyKind, conf
             }
         }
         session::PrettyKind::Html => {
-            assert!(
-                initial
-                    .reading_html_page
-                    .as_deref()
-                    .is_some_and(|html| html.contains("data-ll-sentence-ids=")),
-                "native HTML must carry source-born sentence provenance"
-            );
             assert!(
                 initial.sentence_anchor_map.iter().any(Option::is_some),
                 "source-born HTML provenance must produce observable anchor coverage"
@@ -288,14 +320,21 @@ fn representative_epub_builder_is_deterministic_and_loadable() {
     if pandoc_available() {
         let loaded = lanternleaf_core::epub_loader::load_book_content(&first).unwrap();
         assert!(loaded.tts_text.contains("EPUB alpha"));
-        assert!(
-            loaded
-                .reading_html
-                .as_deref()
-                .unwrap_or_default()
-                .contains("data-ll-sentence-ids="),
-            "EPUB ingestion must annotate source-born sentence identity"
+        let provenance = loaded
+            .structured_document
+            .as_ref()
+            .expect("EPUB ingestion must retain structured source identity");
+        assert!(provenance.sentences.len() > 128);
+        assert_eq!(
+            loaded.tts_text,
+            provenance
+                .sentences
+                .iter()
+                .map(|sentence| sentence.display_text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n")
         );
+        assert!(provenance.sentences.iter().any(|sentence| sentence.chapter_index == 1));
         assert!(
             loaded
                 .reading_html

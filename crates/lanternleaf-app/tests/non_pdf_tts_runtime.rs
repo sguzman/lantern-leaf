@@ -110,6 +110,9 @@ fn wait_for_progress(runtime: &TtsRuntime) -> Vec<lanternleaf_app::tts_runtime::
     let deadline = Instant::now() + Duration::from_secs(3);
     let mut events = Vec::new();
     while Instant::now() < deadline {
+        if let Some(driver) = runtime.simulated_boundary_driver() {
+            let _ = driver.emit_next();
+        }
         events.extend(runtime.collect_events());
         if events.iter().any(|event| {
             event.kind == TtsRuntimeEventKind::Progress

@@ -225,6 +225,9 @@ impl ReaderSession {
     pub fn tts_repeat_current_sentence(&mut self, normalizer: &normalizer::TextNormalizer) {
         if self.current_highlight_idx().is_none() {
             self.tts_play_from_page_start(normalizer);
+        } else if let Some(display_idx) = self.highlighted_display_idx {
+            self.highlighted_audio_idx = self.map_display_to_audio_idx(normalizer, display_idx);
+            self.tts_state = TtsPlaybackState::Playing;
         }
     }
 
@@ -553,6 +556,30 @@ impl ReaderSession {
         }
         if !self.set_audio_highlight_idx(normalizer, audio_idx) {
             return None;
+        }
+        Some(ReaderSessionDelta {
+            action: "reader_tts_sentence_started",
+            playback: self.playback_view(normalizer),
+        })
+    }
+
+    /// Apply a first-sample boundary whose canonical display identity was
+    /// captured when the audio item was prepared.  The identity is never
+    /// rediscovered from the mutable normalization plan.
+    pub fn apply_tts_sentence_boundary(
+        &mut self,
+        normalizer: &normalizer::TextNormalizer,
+        audio_idx: usize,
+        canonical_display_id: usize,
+    ) -> Option<ReaderSessionDelta> {
+        if self.tts_state != TtsPlaybackState::Playing {
+            return None;
+        }
+        self.highlighted_audio_idx = Some(audio_idx);
+        self.highlighted_display_idx = Some(canonical_display_id);
+        if canonical_display_id.saturating_add(1) >= self.current_plan_display_end {
+            self.current_plan = None;
+            self.current_plan_page = None;
         }
         Some(ReaderSessionDelta {
             action: "reader_tts_sentence_started",

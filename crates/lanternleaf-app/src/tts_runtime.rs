@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -24,6 +25,51 @@ const TTS_TARGET_COLD_CACHE_MS: u64 = 2000;
 pub enum TtsRuntimeMode {
     Real,
     Simulated,
+}
+
+/// Deterministic boundary source used by simulated runtime tests. It models
+/// actual first-sample delivery without making wall-clock duration the driver.
+#[derive(Debug, Default)]
+pub struct SimulatedBoundaryDriver {
+    pending: Mutex<VecDeque<tts::TtsSentenceBoundary>>,
+    output: Mutex<Option<mpsc::Sender<tts::TtsSentenceBoundary>>>,
+    paused: AtomicBool,
+}
+
+impl SimulatedBoundaryDriver {
+    pub fn pause(&self) {
+        self.paused.store(true, Ordering::SeqCst);
+    }
+
+    pub fn resume(&self) {
+        self.paused.store(false, Ordering::SeqCst);
+    }
+
+    pub fn emit_next(&self) -> bool {
+        if self.paused.load(Ordering::SeqCst) {
+            return false;
+        }
+        let boundary = self.pending.lock().ok().and_then(|mut queue| queue.pop_front());
+        let Some(boundary) = boundary else { return false };
+        self.output
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().cloned())
+            .is_some_and(|sender| sender.send(boundary).is_ok())
+    }
+
+    fn install(
+        &self,
+        output: mpsc::Sender<tts::TtsSentenceBoundary>,
+        boundaries: Vec<tts::TtsSentenceBoundary>,
+    ) {
+        if let Ok(mut guard) = self.output.lock() {
+            *guard = Some(output);
+        }
+        if let Ok(mut queue) = self.pending.lock() {
+            *queue = boundaries.into_iter().collect();
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -204,6 +250,7 @@ impl TtsEventBatcher {
 #[derive(Clone)]
 pub struct TtsRuntime {
     mode: TtsRuntimeMode,
+    simulated_boundary_driver: Option<Arc<SimulatedBoundaryDriver>>,
     normalizer: normalizer::TextNormalizer,
     panels: Arc<Mutex<session::PanelState>>,
     session: Arc<Mutex<Option<session::ReaderSession>>>,
@@ -235,6 +282,8 @@ impl TtsRuntime {
         let (command_tx, command_rx) = mpsc::channel();
         let runtime = Self {
             mode,
+            simulated_boundary_driver: (mode == TtsRuntimeMode::Simulated)
+                .then(|| Arc::new(SimulatedBoundaryDriver::default())),
             normalizer,
             panels: Arc::new(Mutex::new(session::PanelState::default())),
             session,
@@ -264,6 +313,10 @@ impl TtsRuntime {
             })
             .expect("failed to spawn TTS control worker");
         runtime
+    }
+
+    pub fn simulated_boundary_driver(&self) -> Option<Arc<SimulatedBoundaryDriver>> {
+        self.simulated_boundary_driver.clone()
     }
 
     /// Queue a TTS command for the control worker. This is the egui-facing API and performs no
@@ -352,10 +405,23 @@ impl TtsRuntime {
         }
         let mut should_sync_tts = true;
         match command {
-            TtsCommand::Play => {
-                should_sync_tts = !self.maybe_resume_playback();
+            TtsCommand::Play
+            | TtsCommand::PlayFromPageStart
+            | TtsCommand::PlayFromHighlight
+            | TtsCommand::RepeatSentence
+            | TtsCommand::SeekNext
+            | TtsCommand::SeekPrev => {
+                if let Some(driver) = self.simulated_boundary_driver.as_ref() {
+                    driver.resume();
+                }
+                if matches!(command, TtsCommand::Play) {
+                    should_sync_tts = !self.maybe_resume_playback();
+                }
             }
             TtsCommand::Pause => {
+                if let Some(driver) = self.simulated_boundary_driver.as_ref() {
+                    driver.pause();
+                }
                 self.pause_playback();
                 should_sync_tts = false;
             }
@@ -591,6 +657,7 @@ impl TtsRuntime {
 
         let ctx = TtsRuntimeContext {
             mode: self.mode,
+            simulated_boundary_driver: self.simulated_boundary_driver.clone(),
             normalizer: self.normalizer.clone(),
             session: self.session.clone(),
             request: self.request.clone(),
@@ -647,6 +714,7 @@ impl TtsRuntime {
 #[derive(Clone)]
 struct TtsRuntimeContext {
     mode: TtsRuntimeMode,
+    simulated_boundary_driver: Option<Arc<SimulatedBoundaryDriver>>,
     normalizer: normalizer::TextNormalizer,
     session: Arc<Mutex<Option<session::ReaderSession>>>,
     request: Arc<Mutex<Option<TtsRequestRuntime>>>,
@@ -783,8 +851,14 @@ fn run_tts_runtime_loop(
             None
         };
 
-        let (boundary_tx, boundary_rx) = mpsc::channel::<usize>();
-        let playback = match build_playback(&ctx, &plan, &prepared, engine.as_ref(), boundary_tx) {
+        let (boundary_tx, boundary_rx) = mpsc::channel::<tts::TtsSentenceBoundary>();
+        let playback = match build_playback(
+            &ctx,
+            &plan,
+            &prepared,
+            engine.as_ref(),
+            boundary_tx,
+        ) {
             Ok(playback) => playback,
             Err(err) => {
                 if cancel_token.is_cancelled() {
@@ -839,9 +913,10 @@ fn run_tts_runtime_loop(
                 playback.play();
             }
             match boundary_rx.recv_timeout(TTS_PROGRESS_POLL_INTERVAL) {
-                Ok(audio_idx) => {
+                Ok(boundary) => {
+                    playback.boundary_consumed();
                     if let Some(playback_view) =
-                        apply_tts_audio_boundary(&ctx, runtime_request_id, audio_idx)
+                        apply_tts_audio_boundary(&ctx, runtime_request_id, boundary)
                     {
                         boundaries_seen = boundaries_seen.saturating_add(1);
                         emit_playback_event(
@@ -1050,7 +1125,7 @@ fn transition_tts_runtime_to_paused(
 fn apply_tts_audio_boundary(
     ctx: &TtsRuntimeContext,
     runtime_request_id: u64,
-    audio_idx: usize,
+    boundary: tts::TtsSentenceBoundary,
 ) -> Option<session::ReaderPlaybackView> {
     let event_payload = {
         let mut guard = ctx.session.lock().ok()?;
@@ -1063,7 +1138,11 @@ fn apply_tts_audio_boundary(
             return None;
         }
         let reader = guard.as_mut()?;
-        let delta = reader.apply_tts_audio_boundary(&ctx.normalizer, audio_idx)?;
+        let delta = reader.apply_tts_sentence_boundary(
+            &ctx.normalizer,
+            boundary.audio_idx,
+            boundary.canonical_display_id,
+        )?;
         persist_reader_progress(reader, "tts_runtime_sentence_started");
         Some(delta.playback)
     };
@@ -1086,7 +1165,7 @@ fn persist_reader_progress(reader: &mut session::ReaderSession, reason: &'static
 struct PreparedSentence {
     path: Option<PathBuf>,
     duration: Duration,
-    display_idx: usize,
+    canonical_display_id: usize,
 }
 
 fn prepare_tts_batch(
@@ -1111,7 +1190,7 @@ fn prepare_tts_batch(
             .map(|(offset, sentence)| PreparedSentence {
                 path: None,
                 duration: simulated_sentence_duration(sentence, plan.speed),
-                display_idx: plan
+                canonical_display_id: plan
                     .display_ids
                     .get(chunk_start + offset)
                     .copied()
@@ -1141,7 +1220,7 @@ fn prepare_tts_batch(
                 .map(|(offset, (path, duration))| PreparedSentence {
                     path: Some(path),
                     duration,
-                    display_idx: plan
+                    canonical_display_id: plan
                         .display_ids
                         .get(chunk_start + offset)
                         .copied()
@@ -1166,6 +1245,12 @@ enum PlaybackKind {
 }
 
 impl PlaybackHandle {
+    fn boundary_consumed(&self) {
+        if let PlaybackKind::Simulated { queued, .. } = &self.kind {
+            queued.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
     fn pause(&self) {
         match &self.kind {
             PlaybackKind::Real(playback) => playback.pause(),
@@ -1213,7 +1298,7 @@ fn build_playback(
     plan: &TtsPlaybackPlan,
     prepared: &[PreparedSentence],
     engine: Option<&tts::TtsEngine>,
-    boundary_tx: mpsc::Sender<usize>,
+    boundary_tx: mpsc::Sender<tts::TtsSentenceBoundary>,
 ) -> Result<PlaybackHandle, String> {
     match ctx.mode {
         TtsRuntimeMode::Simulated => {
@@ -1222,8 +1307,20 @@ fn build_playback(
                 .map(|item| item.duration)
                 .collect::<Vec<_>>();
             let queued = Arc::new(AtomicUsize::new(sentence_durations.len()));
-            for index in 0..sentence_durations.len() {
-                let _ = boundary_tx.send(plan.start_idx.saturating_add(index));
+            let boundaries = prepared
+                .iter()
+                .enumerate()
+                .map(|(index, item)| tts::TtsSentenceBoundary {
+                    audio_idx: plan.start_idx.saturating_add(index),
+                    canonical_display_id: item.canonical_display_id,
+                })
+                .collect::<Vec<_>>();
+            if let Some(driver) = ctx.simulated_boundary_driver.as_ref() {
+                driver.install(boundary_tx, boundaries);
+            } else {
+                for boundary in boundaries {
+                    let _ = boundary_tx.send(boundary);
+                }
             }
             Ok(PlaybackHandle {
                 kind: PlaybackKind::Simulated {
@@ -1239,13 +1336,21 @@ fn build_playback(
                 .iter()
                 .filter_map(|item| item.path.clone())
                 .collect();
+            let canonical_display_ids = prepared
+                .iter()
+                .map(|item| item.canonical_display_id)
+                .collect::<Vec<_>>();
             let plan_start_idx = plan.start_idx;
-            let marker = Arc::new(move |audio_index: usize| {
-                let _ = boundary_tx.send(plan_start_idx.saturating_add(audio_index));
+            let marker = Arc::new(move |boundary: tts::TtsSentenceBoundary| {
+                let _ = boundary_tx.send(tts::TtsSentenceBoundary {
+                    audio_idx: plan_start_idx.saturating_add(boundary.audio_idx),
+                    canonical_display_id: boundary.canonical_display_id,
+                });
             });
             let playback = engine
-                .play_files_with_sentence_starts(
+                .play_files_with_sentence_ids(
                     &files,
+                    &canonical_display_ids,
                     plan.pause_after,
                     plan.speed,
                     plan.volume,
@@ -1505,7 +1610,7 @@ mod tests {
         runtime.reset_snapshot_construction_count();
 
         let started = Instant::now();
-        assert!(runtime.submit_command(TtsCommand::Play));
+        assert!(runtime.submit_command(TtsCommand::PlayFromHighlight));
         assert!(
             started.elapsed() < Duration::from_millis(50),
             "egui-facing TTS submission took {:?}",
@@ -1580,12 +1685,16 @@ mod tests {
     fn tts_runtime_emits_progress_events() {
         let normalizer = normalizer::TextNormalizer::default();
         let runtime = TtsRuntime::new_with_mode(normalizer, TtsRuntimeMode::Simulated);
+        let driver = runtime
+            .simulated_boundary_driver()
+            .expect("simulated runtime exposes its boundary driver");
         runtime.set_session(Some(build_test_session(&[&["A.", "B.", "C."]])));
 
         let _ = runtime.apply_command(TtsCommand::Play);
         let started = Instant::now();
         let mut saw_progress = false;
         while started.elapsed() < Duration::from_millis(300) {
+            let _ = driver.emit_next();
             let events = runtime.collect_events();
             if events.iter().any(|event| {
                 event.kind == TtsRuntimeEventKind::Progress
@@ -1597,6 +1706,121 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         assert!(saw_progress, "expected at least one progress event");
+    }
+
+    #[test]
+    fn controlled_runtime_boundaries_preserve_identity_across_windows_and_controls() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let runtime = TtsRuntime::new_with_mode(normalizer, TtsRuntimeMode::Simulated);
+        let driver = runtime
+            .simulated_boundary_driver()
+            .expect("simulated runtime exposes its boundary driver");
+        let sentences: Vec<String> = (0..136)
+            .map(|idx| format!("Boundary sentence {idx} is source-born."))
+            .collect();
+        runtime.set_session(Some(session::ReaderSession::from_pages_for_test(
+            PathBuf::from("/tmp/boundary-identity.epub"),
+            "boundary-identity.epub".to_string(),
+            vec![sentences.join(" ")],
+            vec![sentences.clone()],
+        )));
+
+        let wait_for_boundary = |runtime: &TtsRuntime,
+                                 driver: &SimulatedBoundaryDriver|
+         -> Option<usize> {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut emitted = false;
+            while Instant::now() < deadline {
+                if !emitted {
+                    emitted = driver.emit_next();
+                }
+                if let Some(event) = runtime
+                    .collect_events()
+                    .into_iter()
+                    .find(|event| event.kind == TtsRuntimeEventKind::SentenceStarted)
+                {
+                    return event.cursor.and_then(|cursor| cursor.display_idx);
+                }
+                thread::yield_now();
+            }
+            None
+        };
+
+        assert!(runtime.submit_command(TtsCommand::Play));
+        let first = wait_for_boundary(&runtime, &driver).expect("first boundary");
+
+        assert!(runtime.submit_command(TtsCommand::Pause));
+        let pause_deadline = Instant::now() + Duration::from_millis(300);
+        while Instant::now() < pause_deadline {
+            let _ = runtime.collect_events();
+            thread::yield_now();
+        }
+        assert!(!driver.emit_next(), "paused simulated audio must not emit a boundary");
+        assert_eq!(
+            runtime
+                .snapshot()
+                .and_then(|snapshot| snapshot.highlighted_sentence_idx),
+            Some(first)
+        );
+
+        assert!(runtime.submit_command(TtsCommand::Play));
+        assert_eq!(wait_for_boundary(&runtime, &driver), Some(first + 1));
+
+        assert!(runtime.submit_command(TtsCommand::RepeatSentence));
+        let repeat_deadline = Instant::now() + Duration::from_millis(300);
+        while Instant::now() < repeat_deadline {
+            let _ = runtime.collect_events();
+            if runtime
+                .snapshot()
+                .and_then(|snapshot| snapshot.highlighted_sentence_idx)
+                == Some(first + 1)
+            {
+                break;
+            }
+            thread::yield_now();
+        }
+        assert_eq!(
+            runtime
+                .snapshot()
+                .and_then(|snapshot| snapshot.highlighted_sentence_idx),
+            Some(first + 1)
+        );
+
+        assert!(runtime.submit_command(TtsCommand::SeekNext));
+        let next_deadline = Instant::now() + Duration::from_millis(300);
+        while Instant::now() < next_deadline {
+            let _ = runtime.collect_events();
+            thread::yield_now();
+        }
+        assert!(runtime.submit_command(TtsCommand::SeekPrev));
+
+        let window_runtime = TtsRuntime::new_with_mode(
+            normalizer::TextNormalizer::default(),
+            TtsRuntimeMode::Simulated,
+        );
+        let window_driver = window_runtime
+            .simulated_boundary_driver()
+            .expect("window runtime exposes boundary driver");
+        window_runtime.set_session(Some(session::ReaderSession::from_pages_for_test(
+            PathBuf::from("/tmp/boundary-window.epub"),
+            "boundary-window.epub".to_string(),
+            vec![sentences.join(" ")],
+            vec![sentences.clone()],
+        )));
+        assert!(window_runtime.submit_command(TtsCommand::Play));
+        let mut observed = Vec::new();
+        while observed.len() < 131 {
+            let Some(idx) = wait_for_boundary(&window_runtime, &window_driver) else {
+                break;
+            };
+            observed.push(idx);
+        }
+        assert!(observed.len() >= 131, "expected 128+ runtime boundaries");
+        assert!(
+            observed.iter().any(|idx| *idx >= 64),
+            "boundary identities did not cross the second window: max={:?}",
+            observed.iter().max()
+        );
     }
 
     #[test]

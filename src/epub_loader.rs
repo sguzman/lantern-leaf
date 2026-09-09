@@ -43,6 +43,38 @@ pub struct BookImage {
     pub char_offset: usize,
 }
 
+/// Source-born provenance produced while traversing a structured document.
+///
+/// The sentence IDs are assigned during the same traversal that produces the
+/// canonical display/TTS text.  Consumers must not infer identity by matching
+/// a second, independently rendered text stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuredDocument {
+    pub blocks: Vec<StructuredBlock>,
+    pub sentences: Vec<StructuredSentence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuredBlock {
+    pub block_id: usize,
+    pub chapter_index: usize,
+    pub kind: String,
+    pub plain_text: String,
+    pub sentence_ids: Vec<usize>,
+    pub rich_html: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuredSentence {
+    pub canonical_display_id: usize,
+    pub chapter_index: usize,
+    pub block_id: usize,
+    pub local_sentence_index: usize,
+    pub display_text: String,
+    pub source_start: usize,
+    pub source_end: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct LoadedBook {
     pub tts_text: String,
@@ -55,6 +87,7 @@ pub struct LoadedBook {
     pub pdf_runtime_policy: Option<PdfRuntimePolicySummary>,
     pub pdf_ocr_pipeline: Option<PdfOcrPipelineSummary>,
     pub images: Vec<BookImage>,
+    pub structured_document: Option<StructuredDocument>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, TS)]
@@ -506,6 +539,7 @@ pub fn load_book_content_with_cancel(
         pdf_runtime_policy: content.pdf_runtime_policy,
         pdf_ocr_pipeline: content.pdf_ocr_pipeline,
         images,
+        structured_document: content.structured_document,
     })
 }
 
@@ -520,6 +554,7 @@ struct SourceContent {
     pdf_classification: Option<PdfClassificationSummary>,
     pdf_runtime_policy: Option<PdfRuntimePolicySummary>,
     pdf_ocr_pipeline: Option<PdfOcrPipelineSummary>,
+    structured_document: Option<StructuredDocument>,
 }
 
 fn collect_images(path: &Path) -> Result<Vec<BookImage>> {
