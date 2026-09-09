@@ -94,6 +94,7 @@ impl LanternLeafApp {
             let app_request_id = self.runtime.next_request_id();
             match event.kind {
                 lanternleaf_app::tts_runtime::TtsRuntimeEventKind::Progress
+                | lanternleaf_app::tts_runtime::TtsRuntimeEventKind::SentenceStarted
                 | lanternleaf_app::tts_runtime::TtsRuntimeEventKind::StateChanged => {
                     trace!(
                         tts_request_id,

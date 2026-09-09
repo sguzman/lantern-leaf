@@ -525,6 +525,41 @@ impl ReaderSession {
         (audio, start)
     }
 
+    /// Canonical display identity for each prepared audio item. Multiple audio items may map to
+    /// one display sentence; callers must keep that identity until the next ID starts.
+    pub fn current_tts_audio_display_ids(
+        &mut self,
+        normalizer: &normalizer::TextNormalizer,
+    ) -> Vec<usize> {
+        let plan = self.ensure_current_plan(normalizer);
+        let page_base = self
+            .page_sentence_counts
+            .iter()
+            .take(self.current_page)
+            .sum::<usize>();
+        plan.audio_to_display
+            .iter()
+            .map(|idx| page_base.saturating_add(*idx))
+            .collect()
+    }
+
+    pub fn apply_tts_audio_boundary(
+        &mut self,
+        normalizer: &normalizer::TextNormalizer,
+        audio_idx: usize,
+    ) -> Option<ReaderSessionDelta> {
+        if self.tts_state != TtsPlaybackState::Playing {
+            return None;
+        }
+        if !self.set_audio_highlight_idx(normalizer, audio_idx) {
+            return None;
+        }
+        Some(ReaderSessionDelta {
+            action: "reader_tts_sentence_started",
+            playback: self.playback_view(normalizer),
+        })
+    }
+
     fn move_to_adjacent_page_with_sentences(
         &mut self,
         direction: isize,

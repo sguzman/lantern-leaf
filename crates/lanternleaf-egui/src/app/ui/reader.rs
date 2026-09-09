@@ -1196,6 +1196,21 @@ fn aligned_targets_for_snapshot(
     blocks: &[PrettyBlock],
 ) -> Vec<Option<PrettySentenceTarget>> {
     if snapshot.pretty_kind == PrettyKind::Html {
+        let direct = source_born_targets(snapshot, blocks);
+        let mapped = direct.iter().filter(|target| target.is_some()).count();
+        if mapped > 0 {
+            trace!(
+                canonical_sentences = snapshot.canonical_sentences.len(),
+                directly_mappable = mapped,
+                unmapped = snapshot.canonical_sentences.len().saturating_sub(mapped),
+                "Using source-born HTML sentence provenance for pretty targets"
+            );
+            return direct;
+        }
+        trace!(
+            canonical_sentences = snapshot.canonical_sentences.len(),
+            "Native HTML provenance unavailable; using degraded alignment fallback"
+        );
         return align_canonical_sentences(&snapshot.canonical_sentences, blocks);
     }
     let local = align_canonical_sentences(&snapshot.sentences, blocks);
@@ -1213,6 +1228,44 @@ fn aligned_targets_for_snapshot(
         if let Some(slot) = targets.get_mut(page_base + local_idx) {
             *slot = target;
         }
+    }
+    targets
+}
+
+fn source_born_targets(
+    snapshot: &ReaderSnapshot,
+    blocks: &[PrettyBlock],
+) -> Vec<Option<PrettySentenceTarget>> {
+    let mut targets = vec![None; snapshot.canonical_sentences.len()];
+    let page_base = snapshot
+        .page_sentence_counts
+        .iter()
+        .take(snapshot.current_page)
+        .sum::<usize>();
+    let mut occurrences = std::collections::HashMap::<usize, usize>::new();
+    for (local_idx, anchor) in snapshot.sentence_anchor_map.iter().enumerate() {
+        let Some(block_index) = anchor else {
+            continue;
+        };
+        let Some(block) = blocks.get(*block_index) else {
+            continue;
+        };
+        let local_sentence_index = occurrences.entry(*block_index).or_insert(0);
+        let ranges = sentence_ranges(&block_text(block));
+        let Some((_, text_start, text_end)) = ranges.get(*local_sentence_index) else {
+            continue;
+        };
+        let canonical_idx = page_base.saturating_add(local_idx);
+        if let Some(slot) = targets.get_mut(canonical_idx) {
+            *slot = Some(PrettySentenceTarget {
+                block_index: *block_index,
+                local_sentence_index: *local_sentence_index,
+                text_start: *text_start,
+                text_end: *text_end,
+                source: "source-provenance",
+            });
+        }
+        *local_sentence_index = local_sentence_index.saturating_add(1);
     }
     targets
 }

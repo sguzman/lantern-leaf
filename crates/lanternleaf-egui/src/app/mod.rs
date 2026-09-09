@@ -2526,6 +2526,9 @@ impl eframe::App for LanternLeafApp {
     fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
         let frame_started = Instant::now();
         let _ = frame;
+        if tts_repaint_due(self.tts_runtime.needs_repaint()) {
+            ctx.request_repaint_after(Duration::from_millis(24));
+        }
         self.handle_tts_runtime_events();
         self.handle_effect_events();
         let projection_started = Instant::now();
@@ -2583,6 +2586,23 @@ impl eframe::App for LanternLeafApp {
                 );
             }
         }
+    }
+}
+
+fn tts_repaint_due(active_or_in_flight: bool) -> bool {
+    active_or_in_flight
+}
+
+#[cfg(test)]
+mod tts_repaint_policy_tests {
+    #[test]
+    fn active_playing_and_command_race_schedule_repaint() {
+        assert!(super::tts_repaint_due(true));
+    }
+
+    #[test]
+    fn idle_without_pending_command_is_event_driven() {
+        assert!(!super::tts_repaint_due(false));
     }
 }
 

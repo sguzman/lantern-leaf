@@ -116,6 +116,18 @@ impl TtsEngine {
         volume: f32,
         start_paused: bool,
     ) -> Result<TtsPlayback> {
+        self.play_files_with_sentence_starts(files, pause_after, speed, volume, start_paused, None)
+    }
+
+    pub fn play_files_with_sentence_starts(
+        &self,
+        files: &[PathBuf],
+        pause_after: std::time::Duration,
+        speed: f32,
+        volume: f32,
+        start_paused: bool,
+        sentence_started: Option<Arc<dyn Fn(usize) + Send + Sync>>,
+    ) -> Result<TtsPlayback> {
         let (_stream, handle) = OutputStream::try_default().context("Opening audio output")?;
         let sink = Sink::try_new(&handle).context("Creating sink")?;
         let mut playback = TtsPlayback {
@@ -136,7 +148,7 @@ impl TtsEngine {
             speed,
             "Starting TTS playback"
         );
-        playback.append_files(files, pause_after, speed)?;
+        playback.append_files_with_sentence_starts(files, pause_after, speed, sentence_started)?;
         if !start_paused {
             playback.play();
         }
@@ -392,9 +404,19 @@ impl TtsPlayback {
         pause_after: std::time::Duration,
         speed: f32,
     ) -> Result<Vec<std::time::Duration>> {
+        self.append_files_with_sentence_starts(files, pause_after, speed, None)
+    }
+
+    pub fn append_files_with_sentence_starts(
+        &mut self,
+        files: &[PathBuf],
+        pause_after: std::time::Duration,
+        speed: f32,
+        sentence_started: Option<Arc<dyn Fn(usize) + Send + Sync>>,
+    ) -> Result<Vec<std::time::Duration>> {
         let speed = if speed <= f32::EPSILON { 1.0 } else { speed };
         let mut appended_durations = Vec::with_capacity(files.len());
-        for file in files {
+        for (sentence_index, file) in files.iter().enumerate() {
             let reader = BufReader::new(File::open(file)?);
             let source = Decoder::new(reader)?;
             if (speed - 1.0).abs() <= f32::EPSILON {
@@ -402,7 +424,11 @@ impl TtsPlayback {
                     .total_duration()
                     .unwrap_or_else(|| sentence_duration(file));
                 appended_durations.push(dur);
-                self.sink.append(source);
+                self.sink.append(SentenceStartSource::new(
+                    source,
+                    sentence_index,
+                    sentence_started.clone(),
+                ));
             } else {
                 let channels = source.channels() as u16;
                 let sample_rate = source.sample_rate();
@@ -414,7 +440,11 @@ impl TtsPlayback {
                 );
                 appended_durations.push(dur);
                 let buffer = SamplesBuffer::new(channels, sample_rate, stretched);
-                self.sink.append(buffer);
+                self.sink.append(SentenceStartSource::new(
+                    buffer,
+                    sentence_index,
+                    sentence_started.clone(),
+                ));
             }
             if pause_after > std::time::Duration::ZERO {
                 let silence = Zero::<f32>::new(1, 48_000).take_duration(pause_after);
@@ -432,6 +462,60 @@ impl TtsPlayback {
 
     pub fn queued_sources(&self) -> usize {
         self.sink.len()
+    }
+}
+
+struct SentenceStartSource<S> {
+    inner: S,
+    sentence_index: usize,
+    marker: Option<Arc<dyn Fn(usize) + Send + Sync>>,
+}
+
+impl<S> SentenceStartSource<S> {
+    fn new(
+        inner: S,
+        sentence_index: usize,
+        marker: Option<Arc<dyn Fn(usize) + Send + Sync>>,
+    ) -> Self {
+        Self {
+            inner,
+            sentence_index,
+            marker,
+        }
+    }
+}
+
+impl<S> Iterator for SentenceStartSource<S>
+where
+    S: Source,
+    S::Item: rodio::Sample,
+{
+    type Item = S::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(marker) = self.marker.take() {
+            marker(self.sentence_index);
+        }
+        self.inner.next()
+    }
+}
+
+impl<S> Source for SentenceStartSource<S>
+where
+    S: Source,
+    S::Item: rodio::Sample,
+{
+    fn current_frame_len(&self) -> Option<usize> {
+        self.inner.current_frame_len()
+    }
+    fn channels(&self) -> u16 {
+        self.inner.channels()
+    }
+    fn sample_rate(&self) -> u32 {
+        self.inner.sample_rate()
+    }
+    fn total_duration(&self) -> Option<std::time::Duration> {
+        self.inner.total_duration()
     }
 }
 

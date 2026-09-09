@@ -111,10 +111,10 @@ fn wait_for_progress(runtime: &TtsRuntime) -> Vec<lanternleaf_app::tts_runtime::
     let mut events = Vec::new();
     while Instant::now() < deadline {
         events.extend(runtime.collect_events());
-        if events
-            .iter()
-            .any(|event| event.kind == TtsRuntimeEventKind::Progress)
-        {
+        if events.iter().any(|event| {
+            event.kind == TtsRuntimeEventKind::Progress
+                || event.kind == TtsRuntimeEventKind::SentenceStarted
+        }) {
             break;
         }
         thread::sleep(Duration::from_millis(10));
@@ -167,11 +167,10 @@ fn simulated_tts_uses_real_non_pdf_sessions() {
             .unwrap();
         assert!(page_start.tts.current_sentence_idx.is_some());
         let events = wait_for_progress(&runtime);
-        assert!(
-            events
-                .iter()
-                .any(|event| event.kind == TtsRuntimeEventKind::Progress)
-        );
+        assert!(events.iter().any(|event| {
+            event.kind == TtsRuntimeEventKind::Progress
+                || event.kind == TtsRuntimeEventKind::SentenceStarted
+        }));
         assert!(
             events
                 .iter()

@@ -102,6 +102,7 @@ impl TtsCommand {
 pub enum TtsRuntimeEventKind {
     StateChanged,
     Progress,
+    SentenceStarted,
     Queued,
     Completed,
     Failed,
@@ -157,6 +158,7 @@ struct TtsPlaybackPlan {
     source_path: PathBuf,
     page: usize,
     sentences: Vec<String>,
+    display_ids: Vec<usize>,
     start_idx: usize,
     pause_after: Duration,
     speed: f32,
@@ -212,6 +214,7 @@ pub struct TtsRuntime {
     event_rx: Arc<Mutex<mpsc::Receiver<TtsRuntimeEvent>>>,
     event_batcher: Arc<Mutex<TtsEventBatcher>>,
     command_tx: mpsc::Sender<TtsCommand>,
+    command_in_flight: Arc<AtomicBool>,
 }
 
 impl TtsRuntime {
@@ -242,6 +245,7 @@ impl TtsRuntime {
             event_rx: Arc::new(Mutex::new(event_rx)),
             event_batcher: Arc::new(Mutex::new(TtsEventBatcher::default())),
             command_tx,
+            command_in_flight: Arc::new(AtomicBool::new(false)),
         };
         let worker = runtime.clone();
         thread::Builder::new()
@@ -255,6 +259,7 @@ impl TtsRuntime {
                         elapsed_ms = started.elapsed().as_millis(),
                         "TTS control worker finished"
                     );
+                    worker.command_in_flight.store(false, Ordering::Release);
                 }
             })
             .expect("failed to spawn TTS control worker");
@@ -266,7 +271,11 @@ impl TtsRuntime {
     pub fn submit_command(&self, command: TtsCommand) -> bool {
         let started = Instant::now();
         let label = command.label().to_string();
+        self.command_in_flight.store(true, Ordering::Release);
         let submitted = self.command_tx.send(command).is_ok();
+        if !submitted {
+            self.command_in_flight.store(false, Ordering::Release);
+        }
         trace!(command = %label, elapsed_us = started.elapsed().as_micros(), submitted, "Submitted TTS control command");
         submitted
     }
@@ -294,7 +303,11 @@ impl TtsRuntime {
         self.session
             .lock()
             .ok()
-            .and_then(|guard| guard.as_ref().map(session::ReaderSession::snapshot_construction_count))
+            .and_then(|guard| {
+                guard
+                    .as_ref()
+                    .map(session::ReaderSession::snapshot_construction_count)
+            })
             .unwrap_or(0)
     }
 
@@ -302,6 +315,25 @@ impl TtsRuntime {
         if let Ok(mut guard) = self.panels.lock() {
             *guard = panels;
         }
+    }
+
+    pub fn needs_repaint(&self) -> bool {
+        if self
+            .request
+            .lock()
+            .ok()
+            .is_some_and(|guard| guard.is_some())
+        {
+            return true;
+        }
+        if self.command_in_flight.load(Ordering::Acquire) {
+            return true;
+        }
+        self.session
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|reader| reader.tts_state()))
+            .is_some_and(|state| state != session::TtsPlaybackState::Idle)
     }
 
     pub fn snapshot(&self) -> Option<session::ReaderSnapshot> {
@@ -579,6 +611,7 @@ impl TtsRuntime {
             return None;
         }
         let (audio_sentences, start_idx) = reader.current_tts_audio_slice(&self.normalizer);
+        let display_ids = reader.current_tts_audio_display_ids(&self.normalizer);
         if audio_sentences.is_empty() {
             return None;
         }
@@ -594,6 +627,7 @@ impl TtsRuntime {
             source_path: reader.source_path.clone(),
             page: playback.current_page,
             sentences: audio_sentences,
+            display_ids,
             start_idx,
             pause_after: Duration::from_secs_f64(reader.config.pause_after_sentence.max(0.0) as f64),
             speed: reader.config.tts_speed,
@@ -643,7 +677,6 @@ fn run_tts_runtime_loop(
     let mut engine: Option<tts::TtsEngine> = None;
     let runtime_started_at = Instant::now();
     let mut playback_started_at: Option<Instant> = None;
-    let mut last_sentence_advance_at: Option<Instant> = None;
     let mut ready_prefetch: Option<PrefetchedBatch> = None;
 
     loop {
@@ -750,7 +783,8 @@ fn run_tts_runtime_loop(
             None
         };
 
-        let playback = match build_playback(&ctx, &plan, &prepared, engine.as_ref()) {
+        let (boundary_tx, boundary_rx) = mpsc::channel::<usize>();
+        let playback = match build_playback(&ctx, &plan, &prepared, engine.as_ref(), boundary_tx) {
             Ok(playback) => playback,
             Err(err) => {
                 if cancel_token.is_cancelled() {
@@ -778,48 +812,8 @@ fn run_tts_runtime_loop(
         emit_queued_event(&ctx, runtime_request_id, &plan, &prepared);
 
         let mut continue_playback = true;
-        for duration in playback.sentence_durations.iter().copied() {
-            let mut remaining = duration.saturating_add(plan.pause_after);
-            let mut last_tick = Instant::now();
-            loop {
-                if cancel_token.is_cancelled() {
-                    playback.stop();
-                    clear_tts_request_if_current(&ctx, runtime_request_id);
-                    emit_terminal_event(
-                        &ctx,
-                        runtime_request_id,
-                        TtsRuntimeEventKind::Cancelled,
-                        "reader_tts_runtime_cancelled",
-                        None,
-                    );
-                    return;
-                }
-
-                if pause_requested.load(Ordering::SeqCst) {
-                    if !playback.is_paused() {
-                        playback.pause();
-                    }
-                    last_tick = Instant::now();
-                    thread::sleep(TTS_PROGRESS_POLL_INTERVAL);
-                    continue;
-                }
-
-                if playback.is_paused() {
-                    playback.play();
-                    last_tick = Instant::now();
-                }
-
-                let now = Instant::now();
-                let elapsed = now.saturating_duration_since(last_tick);
-                last_tick = now;
-
-                if elapsed >= remaining {
-                    break;
-                }
-                remaining = remaining.saturating_sub(elapsed);
-                thread::sleep(TTS_PROGRESS_POLL_INTERVAL);
-            }
-
+        let mut boundaries_seen = 0usize;
+        while boundaries_seen < prepared.len() {
             if cancel_token.is_cancelled() {
                 playback.stop();
                 clear_tts_request_if_current(&ctx, runtime_request_id);
@@ -833,18 +827,38 @@ fn run_tts_runtime_loop(
                 return;
             }
 
-            if !advance_tts_runtime_cursor(&ctx, runtime_request_id) {
-                continue_playback = false;
-                break;
+            if pause_requested.load(Ordering::SeqCst) {
+                if !playback.is_paused() {
+                    playback.pause();
+                }
+                thread::sleep(TTS_PROGRESS_POLL_INTERVAL);
+                continue;
             }
-            if let Some(last_tick) = last_sentence_advance_at.replace(Instant::now()) {
-                let elapsed_ms = last_tick.elapsed().as_millis();
-                trace!(
-                    runtime_request_id,
-                    elapsed_ms,
-                    target_next_sentence_ms = TTS_TARGET_NEXT_SENTENCE_MS,
-                    "TTS sentence transition completed"
-                );
+
+            if playback.is_paused() {
+                playback.play();
+            }
+            match boundary_rx.recv_timeout(TTS_PROGRESS_POLL_INTERVAL) {
+                Ok(audio_idx) => {
+                    if let Some(playback_view) =
+                        apply_tts_audio_boundary(&ctx, runtime_request_id, audio_idx)
+                    {
+                        boundaries_seen = boundaries_seen.saturating_add(1);
+                        emit_playback_event(
+                            &ctx,
+                            runtime_request_id,
+                            "reader_tts_sentence_started",
+                            playback_view,
+                            TtsRuntimeEventKind::SentenceStarted,
+                            None,
+                        );
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    continue_playback = false;
+                    break;
+                }
             }
         }
 
@@ -953,6 +967,7 @@ fn collect_tts_playback_plan(
         return None;
     }
     let (audio_sentences, start_idx) = reader.current_tts_audio_slice(&ctx.normalizer);
+    let display_ids = reader.current_tts_audio_display_ids(&ctx.normalizer);
     if audio_sentences.is_empty() {
         return None;
     }
@@ -960,6 +975,7 @@ fn collect_tts_playback_plan(
         source_path: reader.source_path.clone(),
         page: playback.current_page,
         sentences: audio_sentences,
+        display_ids,
         start_idx,
         pause_after: Duration::from_secs_f64(reader.config.pause_after_sentence.max(0.0) as f64),
         speed: reader.config.tts_speed,
@@ -1031,47 +1047,27 @@ fn transition_tts_runtime_to_paused(
     }
 }
 
-fn advance_tts_runtime_cursor(ctx: &TtsRuntimeContext, runtime_request_id: u64) -> bool {
+fn apply_tts_audio_boundary(
+    ctx: &TtsRuntimeContext,
+    runtime_request_id: u64,
+    audio_idx: usize,
+) -> Option<session::ReaderPlaybackView> {
     let event_payload = {
-        let mut guard = match ctx.session.lock() {
-            Ok(guard) => guard,
-            Err(_) => return false,
-        };
+        let mut guard = ctx.session.lock().ok()?;
         let current_request_id = ctx
             .request
             .lock()
             .ok()
             .and_then(|guard| guard.as_ref().map(|runtime| runtime.request_id));
         if current_request_id != Some(runtime_request_id) {
-            return false;
+            return None;
         }
-        let reader = match guard.as_mut() {
-            Some(reader) => reader,
-            None => return false,
-        };
-        let current_playback = reader.playback_view(&ctx.normalizer);
-        if current_playback.tts.state != session::TtsPlaybackState::Playing {
-            return false;
-        }
-        let delta =
-            reader.apply_command_lightweight(session::SessionCommand::TtsSeekNext, &ctx.normalizer);
-        persist_reader_progress(reader, "tts_runtime_step");
+        let reader = guard.as_mut()?;
+        let delta = reader.apply_tts_audio_boundary(&ctx.normalizer, audio_idx)?;
+        persist_reader_progress(reader, "tts_runtime_sentence_started");
         Some(delta.playback)
     };
-
-    if let Some(playback) = event_payload {
-        emit_playback_event(
-            ctx,
-            runtime_request_id,
-            "reader_tts_runtime_step",
-            playback.clone(),
-            TtsRuntimeEventKind::Progress,
-            None,
-        );
-        playback.tts.state == session::TtsPlaybackState::Playing
-    } else {
-        false
-    }
+    event_payload
 }
 
 fn persist_reader_progress(reader: &mut session::ReaderSession, reason: &'static str) {
@@ -1090,6 +1086,7 @@ fn persist_reader_progress(reader: &mut session::ReaderSession, reason: &'static
 struct PreparedSentence {
     path: Option<PathBuf>,
     duration: Duration,
+    display_idx: usize,
 }
 
 fn prepare_tts_batch(
@@ -1110,9 +1107,15 @@ fn prepare_tts_batch(
     match ctx.mode {
         TtsRuntimeMode::Simulated => Ok(chunk_sentences
             .iter()
-            .map(|sentence| PreparedSentence {
+            .enumerate()
+            .map(|(offset, sentence)| PreparedSentence {
                 path: None,
                 duration: simulated_sentence_duration(sentence, plan.speed),
+                display_idx: plan
+                    .display_ids
+                    .get(chunk_start + offset)
+                    .copied()
+                    .unwrap_or(chunk_start + offset),
             })
             .collect()),
         TtsRuntimeMode::Real => {
@@ -1134,9 +1137,15 @@ fn prepare_tts_batch(
             );
             Ok(prepared
                 .into_iter()
-                .map(|(path, duration)| PreparedSentence {
+                .enumerate()
+                .map(|(offset, (path, duration))| PreparedSentence {
                     path: Some(path),
                     duration,
+                    display_idx: plan
+                        .display_ids
+                        .get(chunk_start + offset)
+                        .copied()
+                        .unwrap_or(chunk_start + offset),
                 })
                 .collect())
         }
@@ -1204,6 +1213,7 @@ fn build_playback(
     plan: &TtsPlaybackPlan,
     prepared: &[PreparedSentence],
     engine: Option<&tts::TtsEngine>,
+    boundary_tx: mpsc::Sender<usize>,
 ) -> Result<PlaybackHandle, String> {
     match ctx.mode {
         TtsRuntimeMode::Simulated => {
@@ -1212,6 +1222,9 @@ fn build_playback(
                 .map(|item| item.duration)
                 .collect::<Vec<_>>();
             let queued = Arc::new(AtomicUsize::new(sentence_durations.len()));
+            for index in 0..sentence_durations.len() {
+                let _ = boundary_tx.send(plan.start_idx.saturating_add(index));
+            }
             Ok(PlaybackHandle {
                 kind: PlaybackKind::Simulated {
                     paused: Arc::new(AtomicBool::new(false)),
@@ -1226,8 +1239,19 @@ fn build_playback(
                 .iter()
                 .filter_map(|item| item.path.clone())
                 .collect();
+            let plan_start_idx = plan.start_idx;
+            let marker = Arc::new(move |audio_index: usize| {
+                let _ = boundary_tx.send(plan_start_idx.saturating_add(audio_index));
+            });
             let playback = engine
-                .play_files(&files, plan.pause_after, plan.speed, plan.volume, false)
+                .play_files_with_sentence_starts(
+                    &files,
+                    plan.pause_after,
+                    plan.speed,
+                    plan.volume,
+                    false,
+                    Some(marker),
+                )
                 .map_err(|err| err.to_string())?;
             let sentence_durations = playback.sentence_durations().to_vec();
             Ok(PlaybackHandle {
@@ -1396,6 +1420,46 @@ fn simulated_sentence_duration(sentence: &str, speed: f32) -> Duration {
 mod tests {
     use super::*;
 
+    #[test]
+    fn sentence_started_events_are_not_coalesced_with_progress() {
+        let (tx, rx) = mpsc::channel();
+        for kind in [
+            TtsRuntimeEventKind::SentenceStarted,
+            TtsRuntimeEventKind::SentenceStarted,
+            TtsRuntimeEventKind::Progress,
+            TtsRuntimeEventKind::Progress,
+        ] {
+            tx.send(TtsRuntimeEvent {
+                request_id: 7,
+                action: "test".to_string(),
+                kind,
+                snapshot: None,
+                playback: None,
+                tts: None,
+                message: None,
+                cursor: None,
+            })
+            .unwrap();
+        }
+        let mut batcher = TtsEventBatcher::default();
+        batcher.collect(&rx);
+        let events = batcher.drain();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.kind == TtsRuntimeEventKind::SentenceStarted)
+                .count(),
+            2
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.kind == TtsRuntimeEventKind::Progress)
+                .count(),
+            1
+        );
+    }
+
     fn build_test_session(page_sentences: &[&[&str]]) -> session::ReaderSession {
         let pages: Vec<String> = page_sentences
             .iter()
@@ -1523,10 +1587,10 @@ mod tests {
         let mut saw_progress = false;
         while started.elapsed() < Duration::from_millis(300) {
             let events = runtime.collect_events();
-            if events
-                .iter()
-                .any(|event| event.kind == TtsRuntimeEventKind::Progress)
-            {
+            if events.iter().any(|event| {
+                event.kind == TtsRuntimeEventKind::Progress
+                    || event.kind == TtsRuntimeEventKind::SentenceStarted
+            }) {
                 saw_progress = true;
                 break;
             }

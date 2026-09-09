@@ -589,8 +589,74 @@ fn load_native_pretty_html(path: &Path, cancel: Option<&CancellationToken>) -> R
     if html.trim().is_empty() {
         Ok("<p>No structured HTML content found in this file.</p>".to_string())
     } else {
-        Ok(html)
+        let tts_text = html2text::from_read(html.as_bytes(), 10_000).unwrap_or_default();
+        Ok(annotate_native_html_sentence_provenance(&html, &tts_text))
     }
+}
+
+/// Annotate structured source blocks once, during ingestion, with canonical sentence IDs.
+/// Native rendering consumes these IDs instead of reconstructing identity from strings.
+fn annotate_native_html_sentence_provenance(html: &str, canonical_text: &str) -> String {
+    let block_re = Regex::new(
+        r"(?is)<(h[1-6]|p|li|blockquote)\b([^>]*)>(.*?)</(?:h[1-6]|p|li|blockquote)\s*>",
+    )
+    .expect("valid provenance block regex");
+    let canonical = crate::text_utils::split_sentences(canonical_text);
+    let mut cursor = 0usize;
+    let mut block_index = 0usize;
+    let mut covered = 0usize;
+    let output = block_re
+        .replace_all(html, |caps: &regex::Captures<'_>| {
+            let tag = &caps[1];
+            let attrs = &caps[2];
+            let inner = &caps[3];
+            let plain = html2text::from_read(inner.as_bytes(), 10_000).unwrap_or_default();
+            let local = crate::text_utils::split_sentences(&plain);
+            let mut ids = Vec::new();
+            for sentence in local {
+                let normalized = normalize_provenance_sentence(&sentence);
+                let found = canonical[cursor..]
+                    .iter()
+                    .position(|candidate| normalize_provenance_sentence(candidate) == normalized)
+                    .map(|offset| cursor + offset);
+                if let Some(id) = found {
+                    ids.push(id);
+                    cursor = id.saturating_add(1);
+                    covered = covered.saturating_add(1);
+                }
+            }
+            let ids_text = ids
+                .iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
+            let replacement_attrs = format!(
+                "{attrs} data-ll-sentence-ids=\"{ids_text}\" data-ll-block-index=\"{block_index}\""
+            );
+            block_index = block_index.saturating_add(1);
+            format!("<{tag}{replacement_attrs}>{inner}</{tag}>")
+        })
+        .into_owned();
+    tracing::info!(
+        canonical_sentences = canonical.len(),
+        structured_sentence_provenance = covered,
+        unmapped_sentences = canonical.len().saturating_sub(covered),
+        coverage = if canonical.is_empty() {
+            1.0
+        } else {
+            covered as f32 / canonical.len() as f32
+        },
+        "Built source-born native HTML sentence provenance"
+    );
+    output
+}
+
+fn normalize_provenance_sentence(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 fn load_epub_source_content(
@@ -610,6 +676,7 @@ fn load_epub_source_content(
     } else {
         tts_text
     };
+    let reading_html = annotate_native_html_sentence_provenance(&reading_html, &tts_text);
     info!(
         path = %path.display(),
         stage = "epub_native_complete",

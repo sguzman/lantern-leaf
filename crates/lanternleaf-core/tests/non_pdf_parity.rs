@@ -158,6 +158,17 @@ fn assert_session_contract(path: &Path, expected_kind: session::PrettyKind, conf
             }
         }
         session::PrettyKind::Html => {
+            assert!(
+                initial
+                    .reading_html_page
+                    .as_deref()
+                    .is_some_and(|html| html.contains("data-ll-sentence-ids=")),
+                "native HTML must carry source-born sentence provenance"
+            );
+            assert!(
+                initial.sentence_anchor_map.iter().any(Option::is_some),
+                "source-born HTML provenance must produce observable anchor coverage"
+            );
             for raw_noise in [
                 "<html",
                 "<p>",
@@ -277,6 +288,14 @@ fn representative_epub_builder_is_deterministic_and_loadable() {
     if pandoc_available() {
         let loaded = lanternleaf_core::epub_loader::load_book_content(&first).unwrap();
         assert!(loaded.tts_text.contains("EPUB alpha"));
+        assert!(
+            loaded
+                .reading_html
+                .as_deref()
+                .unwrap_or_default()
+                .contains("data-ll-sentence-ids="),
+            "EPUB ingestion must annotate source-born sentence identity"
+        );
         assert!(
             loaded
                 .reading_html

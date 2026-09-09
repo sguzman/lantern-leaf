@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 use ts_rs::TS;
 
@@ -354,6 +354,10 @@ impl ReaderSession {
             stats,
             settings: self.settings_view(),
         }
+    }
+
+    pub fn tts_state(&self) -> TtsPlaybackState {
+        self.tts_state
     }
 
     #[doc(hidden)]
@@ -1353,6 +1357,21 @@ impl ReaderSession {
             if self.config.native_html_pretty_enabled
                 && let Some(reading_html) = self.reading_html.as_ref()
             {
+                if let Some(map) = source_born_html_anchor_map(
+                    reading_html,
+                    page_idx,
+                    &self.page_sentence_counts,
+                    sentence_count,
+                ) {
+                    tracing::debug!(
+                        path = %self.source_path.display(),
+                        page = page_idx + 1,
+                        sentence_count,
+                        source = "source-born-html-provenance",
+                        "Using source-born HTML sentence provenance"
+                    );
+                    return map;
+                }
                 let anchor_count = count_html_anchors(reading_html);
                 if anchor_count == 0 {
                     tracing::debug!(
@@ -1636,6 +1655,41 @@ impl ReaderSession {
             sentences_read_up_to_current_position: sentences_up_to_current_position,
         }
     }
+}
+
+fn source_born_html_anchor_map(
+    html: &str,
+    page_idx: usize,
+    page_sentence_counts: &[usize],
+    sentence_count: usize,
+) -> Option<Vec<Option<usize>>> {
+    let attr_re = Regex::new(
+        r#"(?is)<(?:h[1-6]|p|li|blockquote)\b[^>]*data-ll-sentence-ids="([^"]*)"[^>]*data-ll-block-index="(\d+)"[^>]*>"#,
+    )
+    .ok()?;
+    let mut global = vec![None; page_sentence_counts.iter().sum()];
+    let mut covered = 0usize;
+    for capture in attr_re.captures_iter(html) {
+        let block = capture.get(2)?.as_str().parse::<usize>().ok()?;
+        for id in capture[1]
+            .split(',')
+            .filter_map(|value| value.parse::<usize>().ok())
+        {
+            if let Some(slot) = global.get_mut(id) {
+                *slot = Some(block);
+                covered = covered.saturating_add(1);
+            }
+        }
+    }
+    if covered == 0 {
+        return None;
+    }
+    let page_base = page_sentence_counts.iter().take(page_idx).sum::<usize>();
+    Some(
+        (0..sentence_count)
+            .map(|local| global.get(page_base + local).copied().flatten())
+            .collect(),
+    )
 }
 
 fn count_markdown_anchors(markdown: &str) -> usize {
@@ -2491,6 +2545,40 @@ mod tests {
     fn proportional_anchor_map_spreads_sentences_across_anchors() {
         let map = proportional_anchor_map(5, 3);
         assert_eq!(map, vec![Some(0), Some(0), Some(1), Some(1), Some(2)]);
+    }
+
+    #[test]
+    fn simulated_sentence_boundaries_drive_canonical_cursor_for_128_items() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let sentences: Vec<String> = (0..128).map(|_| "Boundary sentence.".to_string()).collect();
+        let first: Vec<&str> = sentences[..64].iter().map(String::as_str).collect();
+        let second: Vec<&str> = sentences[64..].iter().map(String::as_str).collect();
+        let mut session = build_test_session(&[&first, &second]);
+        session.apply_command_lightweight(SessionCommand::TtsPlay, &normalizer);
+        let display_ids = session.current_tts_audio_display_ids(&normalizer);
+        assert_eq!(display_ids.len(), 64);
+        for (audio_idx, display_idx) in display_ids.iter().copied().enumerate() {
+            let delta = session
+                .apply_tts_audio_boundary(&normalizer, audio_idx)
+                .expect("playing session accepts semantic audio boundary");
+            assert_eq!(delta.playback.highlighted_sentence_idx, Some(display_idx));
+            assert_eq!(delta.playback.tts.current_sentence_idx, Some(audio_idx));
+        }
+        session.apply_command_lightweight(SessionCommand::NextPage, &normalizer);
+        session.apply_command_lightweight(SessionCommand::TtsPlay, &normalizer);
+        let second_ids = session.current_tts_audio_display_ids(&normalizer);
+        for (audio_idx, display_idx) in second_ids.iter().copied().enumerate() {
+            let delta = session
+                .apply_tts_audio_boundary(&normalizer, audio_idx)
+                .expect("second playback window accepts semantic audio boundary");
+            assert_eq!(
+                delta.playback.highlighted_sentence_idx,
+                Some(display_idx.saturating_sub(64))
+            );
+            assert_eq!(delta.playback.tts.current_sentence_idx, Some(audio_idx));
+        }
+        session.apply_command_lightweight(SessionCommand::TtsPause, &normalizer);
+        assert!(session.apply_tts_audio_boundary(&normalizer, 0).is_none());
     }
 
     #[test]
