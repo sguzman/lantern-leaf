@@ -1,216 +1,120 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-09 after real-desktop Goal 0008 A7 pretty highlight/scroll diagnosis
+Updated: 2026-09-10 after Goal 0008 final real-desktop acceptance and Goal 0009 authorization.
 
-This file contains verified or explicitly bounded evidence only. Historical roadmap checkboxes are not accepted as current proof.
+This file contains current verified/bounded state. Detailed historical correction lineage lives in `docs/work/reports/` and `docs/work/reviews/`.
 
 ## Workspace / architecture
 
-**VERIFIED PRESENT**
+**VERIFIED / AUTHORITATIVE**
 
-- Native Rust + `eframe`/`egui` is the authoritative desktop architecture.
-- Workspace contains the root package plus `lanternleaf-core`, `lanternleaf-app`, and `lanternleaf-egui`.
-- Tauri/React/WebView remains historical reference only.
+- Native Rust + `eframe`/`egui` is the production desktop architecture.
+- Workspace includes the root package plus `lanternleaf-core`, `lanternleaf-app`, and `lanternleaf-egui`.
+- Rust owns canonical document/session/playback state.
+- Tauri/React/WebView is historical reference only.
+- Windows human workflow is repo-native: `git pull -> .\qa.ps1`.
+- Scoop is the active Windows CLI dependency convention.
 
 ## Gate 0 — Windows baseline
 
 **COMPLETE**
 
-Required hosted Windows CI proves:
+Hosted Windows CI covers MSVC/Pandoc setup, workspace check/build/test, repo-native QA preparation, Windows TTS synthesis/decode, and a separate hosted renderer probe.
 
-- MSVC/Pandoc prerequisite setup;
-- `cargo check --workspace`;
-- `cargo build --workspace`;
-- normal-parallel `cargo test --workspace`.
+## Gate 1 — backend-neutral TTS + Windows TTS
 
-Hosted renderer capability remains a separate truthful probe and does not block required build/test evidence.
+**COMPLETE FOR THE WORKING WINDOWS PATH**
 
-## Gate 1 — TTS backend boundary + Windows TTS
+Accepted runtime shape:
 
-**COMPLETE AT ARCHITECTURE / SYNTHESIS LAYER**
+`canonical display sentence -> backend synthesis -> prepared audio -> Rodio first-sample boundary -> canonical ReaderSession cursor -> native UI projection`
 
-Active flow:
+Verified on the human Windows machine:
 
-`canonical sentence -> selected synthesis backend -> cached WAV -> shared Rodio/Sonic playback -> canonical session progression`
+- Windows speech is audible;
+- Play and Pause work;
+- installed Windows voices can be changed interactively;
+- voice changes preserve the reader session;
+- first-sample sentence boundaries now drive visible sentence synchronization instead of predicted-duration timers.
+
+Piper exists as a backend, but Windows live-switch readiness/recovery is not yet robust. Goal 0009 owns that bounded defect; full Piper model/voice provisioning remains future work.
+
+## Goal 0008 / Gate 2.5 — Caliberate first-class library service
+
+**COMPLETE — AUTOMATED + REAL-DESKTOP ACCEPTED**
+
+Accepted relationship:
+
+`Caliberate 127.0.0.1:8181 -> versioned HTTP/JSON provider -> existing library browser -> materialized source -> normal ReaderSession/TTS`
 
 Verified:
 
-- Piper remains the default backend;
-- WinRT Windows TTS uses installed stable voice IDs;
-- implicit Windows default resolves to the actual effective voice before cache identity;
-- backend/voice changes during active speech resynchronize without losing canonical cursor ownership;
-- Piper/eSpeak setup is Piper-only;
-- Windows WAV output decodes through shared Rodio;
-- missing configured Windows voices fail explicitly.
+- Caliberate is the preferred local provider while legacy Calibre compatibility remains available;
+- large Caliberate catalog retrieval is Arc-backed and no longer copied per frame;
+- supported book formats materialize into the normal source/session path;
+- valid EPUB materialization/native ingestion and cache recovery are covered;
+- the previously problematic large EPUB opens quickly and native UI interaction is snappy;
+- bounded pretty rendering avoids laying out the entire large document every frame;
+- one canonical shared ReaderSession serves reader effects, TTS, and persistence;
+- TTS/persistence hot paths avoid heavyweight full ReaderSnapshot construction;
+- native EPUB structured sentence identity is source-born and carried through TTS and pretty rendering;
+- semantic first-sample audio boundaries carry canonical sentence identity;
+- active TTS wakes egui without depending on incidental user input;
+- real-desktop pretty-view highlight now tracks the actually audible sentence accurately;
+- real-desktop pretty viewport follows playback correctly;
+- Windows audio, Play/Pause, and Windows voice selection work on the same real book.
 
-Real speaker playback and egui interaction remain real-desktop verification items.
+Authoritative A8.3 implementation: `771c31ae90e0bf331195979fffebac8eb2f4ffd6`.
 
-## Goal-completion notifications
+Authoritative A8.3 Windows CI: `34431615684`.
 
-**IMPLEMENTED / MULTI-ATTEMPT PROTOCOL DEFINED**
+Final acceptance is recorded in `docs/work/reviews/0008-a8.3-director-acceptance.md`.
 
-Repository macro-goals and Codex Goal UI sessions are now explicitly separate lifecycles.
+## Goal 0009 — TTS playback polish and layered voice configuration
 
-A director rejection may reopen the same repository goal under a fresh Codex Goal session. The watcher is re-armed per execution attempt, terminal state is signaled only after push, and checkout restoration cannot erase the checkout-safe `.git/lanternleaf-goal-state/<id>.terminal` signal.
+**READY / NEXT AUTHORIZED GOAL**
 
-The human does not manually start/reset the watcher.
+Goal 0009 owns four residuals from the successful Goal 0008 QA:
 
-## Gate 2 — Non-PDF reader/TTS parity
+- occasional unsolicited replay of a just-finished audio sentence/item while pretty highlight remains synchronized;
+- text-only scroll follows correctly but its visual sentence highlight is missing/broken;
+- failed/unready Piper selection can leave TTS unusable for the current session until reopen;
+- configuration ownership needs explicit app-default -> per-book override layering.
 
-**AUTOMATED PARITY COMPLETE; REAL-DESKTOP SIGNOFF PENDING**
+Configuration target:
 
-Goal 0006 established restart-era evidence for:
+```text
+compiled/platform defaults
+        ↓
+app conf/config.toml
+        ↓
+per-book reader overrides
+        ↓
+live session
+```
 
-- TXT;
-- Markdown;
-- HTML;
-- EPUB.
+On Windows, a new/unoverridden book should prefer **Zira** through a portable app-level voice preference. An explicit voice selected for a book should persist as that book's stable voice-ID override. A book with no override continues to inherit future app-default changes.
 
-Representative project-owned fixtures now exercise the real source -> session path.
+The current legacy per-book cache serializes a whole `AppConfig`, while the loader explicitly replaces cached `tts_backend` and `windows_voice_id` with app/base values. Goal 0009 replaces that inverse ownership with explicit optional book overrides and safe migration.
 
-Verified automated behavior includes:
+Piper scope in 0009 is recovery/readiness only: a failed Piper attempt must not poison the session, must not persist a broken backend, and Windows playback must be recoverable without reopening the book. Full Piper model downloading/catalog UX remains deferred.
 
-- source ingestion and canonical `tts_text`;
-- source-family syntax cleanliness;
-- canonical sentence/page accounting;
-- sentence anchors;
-- text-only/pretty ownership invariants;
-- real-session search set/next/previous selection;
-- sentence click/highlight ownership;
-- persistence/reopen;
-- idempotent source/cache cleanup;
-- Rust-native Markdown/HTML/EPUB pretty structures;
-- exact/nearest anchor fallback behavior;
-- auto-scroll duplicate/fallback decision semantics;
-- simulated TTS runtime behavior across all four source families on the Pandoc-capable Windows runner;
-- backend-neutral reader cursor semantics;
-- source -> real TXT session -> canonical sentence -> Windows synthesis -> Rodio decode.
+## Non-PDF reader status
 
-Authoritative correction run `34159728934` passed both Windows jobs.
+**CORE/PRETTY PATH STRONG; BOUNDED TEXT-ONLY POLISH REMAINS**
 
-Observed final test evidence includes:
+TXT/Markdown/HTML/EPUB automated parity remains covered from Goal 0006 onward. The large real EPUB now provides strong real-desktop evidence for native pretty rendering, scrolling, Windows speech, and canonical spoken-sentence synchronization.
 
-- core unit tests: 171 passed / 0 failed;
-- non-PDF source/session parity: green;
-- non-PDF simulated runtime parity: green;
-- native pretty parity: 3 passed / 0 failed;
-- Windows TTS integration: 2 passed / 0 failed.
-
-Goal 0006 also fixed bounded Markdown canonicalization so raw representative Markdown syntax is not spoken as canonical text.
-
-### Real-desktop evidence now observed
-
-A repo-native Windows run using `git pull -> .\qa.ps1` successfully completed dependency bootstrap, built LanternLeaf, and entered the native egui shell on the human Windows machine. The run used isolated `.qa/windows` state, so an initially empty library is expected until files or an external library source are opened.
-
-This closes the basic real-desktop build/launch uncertainty. It does **not** yet prove speaker playback, voice selection, visible render quality, or end-user reader ergonomics.
-
-### Remaining Gate 2 evidence
-
-Hosted CI cannot honestly prove:
-
-- visible pretty/text rendering quality;
-- actual window scrolling/jump comfort;
-- physical speaker playback;
-- interactive Windows voice selection;
-- end-user play/pause/seek ergonomics;
-- reopen behavior as experienced through the GUI.
-
-A concise Windows checklist exists at `docs/qa/non-pdf-reader-windows-checklist.md`.
-
-Goal 0007 proved that a prebuilt QA bundle could be produced, but the human rejected artifact download/extraction as unnecessary workflow friction.
-
-The accepted human workflow is now repo-native:
-
-- `deps.ps1` owns Windows dependency/bootstrap state;
-- `qa.ps1` owns isolated real-desktop QA preparation/build/launch;
-- generated QA state/fixtures/logs live under ignored `.qa/`;
-- GitHub Actions artifacts are not part of ordinary manual testing.
+Known remaining non-PDF presentation defect: text-only mode scrolls to the correct sentence during TTS but does not visibly highlight that row. Goal 0009 owns the rendering fix.
 
 ## PDF
 
-**CORE CONTRACT SET REPAIRED; INTERACTIVE VISUAL/TTS WORK PENDING**
+**CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY IS NEXT AFTER GOAL 0009**
 
-Goal 0003 repaired the bounded classifier/OCR/reading-order/cache contract set.
+Earlier work repaired bounded PDF classification/OCR/reading-order/cache contracts. After Goal 0009 closes the residual TTS/readability polish, the next core product gate is native PDF page rendering/viewport/texture stability, followed by PDF text/TTS/highlight synchronization.
 
-Gate 3 native PDF visual stability begins only after Gate 2 real-desktop signoff.
+## Workflow status
 
-## Caliberate / Calibre library integration
+**MACRO-GOAL / MULTI-ATTEMPT PROTOCOL ACTIVE**
 
-**GOAL 0008 A8.3 — SOURCE/BLOCK IDENTITY GOOD; FINAL RENDERED RANGE COORDINATES STILL UNSAFE**
-
-Accepted integration:
-
-- Caliberate is the preferred/default local provider at `http://127.0.0.1:8181`;
-- paged `/api/v1/books` catalog retrieval maps into the existing library browser;
-- supported formats materialize from `/api/v1/books/{id}/content/{format}`;
-- materialized sources enter the existing LanternLeaf source/session/TTS path;
-- provider-aware caches prevent Caliberate/legacy Calibre cross-contamination;
-- Caliberate API-key auth and legacy Basic auth remain isolated;
-- Caliberate does not probe legacy Calibre cover endpoints;
-- legacy Calibre catalog/download behavior remains covered by deterministic HTTP regression tests.
-
-Authoritative Windows run `34185172624` passed both jobs and the core suite reached **180 passed / 0 failed**.
-
-A3 remains accepted for Caliberate materialization/native EPUB ingestion/cache recovery, and A4 successfully reduced real EPUB open time to an acceptable ~1–2 seconds. Real-desktop A4 signoff nevertheless failed immediately afterward: a 1.34 MB / 10,488-sentence EPUB produced 1,644 native pretty blocks and the egui reader became catastrophically unresponsive, with roughly 2–3 second pointer-hover latency. Pressing TTS Play then terminated the process with a main-thread stack overflow before the playback-worker-start diagnostic. Director inspection localizes deterministic causes: full `AppState` deep cloning per frame includes the 104,732-book catalog; heavyweight `ReaderSnapshot` content is copied through high-frequency state/events; the pretty renderer submits all 1,644 blocks to egui each frame without virtualization; and TTS planning is synchronously entered from the egui main-thread command handler against a second session copy. Goal 0008 is reopened as A5 to repair native frame ownership/virtualization, lightweight snapshot/event boundaries, off-main TTS control, and the QA performance profile. No further human QA until A5 is implemented, validated, reviewed, and integrated.
-
-## Historical Tauri / React / WebView implementation
-
-**HISTORICAL / OBSOLETE AS PRODUCTION TARGET**
-
-It may be consulted for behavioral evidence only.
-
-
-### A5 director review update
-
-The first A5 implementation at `ca91d6ce...` is **not integrated**. Arc-backed frame state, bounded pretty rendering, off-main command submission, and the optimized QA profile are good and must be preserved. Director inspection found that persistence and TTS worker hot paths still construct full `ReaderSnapshot` values, and the app still owns separate effect/TTS `ReaderSession` values synchronized only by source-path changes. A5.1 must collapse to one canonical session handle and use lightweight TTS/persistence projections before another real-desktop run.
-
-
-### A5.1 accepted correction
-
-A5.1 is now integrated. Production normal reader effects, TTS runtime, and persistence share one canonical `Arc<Mutex<Option<ReaderSession>>>`. TTS hot paths use lightweight playback/session projections rather than full document snapshots, and persistence derives bookmark/config/playback data directly. Deterministic 10k+ sentence regressions prove zero full `ReaderSnapshot` construction during TTS worker Play/100 seeks and persistence flush. Windows CI run `34280238462` passed. The remaining evidence is one real-desktop large-EPUB responsiveness and Windows TTS run using the optimized default `qa.ps1` profile.
-
-
-### A6 real-desktop diagnosis
-
-A5/A5.1 native performance corrections are now positively observed on the human machine: the previously unusable large EPUB is described as substantially less laggy and “pretty snappy.” TTS Play no longer stack-overflows, but signoff still fails because the repo-native Windows QA configuration resolves an omitted backend to Piper. The runtime attempted the repository's Linux Piper model path and failed before producing audio. A6 corrects the platform default/QA staging contract so normal Windows QA actually exercises Windows TTS without manual backend selection.
-
-### A6 accepted correction
-
-A6 is integrated. Omitted TTS backend is platform-aware, normal Windows `qa.ps1` deterministically overrides staged QA state to Windows TTS on every run, portable defaults no longer contain developer/Linux Piper paths, TTS startup failures become visible actionable native notifications, and focused QA handoff diagnostics include TTS/audio terms. Windows CI run `34304570627` passed staged QA config -> Windows backend -> installed voice -> WAV synthesis -> Rodio decode plus normal workspace validation. The large native EPUB responsiveness portion already passed on the human machine; only actual speaker playback and interactive TTS controls remain.
-
-
-### A7 real-desktop diagnosis
-
-A6's actual Windows-audio objective is now positively verified: repo-native QA selects Windows, physical speech is audible, and installed Windows voices can be changed successfully. Large-EPUB open/UI performance also remains fast/snappy.
-
-Goal 0008 is still blocked by presentation synchronization. Canonical TTS cursor progression is coherent, but the HTML pretty renderer maps canonical sentences through a text-keyed block index and falls back to proportional HTML anchors when that lookup misses; auto-scroll is also a one-shot request consumed before successful target rendering. This allows duplicate/mismatched sentences to jump to unrelated blocks and allows off-screen follow requests to disappear. A7 replaces this with ordered canonical-sentence -> pretty-target alignment, durable follow state, canonical-cursor-driven scrolling, and stable variable-height bounded virtualization.
-
-
-### A7.1 director review
-
-The first A7 implementation is not integrated. It correctly replaces text-keyed/proportional native-pretty targeting with ordered canonical sentence targets and adds bounded variable-height virtualization, but explicit Jump-to-highlight is currently inert because it clears bookkeeping without creating a pending target. The contract's required 100+ transition/Next/Prev/Pause/Resume/Repeat/unchanged-settings regression coverage is also absent, and committed duplicate suppression is not source-aware. A7.1 is a bounded correction preserving the first A7 architecture. No human QA yet.
-
-
-### A7/A7.1 accepted correction
-
-A7/A7.1 is integrated. Native pretty TTS synchronization now uses ordered canonical display-sentence targets, refuses proportional/distant HTML fallback for unmapped spoken sentences, carries durable source-aware follow targets, derives automatic follow only from canonical cursor transitions, supports explicit Jump-to-highlight re-arming, and retains bounded variable-height virtualization. Windows CI run `34403241270` is green. The remaining Gate 2.5 evidence is one sustained real-desktop highlight/viewport-follow run on the same large EPUB.
-
-
-### A8 real-desktop diagnosis
-
-A7/A7.1 did not solve real spoken-sentence synchronization. Windows audio remains correct and native performance remains good, but pretty highlight/follow is effectively absent; text-only only partially follows and lags. Director inspection finds no egui repaint scheduling for background TTS progress, duration-timer-based cursor advancement instead of real audio sentence boundaries, and native EPUB identity still reconstructed after ingestion by matching independently transformed `html2text` and pretty-block streams. A8 moves canonical sentence identity into source ingestion and carries it through audio and rendering, with semantic audio-boundary events and active-TTS repaint scheduling.
-
-
-### A8.1 director review
-
-The first A8 branch is not integrated. Rodio first-sample markers, semantic SentenceStarted events, removal of duration-timer cursor advancement, and active egui repaint scheduling are good. The central source-identity requirement was not met: EPUB provenance is still assigned by re-extracting block text and post-hoc matching it against a separately generated canonical sentence stream, with no neutral structured provenance model. The real EPUB and simulated-boundary tests also do not satisfy the required end-to-end/window/control coverage. A8.1 preserves the good A8 runtime work and replaces the fake provenance layer with one-pass structured extraction plus explicit canonical IDs on audio boundaries.
-
-
-### A8.2 director review
-
-A8.1 is not integrated despite green Windows CI. Core now has real source-born structured sentence provenance and audio boundaries carry explicit canonical IDs, but egui still independently parses raw HTML into a separate PrettyBlock coordinate system and assumes StructuredBlock.block_id equals PrettyBlock Vec index. HR/table/nested-list/inline-image rendering can shift that index and invalidate every later highlight. Pretty target ranges are also re-split from rendered text rather than using source ranges. A8.2 makes StructuredDocument the native pretty input, carries explicit source block/range identity into visual targets, gives ReaderSession unambiguous canonical/global cursor identity, and adds divergence-focused EPUB plus stronger runtime boundary tests.
-
-
-### A8.3 director review
-
-A8.2 is not integrated despite green Windows CI. StructuredDocument now reaches egui via Arc, native pretty blocks carry explicit source block identity, and audio boundaries carry explicit canonical IDs. The remaining blocker is the actual rendered highlight coordinate system: structured sentence offsets are measured on whitespace-normalized plain text while PrettySpan byte offsets are measured on original decoded rich-HTML text, with no translation. Entity/whitespace normalization can therefore shift or invalidate highlight ranges. A8.3 establishes one canonical visible-text coordinate system (or exact translation), supports multi-subblock sentence segments, makes pretty/text-only consume the high-frequency canonical playback ID directly, fixes canonical persistence semantics, and removes word-count inference from structured page identity.
+The repository is the durable agent-to-agent communication surface. Only the single goal under `docs/work/ready/` is authorized to start. Codex owns implementation/validation/reporting and goal notifications; ChatGPT owns goal definition/review/integration; the human owns local GUI/audio verification only when requested.

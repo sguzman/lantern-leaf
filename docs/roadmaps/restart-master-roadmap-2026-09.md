@@ -1,138 +1,132 @@
 # LanternLeaf Restart Master Roadmap — September 2026
 
-This is the active restart roadmap. It orders the detailed roadmaps against the current Windows/native-egui restart.
+This is the active restart roadmap for the Windows/native-egui line. Completion is evidence-driven: accepted implementation plus the human-only runtime evidence a gate actually requires.
 
-Roadmap state is evidence-driven. Completion means accepted implementation plus validation, not historical checkbox state.
-
-## Gate 0 — Recover trustworthy baseline
+## Gate 0 — Trustworthy Windows baseline
 
 **STATUS: COMPLETE**
 
-Goals 0001-0005 established reproducible Windows CI, deterministic test/cache behavior, truthful renderer capability separation, and repaired bounded PDF core contracts.
+Goals 0001–0005 established reproducible Windows CI, deterministic cache/test behavior, native-egui launch, and repaired bounded core contracts.
 
-## Gate 1 — TTS backend boundary + Windows TTS
+## Gate 1 — Backend-neutral TTS + Windows TTS
 
-**STATUS: COMPLETE AT ARCHITECTURE / SYNTHESIS LAYER**
+**STATUS: COMPLETE FOR THE WORKING WINDOWS PATH**
 
 Accepted flow:
 
-`canonical sentence -> backend synthesis -> cached WAV -> shared Rodio/Sonic playback -> session progression`
+`canonical sentence -> backend synthesis -> prepared audio -> Rodio first-sample boundary -> canonical ReaderSession -> native UI`
 
-Piper and WinRT Windows synthesis share the same playback/session model.
+Windows speaker playback, Play/Pause, and installed Windows voice switching are now verified on the real Windows machine.
 
-## Workflow UX — automatic macro-goal completion notification
+Piper remains a supported backend but Windows provisioning/live-switch recovery is not yet polished. Goal 0009 owns bounded recovery; a complete Piper model catalog/downloader is future work.
+
+## Workflow UX — macro-goal notifications
 
 **STATUS: IMPLEMENTED / MULTI-ATTEMPT HARDENED**
 
-Repository goal identity is durable; Codex Goal sessions are disposable execution attempts.
+Repository goal identity is durable; Codex Goal sessions are disposable attempts. Correction attempts reuse the repository goal ID, re-arm the watcher, push before signaling terminal state, and return the shared checkout to `main`.
 
-Correction attempts reuse the repository goal ID, re-arm the detached watcher, push before signaling terminal state, and do not require the human to operate notification plumbing.
+## Gate 2 — Non-PDF reader/TTS
 
-## Gate 2 — Non-PDF reader/TTS parity
+**STATUS: CORE/PRETTY EPUB PATH ACCEPTED; TEXT-ONLY VISUAL POLISH IN GOAL 0009**
 
-**STATUS: AUTOMATED PARITY COMPLETE — REPO-NATIVE REAL-DESKTOP SIGNOFF PENDING**
+Goal 0006 established automated parity for TXT, Markdown, HTML, and EPUB. Goal 0008's later synchronization work strengthened native EPUB identity and real-desktop behavior substantially.
 
-Goal 0006 re-proved current Rust-native behavior for:
+Real Windows evidence now includes:
 
-- TXT;
-- Markdown;
-- HTML;
-- EPUB.
+- fast/snappy large EPUB opening and interaction;
+- working Windows speech;
+- working Play/Pause and Windows voice changes;
+- accurate native pretty spoken-sentence highlighting;
+- accurate viewport follow without the prior random jumps;
+- text-only viewport follow using the same canonical playback identity.
 
-Accepted automated evidence covers:
+Known residual: text-only row highlighting is visually broken even though its scroll follows correctly. Goal 0009 owns this bounded rendering defect.
 
-- representative deterministic fixtures;
-- canonical text/sentence ownership;
-- canonical syntax cleanliness;
-- search navigation;
-- sentence click/highlight contracts;
-- native pretty structures;
-- anchor fallback;
-- auto-scroll decision logic;
-- persistence/reopen/cleanup;
-- simulated TTS across all four formats;
-- Piper/Windows reader-state neutrality;
-- real source/session -> Windows synthesis continuity.
-
-Gate 2 still requires a bounded real-Windows manual signoff for visible/interactive behavior that hosted GPU-less CI cannot prove.
-
-Goal 0007's downloadable QA-bundle approach was technically valid but rejected as human-workflow friction.
-
-The replacement is repo-native:
+Human workflow remains:
 
 `git pull -> .\qa.ps1`
 
-with `deps.ps1` as the checked-in idempotent Windows dependency/bootstrap contract. Ordinary QA must not require downloading CI artifacts.
-
-Gate 2 exit:
-
-- automated Goal 0006 evidence accepted;
-- representative TXT/Markdown/HTML/EPUB GUI smoke completed on a real Windows desktop;
-- Windows voice selection and speaker playback confirmed;
-- major interaction defects, if any, are repaired or explicitly bounded.
+No ordinary manual QA uses downloaded CI artifacts.
 
 ## Gate 2.5 — First-class Caliberate library service
 
-**STATUS: IMPLEMENTATION COMPLETE — REAL-DESKTOP SERVICE SIGNOFF PENDING**
+**STATUS: COMPLETE — GOAL 0008 CLOSED**
 
-Goal 0008 connected the native reader to the user's existing Caliberate library service.
+Accepted relationship:
 
-Target relationship:
+`Caliberate -> HTTP/JSON v1 at 127.0.0.1:8181 -> existing library browser -> materialized source -> normal reader/TTS pipeline`
 
-`Caliberate -> HTTP/JSON v1 at 127.0.0.1:8181 -> LanternLeaf library browser -> materialized source -> existing reader/TTS pipeline`
+Goal 0008 now has both automated and real-desktop acceptance evidence:
 
-Goal 0008 keeps one browser UI, adds a narrow provider boundary, makes Caliberate the preferred local provider, and preserves legacy Calibre content-server compatibility. Automated Windows validation is complete; only the real service/UI/TTS pass remains.
+- paged large Caliberate catalog works through the existing UI;
+- supported books materialize into the normal source/session path;
+- legacy Calibre compatibility remains;
+- large real Caliberate EPUB opens quickly and remains responsive;
+- Windows speech works on the materialized book;
+- canonical first-sample playback boundaries, pretty highlight, and viewport follow stay synchronized on the real machine.
 
-Exit:
+The long A3–A8.3 correction history is preserved under `docs/work/reports/0008.md` and `docs/work/reviews/`.
 
-- paged Caliberate catalog appears through the existing library browser;
-- a supported book format materializes from the Caliberate content endpoint;
-- the materialized book enters the existing LanternLeaf session/TTS path;
-- legacy Calibre remains available behind the provider adapter;
-- real Windows QA confirms a Caliberate-sourced book can be opened and spoken.
+## Gate 2.6 — TTS playback polish + layered voice configuration
+
+**STATUS: READY — GOAL 0009**
+
+Before PDF work, close the residual reader/TTS defects discovered during Goal 0008 acceptance:
+
+- occasional unsolicited replay of a just-finished audio item;
+- missing text-only visual highlight despite correct scroll-follow;
+- failed/unready Piper selection poisoning the current TTS session;
+- app-default/per-book voice/backend ownership.
+
+Configuration policy:
+
+`compiled/platform defaults -> app conf/config.toml -> per-book overrides -> live session`
+
+New/unoverridden Windows books should portably prefer Zira. Explicit per-book voice changes persist as stable voice-ID overrides. Full Piper voice/model management is outside this gate.
 
 ## Gate 3 — Native PDF visual stability
 
-**NEXT CORE RENDERING GATE AFTER CALIBERATE INTEGRATION / REMAINING GATE 2 SIGNOFF**
+**STATUS: NEXT CORE RENDERING GATE AFTER GOAL 0009**
 
 Focus:
 
-- page raster;
-- texture cache;
+- page raster/rendering;
+- texture/cache lifecycle;
 - viewport scheduling;
-- zoom/scroll;
-- memory/performance;
-- stable rendering independent of TTS.
+- zoom/scroll stability;
+- bounded memory/performance;
+- reliable visual behavior independent of TTS.
 
 ## Gate 4 — PDF text, TTS, and highlight synchronization
 
-After visual stability:
+After Gate 3:
 
 - canonical sentence/page mapping;
 - geometry confidence;
-- overlay lifecycle;
+- overlays;
+- first-sample audio-boundary identity;
 - jump/follow behavior;
-- playback transition smoothness;
 - OCR/degraded modes;
-- regression corpus.
+- representative regression corpus.
 
 ## Gate 5 — Format expansion and ingestion cleanup
 
-- DOCX/Word hardening;
+- DOCX/Word;
+- further HTML edge cases;
 - common source/document boundaries;
-- format-level regression tests beyond the Gate 2 reader families.
+- broader format fixtures.
 
 ## Gate 6 — Ergonomics, performance, packaging
 
 - startup/TTS latency;
 - UI cleanup;
-- large-document behavior;
-- Calibre/import polish;
+- large-document ergonomics;
+- Piper model/voice management if desired;
+- library/import polish;
 - release packaging;
 - dependency cleanup justified by measured problems.
 
 ## Director rule
 
-ChatGPT may compress several related passes into one macro-goal when doing so removes needless human/Codex round trips without opening architectural ambiguity.
-
-Detailed subsystem roadmaps remain subordinate evidence.
+ChatGPT may combine related repair passes into one macro-goal when doing so removes needless human/Codex round trips without opening architectural ambiguity. Current verified state and active goal contracts outrank historical roadmap text.

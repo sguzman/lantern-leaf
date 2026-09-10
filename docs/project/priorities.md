@@ -1,182 +1,110 @@
 # LanternLeaf Priorities
 
-These priorities are ordered. They may be revised by ChatGPT/director as verified implementation evidence changes.
+These priorities are ordered by current verified evidence. Historical attempt detail belongs in work reports/reviews rather than this file.
 
-## P0 — Recover a trustworthy Windows baseline
+## P0 — Trustworthy Windows/native baseline
 
-- reproducible Windows build;
-- native egui app launches;
-- workspace tests/build gates are meaningful;
-- actual current functionality is inventoried from code/runtime evidence;
-- Windows CI catches regressions.
+**COMPLETE**
 
-## P1 — Stabilize TTS architecture and add native Windows TTS
+- reproducible Windows build/check/test;
+- native egui application launches;
+- repo-native `deps.ps1` / `qa.ps1` workflow;
+- meaningful Windows CI and separate hosted renderer probe;
+- Scoop remains the Windows CLI dependency convention.
 
-- make backend ownership explicit;
-- preserve Piper;
-- add Windows-native voice enumeration/playback;
-- keep reader/session semantics backend-neutral;
-- verify cancellation, pause/stop, and event semantics.
+## P1 — Backend-neutral TTS + Windows speech
 
-## P2 — Verify and stabilize non-PDF reading
+**WORKING WINDOWS PATH COMPLETE; PIPER POLISH DEFERRED/BOUNDED**
 
-- EPUB/TXT/Markdown;
-- HTML where present/targeted;
-- sentence identity;
-- highlighting;
-- click-to-play;
-- bookmarks/config/search/navigation.
+- canonical reader/session semantics are backend-neutral;
+- Windows voice enumeration/synthesis/playback works;
+- first-sample audio boundaries drive canonical playback identity;
+- Windows speaker playback and interactive voice changes are verified on the human machine.
 
-## P2.5 — Connect LanternLeaf to Caliberate as a first-class library service — A8.3 RENDERED RANGE COORDINATES
+Piper exists, but Windows readiness/live-switch recovery is not yet robust. Goal 0009 handles safe failure/recovery only; full Piper model/voice management is later work.
 
-- use Caliberate's versioned HTTP/JSON API rather than direct database coupling;
-- default local provider target `http://127.0.0.1:8181`;
-- page/catalog/search-compatible provider boundary behind the existing library browser;
-- stream/materialize supported formats into the normal LanternLeaf reader/session pipeline;
-- preserve legacy Calibre content-server compatibility;
-- keep the human workflow repo-native: `git pull -> .\qa.ps1`;
-- preserve A3 valid-EPUB materialization/native-ingestion correctness;
-- A4 now removes synchronous whole-book normalization from reader open and idle snapshot;
-- A4 bounds first TTS activation to a 64-display-sentence lazy plan window and precompiles stable normalizer matchers;
-- deterministic 3,500-sentence regression evidence is green;
-- A4 now proves the large real EPUB can enter Reader mode in an acceptable ~1–2 seconds;
-- A5 must eliminate per-frame deep cloning of the 104k catalog/heavy reader payloads;
-- A5 must virtualize/bound pretty rendering instead of rebuilding all 1,644+ blocks per egui frame;
-- A5 must move TTS control/planning off the egui main thread and remove the observed Play-triggered stack overflow;
-- A5 must make repo-native `qa.ps1` launch a representative optimized interactive profile;
-- require one successful real-desktop large-EPUB responsiveness + Windows TTS verification before Gate 2.5 is complete.
+## P2 — Non-PDF reader/TTS
 
-## P3 — Make native PDF rendering reliable
+**PRETTY EPUB PATH ACCEPTED; TEXT-ONLY VISUAL POLISH REMAINS**
 
-- page rendering;
-- zoom/viewport lifecycle;
-- cache/texture management;
-- performance on representative documents.
+- TXT/Markdown/HTML/EPUB automated parity is established;
+- source-born structured EPUB sentence identity is integrated;
+- native pretty rendering is bounded and responsive on the real large EPUB;
+- pretty spoken-sentence highlighting and viewport follow are now accurate on the real Windows machine;
+- text-only scroll follows correctly but its visible row highlight remains broken and is assigned to Goal 0009.
 
-## P4 — Complete PDF text/TTS/highlight synchronization
+## P2.5 — First-class Caliberate service
 
-- extraction quality;
-- sentence/page mapping;
-- geometry overlays;
+**COMPLETE — GOAL 0008 CLOSED**
+
+- Caliberate uses the versioned HTTP/JSON API at `127.0.0.1:8181`;
+- existing library browser remains the UI;
+- large catalog state is shared rather than deep-cloned per frame;
+- supported formats materialize into the normal source/session/TTS pipeline;
+- legacy Calibre compatibility remains behind the provider boundary;
+- large real Caliberate EPUB opens quickly and is snappy;
+- Windows speech, Play/Pause, voice selection, accurate pretty highlight, and synchronized viewport follow are verified end-to-end.
+
+## P2.6 — Goal 0009: TTS playback polish + layered voice configuration
+
+**READY — NEXT AUTHORIZED WORK**
+
+Goal 0009 must preserve Goal 0008 and close four bounded residuals:
+
+1. diagnose/eliminate unsolicited replay of a just-finished audio item across normal batch/refill/window progression;
+2. make text-only visible highlight consume the same canonical ID its scroll-follow already uses;
+3. make failed/unready Piper selection transactional and recoverable without reopening the book;
+4. replace the current whole-AppConfig per-book cache ownership with explicit layered overrides.
+
+Configuration precedence is fixed:
+
+```text
+compiled/platform defaults
+-> app conf/config.toml
+-> per-book reader overrides
+-> live session
+```
+
+Windows app default must portably prefer **Zira** for new/unoverridden books. An explicit voice selected for one book persists as that book's stable Windows voice-ID override. Books without overrides continue inheriting the app preference.
+
+Do not hardcode an opaque machine-specific Zira voice ID. Do not implement a full Piper model downloader/catalog as part of 0009.
+
+## P3 — Native PDF visual stability
+
+**NEXT CORE PRODUCT GATE AFTER GOAL 0009**
+
+- page raster/render ownership;
+- texture/cache lifecycle;
+- viewport scheduling;
+- zoom/scroll stability;
+- bounded memory/performance on representative PDFs;
+- visual behavior independent of TTS.
+
+## P4 — PDF text/TTS/highlight synchronization
+
+After P3:
+
+- canonical sentence/page mapping;
+- geometry confidence and overlays;
 - jump/follow behavior;
-- degraded confidence modes;
-- regression tests for prior drift/jitter bugs.
+- OCR/degraded confidence modes;
+- first-sample playback identity integrated with PDF geometry;
+- regression corpus for prior drift/jitter failures.
 
-## P5 — Broaden format ingestion
+## P5 — Format expansion / ingestion hardening
 
-- HTML hardening;
 - DOCX/Word;
-- common document ingestion boundaries;
-- format fixtures and regression coverage.
+- HTML edge-case hardening beyond current structured path;
+- shared source/document boundaries;
+- format-level regression fixtures.
 
-## P6 — Ergonomics and performance
+## P6 — Ergonomics, latency, packaging
 
-Only after the preceding foundations are trustworthy:
+Only after foundations are trustworthy:
 
+- startup/TTS latency optimization;
 - UI cleanup;
-- startup latency;
-- TTS latency;
-- large-document performance;
-- library workflow polish.
-
-
-A5.1 correction priority:
-- preserve Arc-backed frame-state and bounded pretty-render improvements from the rejected A5 implementation;
-- replace cloned effect/TTS ReaderSession values with one canonical shared session handle;
-- remove full ReaderSnapshot construction from TTS worker plan/progress/control paths;
-- remove full ReaderSnapshot construction from persistence flushes;
-- add deterministic 10k+ sentence tests proving zero heavyweight snapshots and cross-path cursor authority.
-
-
-A5.1 accepted:
-- one canonical ReaderSession handle now serves normal reader effects, TTS, and persistence;
-- TTS/persistence hot paths are structurally snapshot-free on 10k+ sentence regressions;
-- accepted A5 Arc-backed frame state, bounded pretty rendering, off-main TTS submission, and optimized QA profile remain in place;
-- require successful real-desktop large-EPUB responsiveness + Windows TTS Play/seek/pause/resume/stop before Gate 2.5 completion.
-
-
-A6 correction priority:
-- preserve the now-successful A5/A5.1 native large-EPUB responsiveness work;
-- make omitted TTS backend platform-aware (Windows on Windows, Piper elsewhere);
-- make normal `qa.ps1` deterministically stage/verify Windows TTS even with pre-existing QA state;
-- surface backend/config synthesis failures visibly;
-- prove staged Windows QA config through Windows voice synthesis + WAV decode before another human run.
-
-A6 accepted:
-- normal Windows QA now deterministically selects Windows TTS despite stale staged config;
-- platform-aware omitted-backend defaults and portable Piper defaults are integrated;
-- staged Windows QA synthesis/decode coverage and actionable native TTS errors are green;
-- large-EPUB native responsiveness is already positively observed;
-- final requirement: one real-desktop `.\qa.ps1` run with audible Windows speech plus next/previous/pause/resume/stop.
-
-
-A7 correction priority:
-- preserve confirmed fast/snappy large-EPUB native performance and working Windows speech/voice selection;
-- replace normalized-text HashMap/proportional-anchor TTS targeting with ordered canonical display-sentence -> pretty target alignment;
-- make auto-scroll target-aware and durable until successful scroll/supersession;
-- drive follow behavior only from canonical display-cursor transitions;
-- stabilize variable-height virtual scrolling without restoring full-document layout;
-- add 10k-sentence / 1.5k-block duplicate/unmapped/100+ transition regressions before another human run.
-
-Deferred, nonblocking: interactive Piper switching/provisioning in the normal Windows QA context should be revisited after Goal 0008; Windows TTS is sufficient for current A7 verification.
-
-
-A7.1 correction priority:
-- preserve first-A7 ordered canonical pretty-target mapping, no proportional TTS fallback, sentence-range highlighting, and variable-height bounded virtualization;
-- repair explicit Jump-to-highlight so it actually re-arms the current canonical target;
-- extract/test the production cursor-transition -> follow-target rule across 100+ advances and Next/Prev/Pause/Resume/Repeat/unchanged voice/settings events;
-- make committed duplicate-follow identity source-aware;
-- no human QA until A7.1 director acceptance.
-
-
-A7/A7.1 accepted:
-- canonical global display-sentence identity now drives native pretty targeting;
-- duplicate text no longer collapses distinct occurrences;
-- unmapped HTML spoken sentences do not use proportional random-jump fallback;
-- follow targets are durable/source-aware and driven by actual cursor transitions;
-- explicit Jump-to-highlight is repaired;
-- 128-transition production-rule coverage plus large alignment/virtualization regressions are green;
-- final requirement: sustained real-desktop audible-sentence highlight and viewport-follow verification on the same large EPUB.
-
-
-A8 correction priority:
-- preserve fast/snappy native EPUB rendering and working Windows audio/voices;
-- create canonical sentence identity once during EPUB/native HTML ingestion and carry it into TTS and pretty provenance;
-- make actual audio sentence-start boundaries authoritative for visual cursor transitions;
-- add active-TTS egui repaint scheduling so UI progress does not depend on user input;
-- stop using native EPUB render-time sentence-string alignment as the production identity mechanism;
-- validate through a real multi-chapter EPUB ingestion fixture plus 100+ simulated audio-boundary transitions;
-- no human QA until A8 director acceptance.
-
-
-A8.1 correction priority:
-- preserve first-sample Rodio markers, semantic SentenceStarted events, no duration-timer cursor stepping, and 24 ms active-TTS repaint scheduling;
-- replace post-hoc regex/html2text sentence matching with one-pass structured EPUB extraction that creates canonical IDs directly;
-- add a neutral structured sentence/block provenance model shared by session/TTS/pretty;
-- carry canonical display ID explicitly in prepared audio and boundary messages;
-- upgrade the real EPUB fixture to >128 sentences with nested spans/entities/distant duplicates/image/quote and exact identity assertions;
-- add runtime-level controllable 128+ boundary tests with pause/resume/repeat/next/prev/window semantics;
-- no human QA until A8.1 director acceptance.
-
-
-A8.2 correction priority:
-- preserve A8.1 StructuredDocument source traversal and explicit audio boundary canonical IDs;
-- stop treating source block_id as egui Vec index;
-- build native EPUB pretty blocks from the structured document with explicit source lineage;
-- carry source sentence ranges directly into visual targets;
-- separate canonical/global highlight identity from page-local cursor fields;
-- remove structured EPUB sentence repartitioning by string search;
-- extend the >128-sentence EPUB fixture with HR/table/nested-list/inline-image block-index divergence cases and exact source->pretty->TTS assertions;
-- finish production runtime Repeat/Next/Prev/window boundary assertions;
-- no human QA until A8.2 director acceptance.
-
-
-A8.3 correction priority:
-- preserve A8.2 explicit source block identity, StructuredDocument Arc projection, and strengthened audio boundary semantics;
-- unify/translate normalized canonical source text offsets with rendered PrettySpan byte coordinates;
-- prove &nbsp;/repeated whitespace/newlines/tabs/Unicode whitespace and multibyte boundaries highlight exact visible text;
-- support one canonical sentence across multiple visual subblocks;
-- drive pretty/text-only from high-frequency canonical playback ID rather than stale document snapshot reconstruction;
-- never persist page-local sentence index as canonical identity;
-- replace structured multi-page word-count partition inference with explicit canonical ID ownership;
-- no human QA until A8.3 director acceptance.
+- large-document ergonomics;
+- Piper model/voice management if still desired;
+- library/import polish;
+- release packaging and dependency cleanup.
