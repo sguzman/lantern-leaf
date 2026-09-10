@@ -96,6 +96,8 @@ fn sample_snapshot(path: &Path) -> session::ReaderSnapshot {
         canonical_sentences: vec!["sentence".to_string()],
         page_sentence_counts: vec![1],
         sentence_anchor_map: vec![Some(0)],
+        structured_document: None,
+        highlighted_canonical_idx: Some(0),
         highlighted_sentence_idx: Some(0),
         search_query: String::new(),
         search_matches: vec![0],

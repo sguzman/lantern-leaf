@@ -175,6 +175,10 @@ pub struct ReaderSnapshot {
     pub canonical_sentences: Vec<String>,
     pub page_sentence_counts: Vec<usize>,
     pub sentence_anchor_map: Vec<Option<usize>>,
+    #[serde(skip)]
+    #[ts(skip)]
+    pub structured_document: Option<Arc<crate::epub_loader::StructuredDocument>>,
+    pub highlighted_canonical_idx: Option<usize>,
     pub highlighted_sentence_idx: Option<usize>,
     pub search_query: String,
     pub search_matches: Vec<usize>,
@@ -242,6 +246,7 @@ pub struct ReaderPlaybackView {
     pub source_path: String,
     pub current_page: usize,
     pub highlighted_sentence_idx: Option<usize>,
+    pub highlighted_canonical_idx: Option<usize>,
     pub tts: ReaderTtsView,
     pub stats: ReaderStats,
     pub settings: ReaderSettingsView,
@@ -260,7 +265,7 @@ pub struct ReaderSession {
     tts_text: String,
     reading_markdown: Option<String>,
     reading_html: Option<String>,
-    structured_document: Option<crate::epub_loader::StructuredDocument>,
+    structured_document: Option<Arc<crate::epub_loader::StructuredDocument>>,
     has_structured_markdown: bool,
     pdf_geometry_mode: Option<crate::epub_loader::PdfGeometryMode>,
     pdf_sync_strategy: Option<crate::epub_loader::PdfSyncStrategy>,
@@ -278,6 +283,7 @@ pub struct ReaderSession {
     page_sentence_counts: Vec<usize>,
     pub current_page: usize,
     highlighted_display_idx: Option<usize>,
+    highlighted_canonical_idx: Option<usize>,
     highlighted_audio_idx: Option<usize>,
     pub text_only_mode: bool,
     search_query: String,
@@ -293,7 +299,17 @@ pub struct ReaderSession {
 
 impl ReaderSession {
     pub fn structured_document(&self) -> Option<&crate::epub_loader::StructuredDocument> {
-        self.structured_document.as_ref()
+        self.structured_document.as_deref()
+    }
+
+    pub fn structured_document_handle(
+        &self,
+    ) -> Option<Arc<crate::epub_loader::StructuredDocument>> {
+        self.structured_document.clone()
+    }
+
+    pub fn highlighted_canonical_idx(&self) -> Option<usize> {
+        self.global_display_idx().or(self.highlighted_canonical_idx)
     }
 
     /// Lightweight constructor for test-only sessions without IO.
@@ -334,6 +350,7 @@ impl ReaderSession {
             page_sentence_counts,
             current_page: 0,
             highlighted_display_idx: Some(0),
+            highlighted_canonical_idx: Some(0),
             highlighted_audio_idx: None,
             text_only_mode: false,
             search_query: String::new(),
@@ -356,6 +373,7 @@ impl ReaderSession {
             source_path: self.source_path_str(),
             current_page: self.current_page,
             highlighted_sentence_idx: self.current_highlight_idx(),
+            highlighted_canonical_idx: self.highlighted_canonical_idx(),
             tts,
             stats,
             settings: self.settings_view(),
@@ -1260,6 +1278,8 @@ impl ReaderSession {
             canonical_sentences,
             page_sentence_counts: self.page_sentence_counts.clone(),
             sentence_anchor_map,
+            structured_document: self.structured_document.clone(),
+            highlighted_canonical_idx: self.highlighted_canonical_idx(),
             highlighted_sentence_idx,
             search_query: self.search_query.clone(),
             search_matches: self.search_matches.clone(),
@@ -2078,6 +2098,7 @@ mod tests {
             page_sentence_counts,
             current_page: 0,
             highlighted_display_idx: Some(0),
+            highlighted_canonical_idx: Some(0),
             highlighted_audio_idx: None,
             text_only_mode: false,
             search_query: String::new(),
@@ -3159,5 +3180,25 @@ mod tests {
         }
         assert_eq!(session.highlighted_display_idx, Some(100));
         let _ = fs::remove_dir_all(&normalized_dir);
+    }
+
+    #[test]
+    fn global_tts_boundary_derives_page_local_highlight_identity() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = ReaderSession::from_pages_for_test(
+            PathBuf::from("/tmp/multi-page-boundary.epub"),
+            "multi-page-boundary.epub".to_string(),
+            vec!["A. B.".to_string(), "C. D.".to_string()],
+            vec![vec!["A.".to_string(), "B.".to_string()], vec!["C.".to_string(), "D.".to_string()]],
+        );
+        session.tts_state = TtsPlaybackState::Playing;
+        let delta = session
+            .apply_tts_sentence_boundary(&normalizer, 1, 3)
+            .expect("playing boundary should update the session");
+        assert_eq!(session.current_page, 1);
+        assert_eq!(session.highlighted_display_idx, Some(1));
+        assert_eq!(session.highlighted_canonical_idx(), Some(3));
+        assert_eq!(delta.playback.highlighted_canonical_idx, Some(3));
+        assert_eq!(delta.playback.highlighted_sentence_idx, Some(1));
     }
 }

@@ -162,6 +162,8 @@ pub struct ReaderPlaybackState {
     pub source_path: String,
     pub current_page: usize,
     pub highlighted_sentence_idx: Option<usize>,
+    #[serde(default)]
+    pub highlighted_canonical_idx: Option<usize>,
     pub tts: session::ReaderTtsView,
     pub stats: session::ReaderStats,
     #[serde(default)]

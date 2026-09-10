@@ -864,6 +864,7 @@ fn handle_persistence_flush(
             source_path: view.source_path.clone(),
             current_page: view.current_page,
             highlighted_sentence_idx: view.highlighted_sentence_idx,
+            highlighted_canonical_idx: view.highlighted_canonical_idx,
             tts: view.tts,
             stats: view.stats,
             updated_at: 0,

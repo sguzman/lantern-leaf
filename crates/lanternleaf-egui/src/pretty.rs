@@ -66,6 +66,16 @@ pub struct PrettyBlock {
     pub table: Option<Vec<Vec<PrettyCell>>>,
     pub anchor_idx: usize,
     pub source_kind: PrettySourceKind,
+    pub source_block_id: Option<usize>,
+    pub source_subblock_index: usize,
+    pub source_sentence_ranges: Vec<PrettySourceSentenceRange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrettySourceSentenceRange {
+    pub canonical_display_id: usize,
+    pub text_start: usize,
+    pub text_end: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -602,6 +612,9 @@ fn finish_block_markdown(
         table,
         anchor_idx: anchor_idx_for_block(*block_index),
         source_kind: PrettySourceKind::Markdown,
+        source_block_id: None,
+        source_subblock_index: 0,
+        source_sentence_ranges: Vec::new(),
     });
     *block_index = block_index.saturating_add(1);
 }
@@ -659,6 +672,80 @@ pub fn html_to_blocks(
         "Converted html to pretty blocks"
     );
     blocks
+}
+
+pub fn structured_to_blocks(
+    document: &lanternleaf_core::epub_loader::StructuredDocument,
+    images: &[ReaderImageRef],
+    pretty_cfg: config::PrettyUiConfig,
+) -> Vec<PrettyBlock> {
+    let mut output = Vec::new();
+    for source in &document.blocks {
+        let tag = match source.kind.as_str() {
+            "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => source.kind.as_str(),
+            "blockquote" => "blockquote",
+            "li" => "li",
+            "img" => "img",
+            "hr" => "hr",
+            "table" => "table",
+            _ => "p",
+        };
+        let html = if matches!(tag, "img" | "hr") {
+            source.rich_html.clone()
+        } else {
+            format!("<{tag}>{}</{tag}>", source.rich_html)
+        };
+        let mut local = html_to_blocks(&html, images, pretty_cfg);
+        if local.is_empty() && !source.plain_text.is_empty() {
+            local.push(PrettyBlock {
+                kind: PrettyBlockKind::Paragraph,
+                spans: vec![PrettySpan {
+                    text: source.plain_text.clone(),
+                    style: PrettyStyle::default(),
+                }],
+                code: None,
+                image: None,
+                table: None,
+                anchor_idx: 0,
+                source_kind: PrettySourceKind::Html,
+                source_block_id: None,
+                source_subblock_index: 0,
+                source_sentence_ranges: Vec::new(),
+            });
+        }
+        let mut visual_cursor = 0usize;
+        for (subblock_index, block) in local.iter_mut().enumerate() {
+            let text_len = block.spans.iter().map(|span| span.text.len()).sum::<usize>()
+                + block
+                    .table
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|rows| rows.iter())
+                    .flat_map(|row| row.iter())
+                    .flat_map(|cell| cell.spans.iter())
+                    .map(|span| span.text.len())
+                    .sum::<usize>();
+            block.source_block_id = Some(source.block_id);
+            block.source_subblock_index = subblock_index;
+            block.source_sentence_ranges = document
+                .sentences
+                .iter()
+                .filter(|sentence| sentence.block_id == source.block_id)
+                .filter_map(|sentence| {
+                    let start = sentence.source_start.max(visual_cursor);
+                    let end = sentence.source_end.min(visual_cursor.saturating_add(text_len));
+                    (start < end).then_some(PrettySourceSentenceRange {
+                        canonical_display_id: sentence.canonical_display_id,
+                        text_start: start.saturating_sub(visual_cursor),
+                        text_end: end.saturating_sub(visual_cursor),
+                    })
+                })
+                .collect();
+            visual_cursor = visual_cursor.saturating_add(text_len);
+            output.push(block.clone());
+        }
+    }
+    output
 }
 
 fn walk_scraper_children(
@@ -723,6 +810,9 @@ fn walk_scraper_children(
                         table: None,
                         anchor_idx: anchor_idx_for_block(*block_index),
                         source_kind: PrettySourceKind::Html,
+                        source_block_id: None,
+                        source_subblock_index: 0,
+                        source_sentence_ranges: Vec::new(),
                     });
                     *block_index = block_index.saturating_add(1);
                     continue;
@@ -755,6 +845,9 @@ fn walk_scraper_children(
                         table: None,
                         anchor_idx: anchor_idx_for_block(*block_index),
                         source_kind: PrettySourceKind::Html,
+                        source_block_id: None,
+                        source_subblock_index: 0,
+                        source_sentence_ranges: Vec::new(),
                     });
                     *block_index = block_index.saturating_add(1);
                     continue;
@@ -776,6 +869,9 @@ fn walk_scraper_children(
                                 table: None,
                                 anchor_idx: anchor_idx_for_block(*block_index),
                                 source_kind: PrettySourceKind::Html,
+                                source_block_id: None,
+                                source_subblock_index: 0,
+                                source_sentence_ranges: Vec::new(),
                             });
                             *block_index = block_index.saturating_add(1);
                         }
@@ -817,6 +913,9 @@ fn walk_scraper_children(
                         table: Some(table),
                         anchor_idx: anchor_idx_for_block(*block_index),
                         source_kind: PrettySourceKind::Html,
+                        source_block_id: None,
+                        source_subblock_index: 0,
+                        source_sentence_ranges: Vec::new(),
                     });
                     *block_index = block_index.saturating_add(1);
                     continue;
@@ -1288,6 +1387,9 @@ fn push_flow_items_as_blocks_with_kind(
                         table: None,
                         anchor_idx: anchor_idx_for_block(*block_index),
                         source_kind: PrettySourceKind::Html,
+                        source_block_id: None,
+                        source_subblock_index: 0,
+                        source_sentence_ranges: Vec::new(),
                     });
                     *block_index = block_index.saturating_add(1);
                 } else {
@@ -1302,6 +1404,9 @@ fn push_flow_items_as_blocks_with_kind(
                     table: None,
                     anchor_idx: anchor_idx_for_block(*block_index),
                     source_kind: PrettySourceKind::Html,
+                    source_block_id: None,
+                    source_subblock_index: 0,
+                    source_sentence_ranges: Vec::new(),
                 });
                 *block_index = block_index.saturating_add(1);
             }
@@ -1317,6 +1422,9 @@ fn push_flow_items_as_blocks_with_kind(
             table: None,
             anchor_idx: anchor_idx_for_block(*block_index),
             source_kind: PrettySourceKind::Html,
+            source_block_id: None,
+            source_subblock_index: 0,
+            source_sentence_ranges: Vec::new(),
         });
         *block_index = block_index.saturating_add(1);
     }
@@ -1325,6 +1433,119 @@ fn push_flow_items_as_blocks_with_kind(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lanternleaf_core::epub_loader::{StructuredBlock, StructuredDocument, StructuredSentence};
+
+    #[test]
+    fn structured_projection_keeps_source_ids_when_visual_blocks_diverge() {
+        let document = StructuredDocument {
+            blocks: vec![
+                StructuredBlock {
+                    block_id: 0,
+                    chapter_index: 0,
+                    kind: "p".to_string(),
+                    plain_text: "Before.".to_string(),
+                    sentence_ids: vec![0],
+                    rich_html: "Before.".to_string(),
+                },
+                StructuredBlock {
+                    block_id: 1,
+                    chapter_index: 0,
+                    kind: "hr".to_string(),
+                    plain_text: String::new(),
+                    sentence_ids: Vec::new(),
+                    rich_html: "<hr>".to_string(),
+                },
+                StructuredBlock {
+                    block_id: 2,
+                    chapter_index: 0,
+                    kind: "p".to_string(),
+                    plain_text: "After nested.".to_string(),
+                    sentence_ids: vec![1],
+                    rich_html: "After <em>nested</em>.".to_string(),
+                },
+                StructuredBlock {
+                    block_id: 3,
+                    chapter_index: 0,
+                    kind: "img".to_string(),
+                    plain_text: String::new(),
+                    sentence_ids: Vec::new(),
+                    rich_html: "<img src=\"missing.png\">".to_string(),
+                },
+                StructuredBlock {
+                    block_id: 4,
+                    chapter_index: 0,
+                    kind: "table".to_string(),
+                    plain_text: "Cell value.".to_string(),
+                    sentence_ids: vec![2],
+                    rich_html: "<tr><td>Cell value.</td></tr>".to_string(),
+                },
+            ],
+            sentences: vec![
+                StructuredSentence {
+                    canonical_display_id: 0,
+                    chapter_index: 0,
+                    block_id: 0,
+                    local_sentence_index: 0,
+                    display_text: "Before.".to_string(),
+                    source_start: 0,
+                    source_end: 7,
+                },
+                StructuredSentence {
+                    canonical_display_id: 1,
+                    chapter_index: 0,
+                    block_id: 2,
+                    local_sentence_index: 0,
+                    display_text: "After nested.".to_string(),
+                    source_start: 0,
+                    source_end: 13,
+                },
+                StructuredSentence {
+                    canonical_display_id: 2,
+                    chapter_index: 0,
+                    block_id: 4,
+                    local_sentence_index: 0,
+                    display_text: "Cell value.".to_string(),
+                    source_start: 0,
+                    source_end: 11,
+                },
+            ],
+        };
+        let blocks = structured_to_blocks(&document, &[], config::PrettyUiConfig::default());
+        assert!(blocks.iter().any(|block| {
+            block.source_block_id == Some(1)
+                && matches!(block.kind, PrettyBlockKind::HorizontalRule)
+        }));
+        let after = blocks
+            .iter()
+            .find(|block| block.source_block_id == Some(2))
+            .expect("source block after HR");
+        assert!(after
+            .source_sentence_ranges
+            .iter()
+            .any(|range| range.canonical_display_id == 1 && range.text_start == 0));
+        let table = blocks
+            .iter()
+            .find(|block| block.source_block_id == Some(4))
+            .expect("table source block");
+        assert!(matches!(table.kind, PrettyBlockKind::Table));
+        assert!(table
+            .source_sentence_ranges
+            .iter()
+            .any(|range| range.canonical_display_id == 2));
+        let mapped_ids = blocks
+            .iter()
+            .flat_map(|block| block.source_sentence_ranges.iter())
+            .map(|range| range.canonical_display_id)
+            .collect::<Vec<_>>();
+        assert_eq!(mapped_ids, vec![0, 1, 2]);
+        assert_ne!(
+            blocks
+                .iter()
+                .position(|block| block.source_block_id == Some(4)),
+            Some(4),
+            "visual Vec position must not be the source block identity"
+        );
+    }
 
     #[test]
     fn markdown_parses_inline_styles_hr_list_and_table() {

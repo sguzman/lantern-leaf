@@ -48,13 +48,13 @@ pub struct BookImage {
 /// The sentence IDs are assigned during the same traversal that produces the
 /// canonical display/TTS text.  Consumers must not infer identity by matching
 /// a second, independently rendered text stream.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StructuredDocument {
     pub blocks: Vec<StructuredBlock>,
     pub sentences: Vec<StructuredSentence>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StructuredBlock {
     pub block_id: usize,
     pub chapter_index: usize,
@@ -64,7 +64,7 @@ pub struct StructuredBlock {
     pub rich_html: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StructuredSentence {
     pub canonical_display_id: usize,
     pub chapter_index: usize,

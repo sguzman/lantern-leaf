@@ -56,7 +56,7 @@ impl ReaderSession {
         }
         let reading_markdown = loaded.reading_markdown;
         let reading_html = loaded.reading_html;
-        let structured_document = loaded.structured_document;
+        let structured_document = loaded.structured_document.map(Arc::new);
         let has_structured_markdown = loaded.has_structured_markdown;
         let cached_pdf_sync = crate::cache::load_pdf_sync_meta(&source_path);
         let pdf_geometry_mode = loaded.pdf_geometry_mode.or_else(|| {
@@ -114,6 +114,7 @@ impl ReaderSession {
             page_sentence_counts: Vec::new(),
             current_page: 0,
             highlighted_display_idx: None,
+            highlighted_canonical_idx: None,
             highlighted_audio_idx: None,
             text_only_mode: false,
             search_query: String::new(),

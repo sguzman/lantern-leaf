@@ -210,7 +210,7 @@ impl ReaderSession {
     }
 
     pub fn tts_seek_prev(&mut self, normalizer: &normalizer::TextNormalizer) {
-        let _ = self.move_highlight_relative(-1, normalizer);
+        self.move_highlight_relative(-1, normalizer);
         let highlighted_audio_idx = self.current_audio_highlight_idx(normalizer);
         let highlighted_display_idx = self.highlighted_display_idx;
         tracing::trace!(
@@ -575,8 +575,11 @@ impl ReaderSession {
         if self.tts_state != TtsPlaybackState::Playing {
             return None;
         }
+        let (page, local_idx) = self.page_idx_for_global_sentence(canonical_display_id);
+        self.current_page = page;
         self.highlighted_audio_idx = Some(audio_idx);
-        self.highlighted_display_idx = Some(canonical_display_id);
+        self.highlighted_canonical_idx = Some(canonical_display_id);
+        self.highlighted_display_idx = Some(local_idx);
         if canonical_display_id.saturating_add(1) >= self.current_plan_display_end {
             self.current_plan = None;
             self.current_plan_page = None;

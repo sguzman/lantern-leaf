@@ -13,7 +13,7 @@ use crate::app::ui::format::format_duration_secs;
 use crate::app::{AnchorFallback, LanternLeafApp, PrettySentenceTarget};
 use crate::pretty::{
     PrettyBlock, PrettyBlockKind, PrettyPageCacheKey, PrettySourceKind, PrettySpan, PrettyStyle,
-    clamp_image_size, font_id_for, html_to_blocks, markdown_to_blocks,
+    clamp_image_size, font_id_for, html_to_blocks, markdown_to_blocks, structured_to_blocks,
 };
 
 impl LanternLeafApp {
@@ -785,6 +785,11 @@ impl LanternLeafApp {
                 }
             }
             PrettyKind::Html => {
+                if let Some(structured) = snapshot.structured_document.as_deref() {
+                    let blocks = structured_to_blocks(structured, &snapshot.images, pretty_cfg);
+                    trace_pretty_block_counts(&blocks);
+                    return blocks;
+                }
                 if let Some(html) = snapshot.reading_html_page.as_deref() {
                     let blocks = html_to_blocks(html, &snapshot.images, pretty_cfg);
                     trace_pretty_block_counts(&blocks);
@@ -807,6 +812,9 @@ impl LanternLeafApp {
                 table: None,
                 anchor_idx: 0,
                 source_kind: PrettySourceKind::Markdown,
+                source_block_id: None,
+                source_subblock_index: 0,
+                source_sentence_ranges: Vec::new(),
             }];
         }
         vec![PrettyBlock {
@@ -820,6 +828,9 @@ impl LanternLeafApp {
             table: None,
             anchor_idx: 0,
             source_kind: PrettySourceKind::Markdown,
+            source_block_id: None,
+            source_subblock_index: 0,
+            source_sentence_ranges: Vec::new(),
         }]
     }
 
@@ -1123,6 +1134,17 @@ fn block_text(block: &PrettyBlock) -> String {
             for span in &block.spans {
                 text.push_str(&span.text);
             }
+            if let Some(rows) = &block.table {
+                for row in rows {
+                    for cell in row {
+                        for span in &cell.spans {
+                            text.push_str(&span.text);
+                        }
+                        text.push(' ');
+                    }
+                    text.push('\n');
+                }
+            }
         }
     }
     text
@@ -1197,6 +1219,9 @@ fn aligned_targets_for_snapshot(
 ) -> Vec<Option<PrettySentenceTarget>> {
     if snapshot.pretty_kind == PrettyKind::Html {
         let direct = source_born_targets(snapshot, blocks);
+        if snapshot.structured_document.is_some() {
+            return direct;
+        }
         let mapped = direct.iter().filter(|target| target.is_some()).count();
         if mapped > 0 {
             trace!(
@@ -1237,6 +1262,23 @@ fn source_born_targets(
     blocks: &[PrettyBlock],
 ) -> Vec<Option<PrettySentenceTarget>> {
     let mut targets = vec![None; snapshot.canonical_sentences.len()];
+    if snapshot.structured_document.is_some() {
+        for (block_index, block) in blocks.iter().enumerate() {
+            for (local_sentence_index, range) in block.source_sentence_ranges.iter().enumerate() {
+                if let Some(slot) = targets.get_mut(range.canonical_display_id) {
+                    *slot = Some(PrettySentenceTarget {
+                        block_index,
+                        source_block_id: block.source_block_id,
+                        local_sentence_index,
+                        text_start: Some(range.text_start),
+                        text_end: Some(range.text_end),
+                        source: "source-provenance-range",
+                    });
+                }
+            }
+        }
+        return targets;
+    }
     let page_base = snapshot
         .page_sentence_counts
         .iter()
@@ -1259,6 +1301,7 @@ fn source_born_targets(
         if let Some(slot) = targets.get_mut(canonical_idx) {
             *slot = Some(PrettySentenceTarget {
                 block_index: *block_index,
+                source_block_id: None,
                 local_sentence_index: *local_sentence_index,
                 text_start: *text_start,
                 text_end: *text_end,
@@ -1310,6 +1353,7 @@ fn align_canonical_sentences(
         let (block_index, local_sentence_index, _, text_start, text_end) = &pretty[found];
         targets[canonical_idx] = Some(PrettySentenceTarget {
             block_index: *block_index,
+            source_block_id: None,
             local_sentence_index: *local_sentence_index,
             text_start: *text_start,
             text_end: *text_end,
@@ -1618,6 +1662,9 @@ mod tests {
             table: None,
             anchor_idx: block_index,
             source_kind: PrettySourceKind::Html,
+            source_block_id: None,
+            source_subblock_index: 0,
+            source_sentence_ranges: Vec::new(),
         }
     }
 

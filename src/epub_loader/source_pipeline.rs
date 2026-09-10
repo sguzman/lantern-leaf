@@ -131,7 +131,8 @@ pub(super) fn load_source_content(
         ensure_not_cancelled(cancel, "before_native_html_read")?;
         let html = fs::read_to_string(path)
             .with_context(|| format!("Failed to read HTML source at {}", path.display()))?;
-        let (tts_text, structured_document) = structured_document_from_html(&[(0, html.clone())]);
+        let (tts_text, structured_document) =
+            structured_document_from_html(&[(0, html.clone())], false);
         let reading_html = if html.trim().is_empty() {
             None
         } else {
@@ -592,8 +593,16 @@ pub(super) fn resolve_pdf_dual_view_content(
     }
 }
 
-fn structured_document_from_html(chapters: &[(usize, String)]) -> (String, crate::epub_loader::StructuredDocument) {
-    let block_selector = Selector::parse("h1,h2,h3,h4,h5,h6,p,li,blockquote,img").expect("valid structured block selector");
+fn structured_document_from_html(
+    chapters: &[(usize, String)],
+    include_tables: bool,
+) -> (String, crate::epub_loader::StructuredDocument) {
+    let selector = if include_tables {
+        "h1,h2,h3,h4,h5,h6,p,li,blockquote,img,hr,table"
+    } else {
+        "h1,h2,h3,h4,h5,h6,p,li,blockquote,img,hr"
+    };
+    let block_selector = Selector::parse(selector).expect("valid structured block selector");
     let mut blocks = Vec::new();
     let mut sentences = Vec::new();
     let mut canonical_text = Vec::new();
@@ -603,7 +612,11 @@ fn structured_document_from_html(chapters: &[(usize, String)]) -> (String, crate
         let document = Html::parse_fragment(html);
         for element in document.select(&block_selector) {
             let tag = element.value().name();
-            let rich_html = element.inner_html();
+            let rich_html = if matches!(tag, "img" | "hr") {
+                element.html()
+            } else {
+                element.inner_html()
+            };
             let mut ancestor = element.parent();
             let nested_in_block = loop {
                 let Some(node) = ancestor else { break false };
@@ -613,7 +626,7 @@ fn structured_document_from_html(chapters: &[(usize, String)]) -> (String, crate
                     .map(|parent| {
                         matches!(
                             parent.name(),
-                            "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "p" | "li" | "blockquote"
+                            "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "p" | "li" | "blockquote" | "table"
                         )
                     })
                     .unwrap_or(false);
@@ -628,7 +641,7 @@ fn structured_document_from_html(chapters: &[(usize, String)]) -> (String, crate
             let plain_text = element.text().collect::<String>();
             let plain_text = plain_text.split_whitespace().collect::<Vec<_>>().join(" ");
             let mut sentence_ids = Vec::new();
-            if !plain_text.is_empty() && tag != "img" {
+            if !plain_text.is_empty() && !matches!(tag, "img" | "hr") {
                 let local_sentences = crate::text_utils::split_sentences(&plain_text);
                 let mut source_cursor = 0usize;
                 for (local_sentence_index, display_text) in local_sentences.into_iter().enumerate() {
@@ -716,7 +729,7 @@ fn load_epub_source_content(
     ensure_not_cancelled(cancel, "before_epub_native_text_extract")?;
     info!(path = %path.display(), stage = "epub_native_text_extract", "Extracting EPUB TTS text from native reading HTML");
     let chapters = structured_epub_chapters(&reading_html);
-    let (tts_text, structured_document) = structured_document_from_html(&chapters);
+    let (tts_text, structured_document) = structured_document_from_html(&chapters, true);
     info!(
         path = %path.display(),
         stage = "epub_native_complete",

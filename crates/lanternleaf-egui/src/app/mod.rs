@@ -2852,6 +2852,8 @@ mod tests {
             canonical_sentences: vec!["one".to_string()],
             page_sentence_counts: vec![1],
             sentence_anchor_map: vec![Some(0)],
+            structured_document: None,
+            highlighted_canonical_idx: Some(0),
             highlighted_sentence_idx: Some(0),
             search_query: String::new(),
             search_matches: Vec::new(),
@@ -4147,6 +4149,7 @@ impl PdfConfidenceTier {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PrettySentenceTarget {
     pub(crate) block_index: usize,
+    pub(crate) source_block_id: Option<usize>,
     pub(crate) local_sentence_index: usize,
     pub(crate) text_start: Option<usize>,
     pub(crate) text_end: Option<usize>,

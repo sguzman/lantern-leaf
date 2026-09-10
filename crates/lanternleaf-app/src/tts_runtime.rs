@@ -34,6 +34,7 @@ pub struct SimulatedBoundaryDriver {
     pending: Mutex<VecDeque<tts::TtsSentenceBoundary>>,
     output: Mutex<Option<mpsc::Sender<tts::TtsSentenceBoundary>>>,
     paused: AtomicBool,
+    generation: AtomicU64,
 }
 
 impl SimulatedBoundaryDriver {
@@ -58,17 +59,30 @@ impl SimulatedBoundaryDriver {
             .is_some_and(|sender| sender.send(boundary).is_ok())
     }
 
+    fn clear_pending(&self) -> u64 {
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Ok(mut queue) = self.pending.lock() {
+            queue.clear();
+        }
+        generation
+    }
+
     fn install(
         &self,
         output: mpsc::Sender<tts::TtsSentenceBoundary>,
         boundaries: Vec<tts::TtsSentenceBoundary>,
-    ) {
+        generation: u64,
+    ) -> bool {
+        if self.generation.load(Ordering::SeqCst) != generation {
+            return false;
+        }
         if let Ok(mut guard) = self.output.lock() {
             *guard = Some(output);
         }
         if let Ok(mut queue) = self.pending.lock() {
             *queue = boundaries.into_iter().collect();
         }
+        true
     }
 }
 
@@ -183,6 +197,7 @@ pub struct TtsPlaybackSnapshot {
 pub struct TtsCursor {
     pub audio_idx: Option<usize>,
     pub display_idx: Option<usize>,
+    pub canonical_display_idx: Option<usize>,
     pub page: usize,
 }
 
@@ -620,6 +635,10 @@ impl TtsRuntime {
     }
 
     fn sync_tts_runtime_after_reader_change(&self) {
+        let simulated_generation = self
+            .simulated_boundary_driver
+            .as_ref()
+            .map(|driver| driver.clear_pending());
         let plan = self.build_tts_playback_plan();
         if plan.is_none() {
             self.cancel_request();
@@ -663,6 +682,7 @@ impl TtsRuntime {
             request: self.request.clone(),
             last_command: self.last_command.clone(),
             event_tx: self.event_tx.clone(),
+            simulated_generation,
         };
 
         thread::spawn(move || {
@@ -720,6 +740,7 @@ struct TtsRuntimeContext {
     request: Arc<Mutex<Option<TtsRequestRuntime>>>,
     last_command: Arc<Mutex<Option<String>>>,
     event_tx: mpsc::Sender<TtsRuntimeEvent>,
+    simulated_generation: Option<u64>,
 }
 
 fn run_tts_runtime_loop(
@@ -1316,7 +1337,13 @@ fn build_playback(
                 })
                 .collect::<Vec<_>>();
             if let Some(driver) = ctx.simulated_boundary_driver.as_ref() {
-                driver.install(boundary_tx, boundaries);
+                if !driver.install(
+                    boundary_tx,
+                    boundaries,
+                    ctx.simulated_generation.unwrap_or_default(),
+                ) {
+                    return Err("stale simulated playback generation".to_string());
+                }
             } else {
                 for boundary in boundaries {
                     let _ = boundary_tx.send(boundary);
@@ -1436,6 +1463,7 @@ fn cursor_from_playback(snapshot: &session::ReaderPlaybackView) -> Option<TtsCur
     Some(TtsCursor {
         audio_idx: snapshot.tts.current_sentence_idx,
         display_idx: snapshot.highlighted_sentence_idx,
+        canonical_display_idx: snapshot.highlighted_canonical_idx,
         page: snapshot.current_page,
     })
 }
@@ -1447,6 +1475,7 @@ fn reader_playback_state_from_view(
         source_path: reader.source_path.clone(),
         current_page: reader.current_page,
         highlighted_sentence_idx: reader.highlighted_sentence_idx,
+        highlighted_canonical_idx: reader.highlighted_canonical_idx,
         tts: reader.tts.clone(),
         stats: reader.stats.clone(),
         updated_at: std::time::SystemTime::now()
@@ -1766,33 +1795,34 @@ mod tests {
         assert!(runtime.submit_command(TtsCommand::Play));
         assert_eq!(wait_for_boundary(&runtime, &driver), Some(first + 1));
 
-        assert!(runtime.submit_command(TtsCommand::RepeatSentence));
-        let repeat_deadline = Instant::now() + Duration::from_millis(300);
-        while Instant::now() < repeat_deadline {
-            let _ = runtime.collect_events();
-            if runtime
-                .snapshot()
-                .and_then(|snapshot| snapshot.highlighted_sentence_idx)
-                == Some(first + 1)
-            {
-                break;
-            }
-            thread::yield_now();
-        }
+        let repeat_view = runtime
+            .apply_command(TtsCommand::RepeatSentence)
+            .expect("repeat playback view");
+        assert_eq!(repeat_view.tts.current_sentence_idx, Some(first + 1));
         assert_eq!(
-            runtime
-                .snapshot()
-                .and_then(|snapshot| snapshot.highlighted_sentence_idx),
-            Some(first + 1)
+            wait_for_boundary(&runtime, &driver),
+            Some(first + 1),
+            "repeat must produce an actual boundary for the repeated canonical sentence"
         );
 
-        assert!(runtime.submit_command(TtsCommand::SeekNext));
-        let next_deadline = Instant::now() + Duration::from_millis(300);
-        while Instant::now() < next_deadline {
-            let _ = runtime.collect_events();
-            thread::yield_now();
-        }
-        assert!(runtime.submit_command(TtsCommand::SeekPrev));
+        let next_view = runtime
+            .apply_command(TtsCommand::SeekNext)
+            .expect("next playback view");
+        assert_eq!(next_view.tts.current_sentence_idx, Some(first + 2));
+        assert_eq!(
+            wait_for_boundary(&runtime, &driver),
+            Some(first + 2),
+            "next must produce the following canonical boundary"
+        );
+        let prev_view = runtime
+            .apply_command(TtsCommand::SeekPrev)
+            .expect("previous playback view");
+        assert_eq!(prev_view.tts.current_sentence_idx, Some(first + 1));
+        assert_eq!(
+            wait_for_boundary(&runtime, &driver),
+            Some(first + 1),
+            "previous must return to the prior canonical boundary"
+        );
 
         let window_runtime = TtsRuntime::new_with_mode(
             normalizer::TextNormalizer::default(),

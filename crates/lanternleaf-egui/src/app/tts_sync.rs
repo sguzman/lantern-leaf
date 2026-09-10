@@ -49,6 +49,7 @@ pub(crate) struct PlaybackCursorProjection {
     pub(crate) source_path: String,
     pub(crate) page: usize,
     pub(crate) display_idx: Option<usize>,
+    pub(crate) canonical_display_idx: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,7 +84,9 @@ pub(crate) fn follow_target_for_transition(
         .sum::<usize>();
     Some(CanonicalFollowTarget {
         source_path: incoming.source_path.clone(),
-        canonical_display_idx: page_base.saturating_add(display_idx),
+        canonical_display_idx: incoming
+            .canonical_display_idx
+            .unwrap_or_else(|| page_base.saturating_add(display_idx)),
     })
 }
 
@@ -153,12 +156,14 @@ impl LanternLeafApp {
                         source_path: value.source_path.clone(),
                         page: value.current_page,
                         display_idx: value.highlighted_sentence_idx,
+                        canonical_display_idx: value.highlighted_canonical_idx,
                     }
                 });
                 let incoming_cursor = PlaybackCursorProjection {
                     source_path: playback.source_path.clone(),
                     page: playback.current_page,
                     display_idx: playback.highlighted_sentence_idx,
+                    canonical_display_idx: playback.highlighted_canonical_idx,
                 };
                 let page_sentence_counts = previous
                     .reader_document
@@ -288,6 +293,7 @@ mod tests {
             source_path: "book.epub".to_string(),
             page,
             display_idx,
+            canonical_display_idx: None,
         }
     }
 

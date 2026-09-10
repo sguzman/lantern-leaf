@@ -289,7 +289,7 @@ impl ReaderSession {
         }
     }
 
-    fn page_idx_for_global_sentence(&self, global_idx: usize) -> (usize, usize) {
+    pub(crate) fn page_idx_for_global_sentence(&self, global_idx: usize) -> (usize, usize) {
         if self.page_sentence_counts.is_empty() {
             return (0, 0);
         }
@@ -320,26 +320,34 @@ fn structured_sentences_by_page(
     pages: &[String],
     document: &crate::epub_loader::StructuredDocument,
 ) -> Vec<Vec<String>> {
+    if pages.len() <= 1 {
+        return vec![document
+            .sentences
+            .iter()
+            .map(|sentence| sentence.display_text.clone())
+            .collect()];
+    }
     let mut output = Vec::with_capacity(pages.len());
     let mut cursor = 0usize;
-    for page in pages {
-        let normalized_page = page.split_whitespace().collect::<Vec<_>>().join(" ");
-        let mut normalized_cursor = 0usize;
+    for (page_idx, page) in pages.iter().enumerate() {
+        let page_words = page.split_whitespace().count();
+        let mut used_words = 0usize;
         let mut page_sentences = Vec::new();
+        let is_last_page = page_idx + 1 == pages.len();
         while let Some(sentence) = document.sentences.get(cursor) {
-            let normalized_sentence = sentence
-                .display_text
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ");
-            let Some(offset) = normalized_page[normalized_cursor..].find(&normalized_sentence) else {
+            let sentence_words = sentence.display_text.split_whitespace().count().max(1);
+            if !page_sentences.is_empty()
+                && !is_last_page
+                && used_words.saturating_add(sentence_words) > page_words
+            {
                 break;
-            };
-            normalized_cursor = normalized_cursor
-                .saturating_add(offset)
-                .saturating_add(normalized_sentence.len());
+            }
             page_sentences.push(sentence.display_text.clone());
+            used_words = used_words.saturating_add(sentence_words);
             cursor = cursor.saturating_add(1);
+            if used_words >= page_words && !is_last_page {
+                break;
+            }
         }
         output.push(page_sentences);
     }
