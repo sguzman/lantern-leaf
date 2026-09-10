@@ -27,7 +27,7 @@ These priorities are ordered. They may be revised by ChatGPT/director as verifie
 - click-to-play;
 - bookmarks/config/search/navigation.
 
-## P2.5 — Connect LanternLeaf to Caliberate as a first-class library service — A8.2 STRUCTURED->PRETTY IDENTITY
+## P2.5 — Connect LanternLeaf to Caliberate as a first-class library service — A8.3 RENDERED RANGE COORDINATES
 
 - use Caliberate's versioned HTTP/JSON API rather than direct database coupling;
 - default local provider target `http://127.0.0.1:8181`;
@@ -169,3 +169,14 @@ A8.2 correction priority:
 - extend the >128-sentence EPUB fixture with HR/table/nested-list/inline-image block-index divergence cases and exact source->pretty->TTS assertions;
 - finish production runtime Repeat/Next/Prev/window boundary assertions;
 - no human QA until A8.2 director acceptance.
+
+
+A8.3 correction priority:
+- preserve A8.2 explicit source block identity, StructuredDocument Arc projection, and strengthened audio boundary semantics;
+- unify/translate normalized canonical source text offsets with rendered PrettySpan byte coordinates;
+- prove &nbsp;/repeated whitespace/newlines/tabs/Unicode whitespace and multibyte boundaries highlight exact visible text;
+- support one canonical sentence across multiple visual subblocks;
+- drive pretty/text-only from high-frequency canonical playback ID rather than stale document snapshot reconstruction;
+- never persist page-local sentence index as canonical identity;
+- replace structured multi-page word-count partition inference with explicit canonical ID ownership;
+- no human QA until A8.3 director acceptance.

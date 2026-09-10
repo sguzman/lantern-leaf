@@ -136,7 +136,7 @@ Gate 3 native PDF visual stability begins only after Gate 2 real-desktop signoff
 
 ## Caliberate / Calibre library integration
 
-**GOAL 0008 A8.2 — CORE PROVENANCE/AUDIO IDs GOOD; STRUCTURED->PRETTY IDENTITY STILL UNSAFE**
+**GOAL 0008 A8.3 — SOURCE/BLOCK IDENTITY GOOD; FINAL RENDERED RANGE COORDINATES STILL UNSAFE**
 
 Accepted integration:
 
@@ -209,3 +209,8 @@ The first A8 branch is not integrated. Rodio first-sample markers, semantic Sent
 ### A8.2 director review
 
 A8.1 is not integrated despite green Windows CI. Core now has real source-born structured sentence provenance and audio boundaries carry explicit canonical IDs, but egui still independently parses raw HTML into a separate PrettyBlock coordinate system and assumes StructuredBlock.block_id equals PrettyBlock Vec index. HR/table/nested-list/inline-image rendering can shift that index and invalidate every later highlight. Pretty target ranges are also re-split from rendered text rather than using source ranges. A8.2 makes StructuredDocument the native pretty input, carries explicit source block/range identity into visual targets, gives ReaderSession unambiguous canonical/global cursor identity, and adds divergence-focused EPUB plus stronger runtime boundary tests.
+
+
+### A8.3 director review
+
+A8.2 is not integrated despite green Windows CI. StructuredDocument now reaches egui via Arc, native pretty blocks carry explicit source block identity, and audio boundaries carry explicit canonical IDs. The remaining blocker is the actual rendered highlight coordinate system: structured sentence offsets are measured on whitespace-normalized plain text while PrettySpan byte offsets are measured on original decoded rich-HTML text, with no translation. Entity/whitespace normalization can therefore shift or invalidate highlight ranges. A8.3 establishes one canonical visible-text coordinate system (or exact translation), supports multi-subblock sentence segments, makes pretty/text-only consume the high-frequency canonical playback ID directly, fixes canonical persistence semantics, and removes word-count inference from structured page identity.

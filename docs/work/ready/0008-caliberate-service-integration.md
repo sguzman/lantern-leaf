@@ -2596,3 +2596,251 @@ Preserve:
 No human QA during A8.2.
 
 After director acceptance, repeat the same real EPUB playback/highlight test with no additional setup.
+
+
+## Director correction continuation — attempt A8.3: canonical rendered-text coordinate preservation
+
+### Director decision on A8.2
+
+**REJECTED FOR INTEGRATION. Preserve A8.2; do not request human QA yet.**
+
+Rejected worker terminal head:
+
+`df7697bd731eeacaa9fa73cedec2960c679da85c`
+
+A8.2 implementation:
+
+`d39e485ad571443398ddc7e6655155a8eb7a5115`
+
+Authoritative Windows CI:
+
+`34426005710` — fully green.
+
+A8.2 correctly closes most of the A8.1 structural gap:
+
+- `StructuredDocument` is shared into the document snapshot via `Arc`;
+- native structured HTML/EPUB pretty blocks are adapted source-block-by-source-block rather than reparsing the entire raw document as one unrelated block universe;
+- `PrettyBlock` now carries explicit `source_block_id`, `source_subblock_index`, and source sentence ranges;
+- source block identity no longer assumes PrettyBlock Vec position equivalence;
+- semantic boundary handling converts global canonical ID to page/local state and also stores a first-class canonical identity;
+- runtime Repeat/Next/Prev now assert actual boundary identities;
+- Windows CI remains green.
+
+A8.3 is required because the final sentence-range coordinate mapping and canonical UI consumption are still semantically unsafe.
+
+### Rejection reason 1 — normalized source offsets are copied directly into raw rendered-text byte offsets
+
+Core structured extraction currently computes block text as:
+
+```rust
+let plain_text = element.text().collect::<String>();
+let plain_text = plain_text.split_whitespace().collect::<Vec<_>>().join(" ");
+```
+
+`StructuredSentence.source_start/source_end` are byte offsets into that **whitespace-normalized** `plain_text`.
+
+The A8.2 pretty adapter then reparses `StructuredBlock.rich_html` locally and produces `PrettySpan.text` values from the original decoded text nodes. Those spans preserve original whitespace/newlines/entities as decoded by the HTML parser.
+
+The adapter currently computes each visual subblock's text length and intersects:
+
+```text
+StructuredSentence normalized source_start/source_end
+with
+raw PrettySpan byte range
+```
+
+without any coordinate translation.
+
+These are not the same coordinate system.
+
+Concrete failure classes:
+
+- `&nbsp;` becomes a non-breaking-space codepoint in rendered text, while `split_whitespace().join(" ")` replaces it with ASCII space;
+- repeated spaces collapse to one;
+- line breaks/tabs collapse to one;
+- runs of Unicode whitespace can change both character and byte counts;
+- offsets after such normalization drift;
+- a raw byte cut derived from normalized text is not guaranteed to be a UTF-8 character boundary in the rendered span stream.
+
+The A8.2 contract explicitly required an explicit source-visible-range -> rendered-range translation when normalization differs. It was not implemented.
+
+### A8.3-A — one canonical visible-text coordinate system per StructuredBlock
+
+Define a single neutral **canonical visible text** coordinate system for each structured block.
+
+Requirements:
+
+- every `StructuredSentence.source_start/source_end` is measured in this canonical visible-text stream;
+- every structured pretty adapter knows how its rendered spans map to that same stream;
+- whitespace normalization policy must be explicit and shared;
+- do not treat normalized byte offsets as raw HTML-decoded span byte offsets;
+- offsets used for Rust string slicing must always be validated UTF-8 boundaries.
+
+Preferred approaches:
+
+1. **Canonicalize span text at source traversal time.**
+   - structured extraction produces neutral inline spans whose text concatenation is exactly the block canonical visible text;
+   - sentence ranges are offsets into that exact concatenation;
+   - pretty adapter renders those neutral spans directly, so coordinates are identical.
+
+2. **Explicit coordinate map.**
+   - preserve richer raw span text if necessary;
+   - while adapting a block, build a monotonic mapping from canonical visible-text boundaries to rendered PrettySpan boundaries;
+   - translate each source sentence range through that map before creating `PrettySourceSentenceRange`.
+
+Do not recover the range by sentence-string matching.
+
+### A8.3-B — preserve rich inline style without breaking canonical coordinates
+
+A sentence crossing:
+
+```html
+<p>Alpha   <em>beta&nbsp;gamma</em>
+<strong>delta</strong>.</p>
+```
+
+must have:
+
+- one canonical display sentence ID;
+- one canonical visible-text value under the shared whitespace policy;
+- styled rendered segments that concatenate to the same canonical visible-text coordinate stream, or an explicit exact translation;
+- a highlight range whose start/end are valid UTF-8 boundaries and cover the intended visible sentence.
+
+Add cases containing:
+
+- ASCII repeated spaces;
+- tabs/newlines;
+- `&nbsp;`;
+- non-ASCII whitespace;
+- multibyte characters immediately before/after normalized whitespace;
+- nested emphasis/strong/link spans.
+
+### A8.3-C — support source block expansion without losing a sentence range
+
+`structured_to_blocks` may expand one source block into multiple visual subblocks, especially around inline images/nested structure.
+
+Required semantics:
+
+- a canonical sentence may map to one or more rendered range segments if its visible text crosses visual subblocks;
+- do not silently overwrite an earlier target when the same canonical ID appears in multiple subblocks;
+- if the existing `PrettySentenceTarget` model is single-block-only, introduce a primary scroll target plus a list of rendered highlight segments, or another explicit representation;
+- scroll/follow uses one deterministic primary segment (normally first visible textual segment);
+- highlighting covers all representable segments belonging to the same canonical sentence;
+- an inline image embedded inside a sentence must not make the pre-image half disappear from highlight identity.
+
+This must remain bounded and must not require whole-document layout.
+
+### A8.3-D — native pretty rendering consumes canonical playback identity directly
+
+A8.2 introduced `highlighted_canonical_idx`, but `render_reader_content` still passes only page-local `highlighted_sentence_idx` into pretty rendering, which then recomputes:
+
+```text
+snapshot.current_page + local index -> canonical index
+```
+
+The full document snapshot is intentionally low-frequency after A5/A5.1, while TTS playback state is high-frequency. On a page transition the snapshot's current page can be stale even though `reader_playback.current_page` and `highlighted_canonical_idx` are current.
+
+Required:
+
+- pretty rendering and text-only highlighting receive/use `ReaderPlaybackState.highlighted_canonical_idx` as the authoritative semantic identity when available;
+- page-local index/page are derived display/navigation metadata;
+- never recompute semantic canonical identity from a stale full document snapshot when the playback projection already carries it;
+- source-open/no-runtime-playback fallback may use snapshot canonical identity.
+
+Add an app-level regression:
+
+1. document snapshot remains on page 0;
+2. lightweight playback event advances to page 1 canonical ID N;
+3. renderer/highlight projection selects canonical N, not `page0_base + local_idx`.
+
+### A8.3-E — canonical identity in persistence must remain canonical
+
+`RemotePersistenceService::persist_reader_housekeeping` currently constructs a playback payload with:
+
+```rust
+highlighted_sentence_idx: housekeeping.bookmark.sentence_idx,
+highlighted_canonical_idx: housekeeping.bookmark.sentence_idx,
+```
+
+A bookmark sentence index is page-local. It is not a canonical global identity.
+
+Required:
+
+- when `housekeeping.playback` is available, persist its explicit canonical ID;
+- if only bookmark page/local fields exist, either compute canonical ID from persisted page sentence-count metadata if such metadata is reliably available, or store canonical ID as `None`;
+- never label a page-local index as canonical/global;
+- add a multi-page persistence regression with same local index on different pages.
+
+### A8.3-F — structured page partitioning must carry ID ranges, not word-budget approximation
+
+A8.2 removed sentence-string `.find` rematching, which is good, but multi-page `structured_sentences_by_page` now guesses sentence ownership by page word counts.
+
+That is not an identity-safe pagination contract.
+
+For current native EPUB whole-stream mode:
+
+- one logical page must directly own all structured canonical IDs.
+
+For any multi-page structured mode/test:
+
+- pagination must produce canonical ID ranges/boundaries as part of pagination itself;
+- `raw_page_sentences` derives from those ID ranges;
+- do not infer ID ownership afterward from word counts.
+
+If production has no structured multi-page pagination today, keep the direct one-page path and confine artificial multi-page tests to explicit supplied ID ranges rather than heuristic repartition.
+
+### A8.3-G — strengthen tests at the actual rendered-range seam
+
+Extend the structured pretty tests and real EPUB fixture assertions.
+
+At minimum assert:
+
+1. fixture sentence containing `&nbsp;` has exact canonical visible text and exact rendered highlight range;
+2. a sentence with repeated spaces/newline/tab normalization maps to exact rendered visible characters;
+3. multibyte text adjacent to normalized whitespace never produces non-boundary string slices;
+4. nested emphasis/strong spans preserve one sentence range across style boundaries;
+5. inline-image-in-sentence case preserves all textual range segments for one canonical ID;
+6. HR/table/nested-list divergence still preserves source block identity;
+7. source->pretty target coverage for the >128-sentence fixture is complete;
+8. sampled targets before and after entity/whitespace/image divergence render the expected visible sentence text when their target ranges are concatenated;
+9. no native structured EPUB path calls `sentence_ranges` or normalized sentence alignment;
+10. a stale full document snapshot + newer lightweight playback canonical ID still highlights the newer canonical sentence.
+
+### A8.3-H — preserve good A8/A8.1/A8.2 work
+
+Preserve:
+
+- one-pass `StructuredDocument` creation;
+- direct structured TTS projection;
+- explicit source block IDs;
+- local per-source-block rich parsing/adaptation;
+- explicit canonical ID on prepared audio/first-sample boundaries;
+- first-sample-only marker semantics;
+- runtime Repeat/Next/Prev boundary assertions;
+- semantic `SentenceStarted`;
+- no duration-timer cursor advancement;
+- 24 ms active egui repaint scheduling;
+- A7 durable follow state and bounded variable-height renderer;
+- A5/A5.1 lightweight state/snapshot-free hot paths;
+- A6 Windows backend/voice behavior;
+- Caliberate/legacy Calibre behavior.
+
+### A8.3 acceptance gates
+
+1. Canonical source sentence offsets and rendered pretty ranges use one explicit coordinate system or an exact monotonic translation.
+2. Entity/whitespace normalization cannot shift highlight byte ranges.
+3. Every produced highlight byte boundary is UTF-8 safe.
+4. Canonical sentences spanning multiple visual subblocks retain all highlight segments and one deterministic scroll target.
+5. Pretty/text-only consume the high-frequency canonical playback ID directly.
+6. Remote persistence never stores a page-local index as canonical identity.
+7. Structured multi-page ownership uses explicit canonical ID ranges, not word-count inference.
+8. Real >128-sentence EPUB + pretty adapter regressions assert exact rendered visible text across entity/whitespace/nested-span/inline-image divergence.
+9. A8.2 explicit source block IDs and audio-boundary semantics remain green.
+10. Normal workspace validation and Windows CI/TTS probes pass.
+11. No human QA until director acceptance.
+
+### Human QA
+
+No human QA during A8.3.
+
+After director acceptance, return to the same real EPUB. This correction should be the first one whose automated coverage directly asserts the final rendered highlight text rather than merely the existence of IDs/ranges.
