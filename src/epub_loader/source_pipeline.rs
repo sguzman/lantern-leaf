@@ -638,8 +638,17 @@ fn structured_document_from_html(
             if nested_in_block {
                 continue;
             }
-            let plain_text = element.text().collect::<String>();
-            let plain_text = plain_text.split_whitespace().collect::<Vec<_>>().join(" ");
+            let raw_text = if tag == "table" {
+                let cell_selector = Selector::parse("th,td").expect("valid table cell selector");
+                element
+                    .select(&cell_selector)
+                    .map(|cell| cell.text().collect::<String>())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                element.text().collect::<String>()
+            };
+            let plain_text = crate::epub_loader::canonicalize_visible_text(&raw_text);
             let mut sentence_ids = Vec::new();
             if !plain_text.is_empty() && !matches!(tag, "img" | "hr") {
                 let local_sentences = crate::text_utils::split_sentences(&plain_text);

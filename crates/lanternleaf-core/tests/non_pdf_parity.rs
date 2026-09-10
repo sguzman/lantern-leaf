@@ -45,7 +45,7 @@ fn build_epub_fixture() -> PathBuf {
         .collect::<Vec<_>>()
         .join(" ");
     let chapter1 = format!(
-        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>Chapter One</h1><p>EPUB alpha appears here. The <em>nested sentence crosses</em> <strong>inline spans</strong> safely.</p><p>Entities &amp; nonbreaking&nbsp;space stay in the source stream.</p><hr/><table><tr><th>Kind</th><th>Value</th></tr><tr><td>Fixture</td><td>Table sentence.</td></tr></table><blockquote><p>The quoted structure remains one source block.</p></blockquote><ul><li>Native list item one.<ul><li>Nested list item remains distinct.</li></ul></li><li>Native list item two.</li></ul><p>Inline image before later identity <img src=\"missing.png\" alt=\"fixture image\"/> remains source-addressable.</p><img src=\"missing.png\" alt=\"fixture image\"/><p>The repeated distant sentence is identical.</p><p>{chapter_one_sentences}</p></body></html>"
+        "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>Chapter One</h1><p>EPUB alpha appears here. The <em>nested sentence crosses</em> <strong>inline spans</strong> safely.</p><p>Entities &amp; nonbreaking&nbsp;space stay in the source stream.</p><p>Unicode lead   <em>élan&nbsp;et</em>\n\t<strong>suite</strong> <img src=\"missing.png\" alt=\"fixture image\"/> finale.</p><hr/><table><tr><th>Kind</th><th>Value</th></tr><tr><td>Fixture</td><td>Table sentence.</td></tr></table><blockquote><p>The quoted structure remains one source block.</p></blockquote><ul><li>Native list item one.<ul><li>Nested list item remains distinct.</li></ul></li><li>Native list item two.</li></ul><p>Inline image before later identity <img src=\"missing.png\" alt=\"fixture image\"/> remains source-addressable.</p><img src=\"missing.png\" alt=\"fixture image\"/><p>The repeated distant sentence is identical.</p><p>{chapter_one_sentences}</p></body></html>"
     );
     let chapter2 = format!(
         "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>Chapter Two</h1><p>EPUB beta appears here. EPUB alpha appears again for search navigation.</p><p>{chapter_two_sentences}</p><p>The repeated distant sentence is identical.</p><blockquote><p>Another structured quote closes the second chapter.</p></blockquote></body></html>"
@@ -153,6 +153,11 @@ fn assert_session_contract(path: &Path, expected_kind: session::PrettyKind, conf
             provenance.sentences.len()
         );
         assert_eq!(provenance.sentences.len(), initial.canonical_sentences.len());
+        assert_eq!(
+            initial.page_sentence_counts,
+            vec![provenance.sentences.len()],
+            "structured EPUB ownership must remain one explicit logical page"
+        );
         assert_eq!(provenance.sentences[0].canonical_display_id, 0);
         assert!(provenance.sentences.iter().any(|sentence| sentence.chapter_index == 1));
         let duplicates = provenance
@@ -168,6 +173,18 @@ fn assert_session_contract(path: &Path, expected_kind: session::PrettyKind, conf
         assert!(provenance.blocks.iter().any(|block| block.kind == "li"));
         assert!(provenance.blocks.iter().any(|block| block.kind == "hr"));
         assert!(provenance.blocks.iter().any(|block| block.kind == "table"));
+        assert!(provenance.sentences.iter().any(|sentence| {
+            sentence.display_text == "Unicode lead élan et suite finale."
+        }));
+        assert!(provenance.sentences.iter().all(|sentence| {
+            sentence.source_start < sentence.source_end
+                && sentence.source_end <= provenance
+                    .blocks
+                    .iter()
+                    .find(|block| block.block_id == sentence.block_id)
+                    .map(|block| block.plain_text.len())
+                    .unwrap_or(0)
+        }));
         assert!(!initial.reading_html_page.as_deref().unwrap_or_default().contains("data-ll-sentence-ids"));
     }
     if expected_kind != session::PrettyKind::Html {

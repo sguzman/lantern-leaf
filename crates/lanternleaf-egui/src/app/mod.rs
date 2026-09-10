@@ -4154,6 +4154,14 @@ pub(crate) struct PrettySentenceTarget {
     pub(crate) text_start: Option<usize>,
     pub(crate) text_end: Option<usize>,
     pub(crate) source: &'static str,
+    pub(crate) segments: Vec<PrettySentenceSegment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PrettySentenceSegment {
+    pub(crate) block_index: usize,
+    pub(crate) text_start: Option<usize>,
+    pub(crate) text_end: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

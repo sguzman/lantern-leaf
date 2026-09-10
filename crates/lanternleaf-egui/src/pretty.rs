@@ -713,6 +713,10 @@ pub fn structured_to_blocks(
                 source_sentence_ranges: Vec::new(),
             });
         }
+        // StructuredSentence ranges are byte offsets in StructuredBlock.plain_text.
+        // Normalize the rendered spans with the same visible-text policy before
+        // assigning ranges; these are never offsets into raw HTML-decoded text.
+        canonicalize_structured_blocks(&mut local);
         let mut visual_cursor = 0usize;
         for (subblock_index, block) in local.iter_mut().enumerate() {
             let text_len = block.spans.iter().map(|span| span.text.len()).sum::<usize>()
@@ -746,6 +750,57 @@ pub fn structured_to_blocks(
         }
     }
     output
+}
+
+fn canonicalize_structured_blocks(blocks: &mut [PrettyBlock]) {
+    let mut started = false;
+    let mut pending_space = false;
+    for block in blocks {
+        for span in &mut block.spans {
+            canonicalize_span_text(span, &mut started, &mut pending_space);
+        }
+        if let Some(rows) = &mut block.table {
+            let row_count = rows.len();
+            for (row_index, row) in rows.iter_mut().enumerate() {
+                let cell_count = row.len();
+                for (cell_index, cell) in row.iter_mut().enumerate() {
+                    for span in &mut cell.spans {
+                        canonicalize_span_text(span, &mut started, &mut pending_space);
+                    }
+                    if cell_index + 1 < cell_count {
+                        pending_space = true;
+                    }
+                }
+                if row_index + 1 < row_count {
+                    pending_space = true;
+                }
+            }
+        }
+    }
+}
+
+fn canonicalize_span_text(
+    span: &mut PrettySpan,
+    started: &mut bool,
+    pending_space: &mut bool,
+) {
+    let raw = std::mem::take(&mut span.text);
+    let mut canonical = String::new();
+    for ch in raw.chars() {
+        if ch.is_whitespace() {
+            if *started {
+                *pending_space = true;
+            }
+        } else {
+            if *pending_space {
+                canonical.push(' ');
+                *pending_space = false;
+            }
+            canonical.push(ch);
+            *started = true;
+        }
+    }
+    span.text = canonical;
 }
 
 fn walk_scraper_children(
@@ -1545,6 +1600,59 @@ mod tests {
             Some(4),
             "visual Vec position must not be the source block identity"
         );
+    }
+
+    #[test]
+    fn structured_projection_preserves_exact_canonical_ranges_across_whitespace_styles_and_image() {
+        let sentence = "Álpha beta gamma delta après.";
+        let document = StructuredDocument {
+            blocks: vec![StructuredBlock {
+                block_id: 0,
+                chapter_index: 0,
+                kind: "p".to_string(),
+                plain_text: sentence.to_string(),
+                sentence_ids: vec![0],
+                rich_html: "Álpha   <em>beta&nbsp;gamma</em>\n\t<strong>delta</strong> <img src=\"inline.png\"> après.".to_string(),
+            }],
+            sentences: vec![StructuredSentence {
+                canonical_display_id: 0,
+                chapter_index: 0,
+                block_id: 0,
+                local_sentence_index: 0,
+                display_text: sentence.to_string(),
+                source_start: 0,
+                source_end: sentence.len(),
+            }],
+        };
+        let images = [ReaderImageRef {
+            raw_path: "inline.png".to_string(),
+            local_path: "inline.png".to_string(),
+        }];
+        let blocks = structured_to_blocks(&document, &images, config::PrettyUiConfig::default());
+        let segments = blocks
+            .iter()
+            .enumerate()
+            .flat_map(|(block_index, block)| {
+                block
+                    .source_sentence_ranges
+                    .iter()
+                    .filter(move |range| range.canonical_display_id == 0)
+                    .map(move |range| (block_index, range))
+            })
+            .collect::<Vec<_>>();
+        assert!(segments.len() >= 2, "inline image should preserve multiple text segments");
+        let mut rendered = String::new();
+        for (block_index, range) in segments {
+            let text = blocks[block_index]
+                .spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>();
+            assert!(text.is_char_boundary(range.text_start));
+            assert!(text.is_char_boundary(range.text_end));
+            rendered.push_str(&text[range.text_start..range.text_end]);
+        }
+        assert_eq!(rendered, sentence);
     }
 
     #[test]

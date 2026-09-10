@@ -119,6 +119,7 @@ pub struct ReaderPlaybackDomainState {
     pub tts_state_event: Option<TtsStateEvent>,
     pub playback_event: Option<ReaderPlaybackStateEvent>,
     pub highlighted_sentence_idx: Option<usize>,
+    pub highlighted_canonical_idx: Option<usize>,
     pub tts_state: Option<session::ReaderTtsView>,
     pub playback_stats: Option<session::ReaderStats>,
     pub last_updated_at: u64,
@@ -354,10 +355,12 @@ impl AppState {
         if let Some(ref state) = playback {
             self.reader_playback.last_updated_at = state.updated_at;
             self.reader_playback.highlighted_sentence_idx = state.highlighted_sentence_idx;
+            self.reader_playback.highlighted_canonical_idx = state.highlighted_canonical_idx;
             self.reader_playback.tts_state = Some(state.tts.clone());
             self.reader_playback.playback_stats = Some(state.stats.clone());
         } else {
             self.reader_playback.highlighted_sentence_idx = None;
+            self.reader_playback.highlighted_canonical_idx = None;
             self.reader_playback.tts_state = None;
             self.reader_playback.playback_stats = None;
         }

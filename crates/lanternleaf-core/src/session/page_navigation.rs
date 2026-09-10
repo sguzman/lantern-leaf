@@ -89,25 +89,18 @@ impl ReaderSession {
         // canonical TTS/page text in the same "single-page" coordinate space. Otherwise,
         // the UI can show full-book HTML while the TTS cursor/indices are paginated against
         // a different slice of the book, making audio/highlight appear desynced.
-        let is_epub = self
-            .source_path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.eq_ignore_ascii_case("epub"))
-            .unwrap_or(false);
-        let epub_pretty_single_page = is_epub
-            && self.config.native_html_pretty_enabled
+        let structured_pretty_single_page = self.structured_document.is_some()
             && self
                 .reading_html
                 .as_ref()
                 .is_some_and(|html| !html.trim().is_empty());
-        if epub_pretty_single_page {
+        if structured_pretty_single_page {
             self.pages = vec![self.tts_text.clone()];
             tracing::debug!(
                 path = %self.source_path.display(),
                 owner = "tts_text",
                 pages = self.pages.len(),
-                mode = "epub_pretty_single_page",
+                mode = "structured_pretty_single_page",
                 tts_chars = self.tts_text.len(),
                 "Repaginated canonical text as a single page for EPUB HTML pretty rendering"
             );
@@ -125,7 +118,7 @@ impl ReaderSession {
             .reading_markdown
             .as_ref()
             .map(|markdown| {
-                if epub_pretty_single_page {
+                if structured_pretty_single_page {
                     vec![markdown.clone()]
                 } else {
                     pagination::paginate(
@@ -140,7 +133,13 @@ impl ReaderSession {
             self.markdown_pages.resize(self.pages.len(), String::new());
         }
         self.raw_page_sentences = if let Some(document) = self.structured_document.as_ref() {
-            structured_sentences_by_page(&self.pages, document)
+            vec![
+                document
+                    .sentences
+                    .iter()
+                    .map(|sentence| sentence.display_text.clone())
+                    .collect(),
+            ]
         } else {
             self.pages
                 .iter()
@@ -314,51 +313,4 @@ impl ReaderSession {
             .map(Vec::len)
             .unwrap_or(0)
     }
-}
-
-fn structured_sentences_by_page(
-    pages: &[String],
-    document: &crate::epub_loader::StructuredDocument,
-) -> Vec<Vec<String>> {
-    if pages.len() <= 1 {
-        return vec![document
-            .sentences
-            .iter()
-            .map(|sentence| sentence.display_text.clone())
-            .collect()];
-    }
-    let mut output = Vec::with_capacity(pages.len());
-    let mut cursor = 0usize;
-    for (page_idx, page) in pages.iter().enumerate() {
-        let page_words = page.split_whitespace().count();
-        let mut used_words = 0usize;
-        let mut page_sentences = Vec::new();
-        let is_last_page = page_idx + 1 == pages.len();
-        while let Some(sentence) = document.sentences.get(cursor) {
-            let sentence_words = sentence.display_text.split_whitespace().count().max(1);
-            if !page_sentences.is_empty()
-                && !is_last_page
-                && used_words.saturating_add(sentence_words) > page_words
-            {
-                break;
-            }
-            page_sentences.push(sentence.display_text.clone());
-            used_words = used_words.saturating_add(sentence_words);
-            cursor = cursor.saturating_add(1);
-            if used_words >= page_words && !is_last_page {
-                break;
-            }
-        }
-        output.push(page_sentences);
-    }
-    if cursor < document.sentences.len() {
-        if let Some(last) = output.last_mut() {
-            last.extend(
-                document.sentences[cursor..]
-                    .iter()
-                    .map(|sentence| sentence.display_text.clone()),
-            );
-        }
-    }
-    output
 }

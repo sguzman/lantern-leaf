@@ -75,6 +75,13 @@ pub struct StructuredSentence {
     pub source_end: usize,
 }
 
+/// The visible-text coordinate system shared by structured extraction and the
+/// native pretty adapter. HTML entities and every Unicode whitespace run are
+/// represented as one ASCII space, with block-edge whitespace trimmed.
+pub fn canonicalize_visible_text(input: &str) -> String {
+    input.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 #[derive(Debug, Clone)]
 pub struct LoadedBook {
     pub tts_text: String,

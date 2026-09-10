@@ -305,6 +305,52 @@ impl RemotePersistenceService {
     }
 }
 
+fn reader_playback_state_from_housekeeping(
+    housekeeping: &ReaderHousekeeping,
+    updated_at: u64,
+) -> crate::contracts::ReaderPlaybackState {
+    let playback_view = housekeeping.playback.as_ref();
+    crate::contracts::ReaderPlaybackState {
+        source_path: housekeeping.source_path.clone(),
+        current_page: playback_view
+            .map(|p| p.current_page)
+            .unwrap_or(housekeeping.bookmark.page),
+        highlighted_sentence_idx: playback_view.and_then(|p| p.highlighted_sentence_idx),
+        highlighted_canonical_idx: playback_view.and_then(|p| p.highlighted_canonical_idx),
+        tts: playback_view
+            .map(|p| p.tts.clone())
+            .unwrap_or_else(|| crate::contracts::ReaderTtsView {
+                state: lanternleaf_core::session::TtsPlaybackState::Idle,
+                current_sentence_idx: None,
+                sentence_count: 0,
+                can_seek_prev: false,
+                can_seek_next: false,
+                progress_pct: 0.0,
+            }),
+        stats: playback_view
+            .map(|p| p.stats.clone())
+            .unwrap_or_else(|| crate::contracts::ReaderStats {
+                page_index: housekeeping.bookmark.page + 1,
+                total_pages: 0,
+                tts_progress_pct: 0.0,
+                global_progress_pct: 0.0,
+                page_time_remaining_secs: 0.0,
+                book_time_remaining_secs: 0.0,
+                page_word_count: 0,
+                page_sentence_count: 0,
+                page_start_percent: 0.0,
+                page_end_percent: 0.0,
+                words_read_up_to_page_start: 0,
+                sentences_read_up_to_page_start: 0,
+                words_read_up_to_page_end: 0,
+                sentences_read_up_to_page_end: 0,
+                words_read_up_to_current_position: 0,
+                sentences_read_up_to_current_position: 0,
+            }),
+        updated_at,
+    }
+}
+
 impl PersistenceService for RemotePersistenceService {
     fn persist_reader_housekeeping(
         &self,
@@ -317,51 +363,7 @@ impl PersistenceService for RemotePersistenceService {
             .unwrap_or_default()
             .as_millis() as u64;
 
-        let playback = crate::contracts::ReaderPlaybackState {
-            source_path: housekeeping.source_path.clone(),
-            current_page: housekeeping
-                .playback
-                .as_ref()
-                .map(|p| p.current_page)
-                .unwrap_or(housekeeping.bookmark.page),
-            highlighted_sentence_idx: housekeeping.bookmark.sentence_idx,
-            highlighted_canonical_idx: housekeeping.bookmark.sentence_idx,
-            tts: housekeeping
-                .playback
-                .as_ref()
-                .map(|p| p.tts.clone())
-                .unwrap_or_else(|| crate::contracts::ReaderTtsView {
-                    state: lanternleaf_core::session::TtsPlaybackState::Idle,
-                    current_sentence_idx: None,
-                    sentence_count: 0,
-                    can_seek_prev: false,
-                    can_seek_next: false,
-                    progress_pct: 0.0,
-                }),
-            stats: housekeeping
-                .playback
-                .as_ref()
-                .map(|p| p.stats.clone())
-                .unwrap_or_else(|| crate::contracts::ReaderStats {
-                    page_index: housekeeping.bookmark.page + 1,
-                    total_pages: 0,
-                    tts_progress_pct: 0.0,
-                    global_progress_pct: 0.0,
-                    page_time_remaining_secs: 0.0,
-                    book_time_remaining_secs: 0.0,
-                    page_word_count: 0,
-                    page_sentence_count: 0,
-                    page_start_percent: 0.0,
-                    page_end_percent: 0.0,
-                    words_read_up_to_page_start: 0,
-                    sentences_read_up_to_page_start: 0,
-                    words_read_up_to_page_end: 0,
-                    sentences_read_up_to_page_end: 0,
-                    words_read_up_to_current_position: 0,
-                    sentences_read_up_to_current_position: 0,
-                }),
-            updated_at,
-        };
+        let playback = reader_playback_state_from_housekeeping(&housekeeping, updated_at);
 
         let update = serde_json::json!({
             "bookmark": housekeeping.bookmark,
@@ -852,6 +854,46 @@ mod tests {
             PersistenceTrigger::SourceOpen,
         );
         assert!(service.persisted.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn remote_playback_persistence_keeps_global_identity_separate_from_page_local_index() {
+        let snapshot = make_reader_snapshot();
+        let playback = crate::contracts::ReaderPlaybackState {
+            source_path: "/tmp/test.epub".to_string(),
+            current_page: 1,
+            highlighted_sentence_idx: Some(2),
+            highlighted_canonical_idx: Some(12),
+            tts: snapshot.tts.clone(),
+            stats: snapshot.stats.clone(),
+            updated_at: 0,
+        };
+        let housekeeping = ReaderHousekeeping::from_parts(
+            "/tmp/test.epub",
+            cache::Bookmark {
+                page: 1,
+                sentence_idx: Some(2),
+                ..sample_bookmark()
+            },
+            config::AppConfig::default(),
+            Some(playback),
+        );
+        let persisted = reader_playback_state_from_housekeeping(&housekeeping, 9);
+        assert_eq!(persisted.current_page, 1);
+        assert_eq!(persisted.highlighted_sentence_idx, Some(2));
+        assert_eq!(persisted.highlighted_canonical_idx, Some(12));
+
+        let without_playback = ReaderHousekeeping::from_parts(
+            "/tmp/test.epub",
+            housekeeping.bookmark,
+            config::AppConfig::default(),
+            None,
+        );
+        assert_eq!(
+            reader_playback_state_from_housekeeping(&without_playback, 10)
+                .highlighted_canonical_idx,
+            None
+        );
     }
 
     #[test]

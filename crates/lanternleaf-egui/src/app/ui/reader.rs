@@ -10,7 +10,9 @@ use lanternleaf_core::text_utils;
 use tracing::trace;
 
 use crate::app::ui::format::format_duration_secs;
-use crate::app::{AnchorFallback, LanternLeafApp, PrettySentenceTarget};
+use crate::app::{
+    AnchorFallback, LanternLeafApp, PrettySentenceSegment, PrettySentenceTarget,
+};
 use crate::pretty::{
     PrettyBlock, PrettyBlockKind, PrettyPageCacheKey, PrettySourceKind, PrettySpan, PrettyStyle,
     clamp_image_size, font_id_for, html_to_blocks, markdown_to_blocks, structured_to_blocks,
@@ -55,7 +57,19 @@ impl LanternLeafApp {
                     pretty_kind = ?snapshot.pretty_kind,
                     "Skipping pretty view in favor of sentence list"
                 );
-                self.render_sentence_list(ui, snapshot, highlighted_sentence_idx);
+                let highlighted_canonical_idx = canonical_highlight_index(
+                    &snapshot.page_sentence_counts,
+                    snapshot.current_page,
+                    state.reader_playback.highlighted_canonical_idx,
+                    snapshot.highlighted_canonical_idx,
+                    highlighted_sentence_idx,
+                );
+                self.render_sentence_list(
+                    ui,
+                    snapshot,
+                    highlighted_sentence_idx,
+                    highlighted_canonical_idx,
+                );
                 ui.add_space(6.0);
                 self.render_canonical_preview(ui, snapshot);
             }
@@ -87,8 +101,18 @@ impl LanternLeafApp {
         let render_started = std::time::Instant::now();
         self.refresh_pretty_cache(snapshot);
         let highlight_idx = effective_highlighted_sentence_idx;
-        let canonical_highlight_idx =
-            highlight_idx.map(|idx| canonical_display_index(snapshot, idx));
+        let playback_canonical = self
+            .runtime
+            .state_snapshot()
+            .reader_playback
+            .highlighted_canonical_idx;
+        let canonical_highlight_idx = canonical_highlight_index(
+            &snapshot.page_sentence_counts,
+            snapshot.current_page,
+            playback_canonical,
+            snapshot.highlighted_canonical_idx,
+            highlight_idx,
+        );
         let highlight_target = canonical_highlight_idx
             .and_then(|idx| self.pretty_sentence_targets.get(idx))
             .cloned()
@@ -211,7 +235,13 @@ impl LanternLeafApp {
                                 }
 
                                 let mut response = None;
-                                let highlight_matched = highlight_block_idx == Some(block_i);
+                                let highlight_matched = highlight_target
+                                    .as_ref()
+                                    .is_some_and(|target| {
+                                        target.segments.iter().any(|segment| {
+                                            segment.block_index == block_i
+                                        })
+                                    });
                                 let block_highlight_bg = if highlight_matched {
                                     Some(highlight_color)
                                 } else {
@@ -251,12 +281,18 @@ impl LanternLeafApp {
                                             };
                                         let job = if highlight_matched {
                                             if let Some(target) = highlight_target.as_ref() {
+                                                let segment = target
+                                                    .segments
+                                                    .iter()
+                                                    .find(|segment| {
+                                                        segment.block_index == block_i
+                                                    })
+                                                    .cloned();
                                                 spans_to_job_with_sentence_target(
                                                     ui,
                                                     &block.spans,
                                                     base_px,
                                                     text_color,
-                                                    target,
                                                     highlight_color,
                                                     regular_family.clone(),
                                                     bold_family.clone(),
@@ -264,6 +300,7 @@ impl LanternLeafApp {
                                                     mono_bold.clone(),
                                                     pretty_cfg,
                                                     snapshot.settings.line_spacing,
+                                                    segment.as_ref(),
                                                 )
                                             } else {
                                                 spans_to_job_with_base(
@@ -626,6 +663,7 @@ impl LanternLeafApp {
         ui: &mut Ui,
         snapshot: &ReaderSnapshot,
         effective_highlighted_sentence_idx: Option<usize>,
+        effective_highlighted_canonical_idx: Option<usize>,
     ) {
         ui.group(|ui| {
             ui.label("Sentence list");
@@ -634,7 +672,7 @@ impl LanternLeafApp {
                 return;
             }
             let target_idx = effective_highlighted_sentence_idx;
-            let target_canonical_idx = target_idx.map(|idx| canonical_display_index(snapshot, idx));
+            let target_canonical_idx = effective_highlighted_canonical_idx;
             let auto_scroll_requested = target_canonical_idx.is_some_and(|idx| {
                 self.auto_scroll_state
                     .pending_for(&snapshot.source_path, idx)
@@ -644,7 +682,8 @@ impl LanternLeafApp {
                 .max_height(240.0)
                 .show(ui, |ui| {
                     for (idx, sentence) in snapshot.sentences.iter().enumerate() {
-                        let selected = target_idx == Some(idx);
+                        let selected = target_canonical_idx
+                            == Some(canonical_display_index(snapshot, idx));
                         let label = format!("{:03} {}", idx + 1, sentence);
                         let response = ui.selectable_label(selected, label);
                         if response.clicked() {
@@ -1213,6 +1252,24 @@ fn canonical_display_index(snapshot: &ReaderSnapshot, local_idx: usize) -> usize
         .saturating_add(local_idx)
 }
 
+fn canonical_highlight_index(
+    page_sentence_counts: &[usize],
+    snapshot_page: usize,
+    playback_canonical: Option<usize>,
+    snapshot_canonical: Option<usize>,
+    snapshot_local: Option<usize>,
+) -> Option<usize> {
+    playback_canonical
+        .or(snapshot_canonical)
+        .or_else(|| snapshot_local.map(|idx| {
+            page_sentence_counts
+                .iter()
+                .take(snapshot_page)
+                .sum::<usize>()
+                .saturating_add(idx)
+        }))
+}
+
 fn aligned_targets_for_snapshot(
     snapshot: &ReaderSnapshot,
     blocks: &[PrettyBlock],
@@ -1261,19 +1318,30 @@ fn source_born_targets(
     snapshot: &ReaderSnapshot,
     blocks: &[PrettyBlock],
 ) -> Vec<Option<PrettySentenceTarget>> {
-    let mut targets = vec![None; snapshot.canonical_sentences.len()];
+    let mut targets: Vec<Option<PrettySentenceTarget>> =
+        vec![None; snapshot.canonical_sentences.len()];
     if snapshot.structured_document.is_some() {
         for (block_index, block) in blocks.iter().enumerate() {
             for (local_sentence_index, range) in block.source_sentence_ranges.iter().enumerate() {
                 if let Some(slot) = targets.get_mut(range.canonical_display_id) {
-                    *slot = Some(PrettySentenceTarget {
+                    let segment = PrettySentenceSegment {
                         block_index,
-                        source_block_id: block.source_block_id,
-                        local_sentence_index,
                         text_start: Some(range.text_start),
                         text_end: Some(range.text_end),
-                        source: "source-provenance-range",
-                    });
+                    };
+                    if let Some(target) = slot.as_mut() {
+                        target.segments.push(segment);
+                    } else {
+                        *slot = Some(PrettySentenceTarget {
+                            block_index,
+                            source_block_id: block.source_block_id,
+                            local_sentence_index,
+                            text_start: Some(range.text_start),
+                            text_end: Some(range.text_end),
+                            source: "source-provenance-range",
+                            segments: vec![segment],
+                        });
+                    }
                 }
             }
         }
@@ -1306,6 +1374,11 @@ fn source_born_targets(
                 text_start: *text_start,
                 text_end: *text_end,
                 source: "source-provenance",
+                segments: vec![PrettySentenceSegment {
+                    block_index: *block_index,
+                    text_start: *text_start,
+                    text_end: *text_end,
+                }],
             });
         }
         *local_sentence_index = local_sentence_index.saturating_add(1);
@@ -1362,6 +1435,11 @@ fn align_canonical_sentences(
             } else {
                 "exact-lookahead"
             },
+            segments: vec![PrettySentenceSegment {
+                block_index: *block_index,
+                text_start: *text_start,
+                text_end: *text_end,
+            }],
         });
         pretty_cursor = found + 1;
     }
@@ -1500,7 +1578,6 @@ fn spans_to_job_with_sentence_target(
     spans: &[PrettySpan],
     base_px: f32,
     base_color: Color32,
-    target: &PrettySentenceTarget,
     highlight: Color32,
     regular_family: FontFamily,
     bold_family: FontFamily,
@@ -1508,8 +1585,9 @@ fn spans_to_job_with_sentence_target(
     mono_bold: FontFamily,
     pretty_cfg: lanternleaf_core::config::PrettyUiConfig,
     line_spacing_scale: f32,
+    segment: Option<&PrettySentenceSegment>,
 ) -> LayoutJob {
-    let Some(start) = target.text_start else {
+    let Some(segment) = segment else {
         return spans_to_job_with_base(
             ui,
             spans,
@@ -1524,7 +1602,22 @@ fn spans_to_job_with_sentence_target(
             line_spacing_scale,
         );
     };
-    let end = target.text_end.unwrap_or(start);
+    let Some(start) = segment.text_start else {
+        return spans_to_job_with_base(
+            ui,
+            spans,
+            base_px,
+            base_color,
+            Some(highlight),
+            regular_family,
+            bold_family,
+            mono_regular,
+            mono_bold,
+            pretty_cfg,
+            line_spacing_scale,
+        );
+    };
+    let end = segment.text_end.unwrap_or(start);
     let mut job = LayoutJob::default();
     let mut offset = 0usize;
     for span in spans {
@@ -1635,6 +1728,22 @@ mod tests {
         let target = "Second sentence!";
         let matched = match_sentence_index(&sentences, target);
         assert_eq!(matched, Some(1));
+    }
+
+    #[test]
+    fn playback_canonical_identity_wins_over_stale_snapshot_page_projection() {
+        assert_eq!(
+            canonical_highlight_index(&[2, 2], 0, Some(3), Some(1), Some(1)),
+            Some(3)
+        );
+        assert_eq!(
+            canonical_highlight_index(&[2, 2], 1, None, Some(3), Some(1)),
+            Some(3)
+        );
+        assert_eq!(
+            canonical_highlight_index(&[2, 2], 1, None, None, Some(1)),
+            Some(3)
+        );
     }
 
     #[test]
