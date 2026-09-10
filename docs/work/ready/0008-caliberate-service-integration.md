@@ -2291,3 +2291,308 @@ Preserve and revalidate:
 No human QA during A8.1.
 
 After director acceptance, repeat the A8 real-book synchronization test. No additional setup or manual ceremony.
+
+
+## Director correction continuation — attempt A8.2: eliminate the final structured->pretty identity seam
+
+### Director decision on A8.1
+
+**REJECTED FOR INTEGRATION. Preserve the implementation; do not send to human QA yet.**
+
+Rejected worker terminal head:
+
+`0bc6b53f7daa6e71f42ee6a7bb6c8d647e65a070`
+
+A8.1 implementation:
+
+`e01cdf38a392cc31d6fbe16b884a1f5011ff67f6`
+
+Authoritative Windows CI:
+
+`34417953850` — fully green.
+
+A8.1 fixes important A8 defects and those changes must be preserved:
+
+- `StructuredDocument`, `StructuredBlock`, and `StructuredSentence` now exist in core;
+- EPUB/native HTML canonical TTS text is produced from the same structured source traversal rather than whole-document post-hoc sentence matching;
+- structured sentences carry canonical display ID, chapter, source block ID, local occurrence, and source text range;
+- prepared TTS items and `TtsSentenceBoundary` carry explicit canonical display identity;
+- first-sample marker fires only after an actual sample is yielded;
+- runtime boundary handling uses the explicit canonical ID rather than rediscovering it from mutable audio->display mapping;
+- controllable simulated boundary infrastructure exists;
+- active egui repaint and semantic `SentenceStarted` work from A8 remain;
+- the real EPUB fixture is now >128 sentences with multiple chapters, nested markup, entities, duplicate sentences, image/list/quote structure.
+
+The remaining rejection is narrower but directly capable of reproducing the human's “pretty view has no working highlight” failure.
+
+### Rejection reason 1 — core block IDs and egui PrettyBlock indices are different coordinate systems
+
+A8.1 core extraction assigns `StructuredBlock.block_id` from this source selection:
+
+```text
+h1..h6, p, li, blockquote, img
+```
+
+with nested selected elements suppressed beneath an already-selected block.
+
+The egui HTML renderer independently parses raw HTML and creates its own `PrettyBlock` sequence.
+
+That renderer also creates/splits blocks for constructs whose counting semantics differ from the structured extractor, including:
+
+- `<hr>`;
+- `<table>`;
+- nested list items;
+- images embedded inside a paragraph, which can split one paragraph into text/image/text pretty blocks;
+- other flow-item splitting decisions.
+
+A8.1 then converts structured provenance to pretty targets with:
+
+```rust
+let block_index = sentence_anchor_map[...] // StructuredBlock.block_id
+let block = pretty_blocks.get(block_index) // assumes same Vec coordinate
+```
+
+That assumption is false in general.
+
+Example:
+
+```html
+<p>Sentence zero.</p>
+<hr>
+<p>Sentence one.</p>
+```
+
+Core structured IDs may be:
+
+```text
+p0 -> block_id 0
+p1 -> block_id 1
+```
+
+while egui pretty blocks are:
+
+```text
+paragraph -> index 0
+hr        -> index 1
+paragraph -> index 2
+```
+
+Sentence one is therefore pointed at the horizontal rule instead of its paragraph. One early divergence shifts every later target.
+
+This is exactly the class of failure the source-born identity architecture was supposed to make impossible.
+
+### A8.2-A — PrettyBlock must carry explicit source identity
+
+Do not use the position of a `PrettyBlock` in a Vec as source identity.
+
+For native structured EPUB/HTML, every pretty block produced from structured source must carry explicit lineage, conceptually:
+
+```text
+PrettyBlock {
+    ...
+    source_block_id: Option<StructuredBlockId>
+    source_subblock_index: usize   // only if one source block expands visually
+}
+```
+
+Requirements:
+
+- `StructuredBlock.block_id` is the identity;
+- egui array position remains only a render-order/indexing optimization;
+- target resolution finds a pretty block by explicit source identity, not `blocks.get(block_id)`;
+- if one source block expands into several visual blocks, the adapter retains parent `source_block_id` and enough subrange metadata to find the child containing the canonical sentence;
+- HTML constructs that generate visual-only blocks such as HR must not shift sentence identity for subsequent source blocks;
+- tables/images/nested lists must not shift later source identity.
+
+### A8.2-B — native EPUB pretty projection must adapt StructuredDocument, not independently parse the whole raw HTML document
+
+For native EPUB with `structured_document.is_some()`, build pretty blocks from the structured representation.
+
+Acceptable approaches include:
+
+1. a direct neutral structured->PrettyBlock adapter; or
+2. parse each `StructuredBlock.rich_html` locally to preserve rich inline formatting while retaining that block's explicit source ID.
+
+Unacceptable:
+
+```text
+raw reading_html
+-> independent whole-document html_to_blocks
+-> hope its block index matches StructuredDocument
+```
+
+The existing whole-document HTML parser may remain for degraded/non-structured HTML sources.
+
+Preserve formatting features where possible: headings, emphasis, strong, code, links, lists, quotes, images, tables, etc.
+
+### A8.2-C — sentence range provenance must survive into pretty targets
+
+A8.1 currently stores `StructuredSentence.source_start/source_end`, but egui discards those ranges and recomputes:
+
+```text
+block_text(pretty block)
+-> split_sentences again
+-> occurrence count
+-> reconstructed text_start/text_end
+```
+
+That is another avoidable identity reconstruction seam.
+
+For native structured EPUB:
+
+- canonical pretty target comes from the source-born `StructuredSentence`;
+- target carries its source block ID and source text range directly;
+- adapter must map that source-visible range into the generated PrettyBlock span stream deterministically;
+- do not sentence-split again to discover which occurrence it is.
+
+If the adapter normalizes whitespace for display, it must construct an explicit source-range -> rendered-range translation while producing the visual spans.
+
+Required invariant for text-bearing structured blocks:
+
+```text
+canonical structured visible text
+<-> rendered PrettySpan visible text
+```
+
+has an explicit deterministic mapping.
+
+### A8.2-D — expose structured provenance to the UI without heavyweight copying
+
+The pretty adapter needs the actual source-born structured document, not merely a block-level sentence anchor map.
+
+Expose it through the reader/document projection using shared immutable ownership such as `Arc<StructuredDocument>` or an equivalent lightweight handle.
+
+Requirements:
+
+- no per-frame deep clone;
+- preserve A5/A5.1 lightweight frame/snapshot architecture;
+- document provenance is published at source-open/document-refresh frequency;
+- high-frequency TTS events continue to carry only lightweight cursor/playback data.
+
+### A8.2-E — make canonical highlight identity first-class in ReaderSession
+
+A8.1's semantic boundary carries a **global canonical display ID**, but `apply_tts_sentence_boundary` writes it directly into `highlighted_display_idx`, which historically represents a page-local display index.
+
+That is semantically invalid even though the current one-page EPUB pretty mode masks it because global == local.
+
+Required model:
+
+- add/maintain an explicit canonical/global highlighted sentence identity, or convert every incoming global canonical ID through `page_idx_for_global_sentence` before touching page-local cursor fields;
+- `ReaderPlaybackView` / app playback projection should expose the canonical display ID directly;
+- text-only and pretty modes consume that same canonical identity;
+- page-local indices remain derived compatibility/navigation state, not the source of truth for semantic SentenceStarted;
+- a multi-page structured-source regression must prove canonical ID N resolves to the correct page + local sentence rather than being written as an invalid local index.
+
+Do not overload fields with mixed local/global meaning.
+
+### A8.2-F — remove structured EPUB page partition string rematching
+
+`structured_sentences_by_page` currently repartitions a structured document by searching sentence strings inside `pages: Vec<String>`.
+
+For current one-stream EPUB this is often harmless, but it reintroduces string identity into the core structured path.
+
+For native structured EPUB:
+
+- derive page/sentence partitions directly from structured canonical IDs and the actual pagination policy;
+- in whole-stream pretty mode, the partition is simply all structured sentence IDs in the single logical page;
+- if/when structured pagination exists, pagination must return canonical ID ranges directly;
+- do not use `.find(normalized_sentence)` to rediscover structured sentence ownership.
+
+### A8.2-G — strengthen the real EPUB fixture to prove visual identity, not just source identity
+
+The >128-sentence A8.1 fixture is a good base. Extend it deliberately with block-coordinate divergence cases **before later sampled sentences**:
+
+- `<hr>`;
+- a table;
+- nested list;
+- an inline image inside a paragraph that causes or could cause visual block splitting;
+- keep nested inline emphasis/strong spans, entities, distant duplicate full sentences, multiple spine chapters.
+
+Then run the real production chain:
+
+```text
+EPUB bytes
+-> EpubDoc/native structured ingestion
+-> StructuredDocument
+-> ReaderSession
+-> reader document projection
+-> native structured->PrettyBlock adapter
+-> canonical PrettySentenceTarget
+-> TTS prepared item canonical ID
+```
+
+Required assertions:
+
+1. >128 canonical sentences remain;
+2. sampled canonical IDs before and after HR/table/image/nested-list divergence map to the intended explicit source block ID;
+3. rendered pretty Vec position may differ from source block ID without breaking target resolution;
+4. distant duplicate sentences map to different source block IDs/ranges;
+5. nested-span sentence highlight covers its exact rendered sentence range;
+6. no `align_canonical_sentences` path runs for native structured EPUB;
+7. no `sentence_ranges(block_text(...))` rediscovery is used for native structured EPUB;
+8. every sampled TTS prepared item carries the same canonical ID consumed by the pretty target;
+9. fixture structured->pretty coverage is complete.
+
+This must be an egui/core integration-capable test or equivalent shared adapter test; source-only assertions are insufficient.
+
+### A8.2-H — finish the runtime boundary control test
+
+The new `controlled_runtime_boundaries_preserve_identity_across_windows_and_controls` is a good start but its control assertions are incomplete.
+
+Current gaps:
+
+- Repeat command is submitted, but no repeated SentenceStarted boundary is asserted;
+- SeekNext is submitted without asserting the next boundary identity;
+- SeekPrev is submitted without asserting the previous boundary identity;
+- the 128+ sequence proves IDs cross >=64, but not explicit prepare-window (8-sentence) and normalization-window (64-sentence) continuity assertions;
+- no multi-page canonical/local conversion is tested.
+
+Required runtime-level assertions:
+
+1. first boundary starts canonical X;
+2. pause prevents boundary emission;
+3. resume keeps X until next actual boundary, then starts X+1;
+4. Repeat causes the next actual SentenceStarted to carry X+1 again;
+5. Next causes next actual SentenceStarted to carry X+2;
+6. Prev causes next actual SentenceStarted to return to X+1;
+7. sequence crosses multiple 8-item prepare batches and at least two 64-display normalization windows with exact monotonic IDs;
+8. a separate multi-page structured session proves global canonical boundary identity is converted to correct page/local state;
+9. no duration timer independently changes the cursor.
+
+Use the production runtime/boundary driver, not direct session setter calls.
+
+### A8.2-I — preserve good A8/A8.1 work
+
+Preserve:
+
+- one-pass core structured document construction;
+- TTS text projected from structured sentences;
+- explicit canonical ID in `PreparedSentence` and `TtsSentenceBoundary`;
+- first-sample-only marker emission;
+- semantic SentenceStarted event path;
+- no predicted-duration cursor stepping;
+- active 24 ms egui repaint scheduling;
+- A7 durable follow state and variable-height bounded rendering;
+- A5/A5.1 canonical session/snapshot-free hot paths;
+- A6 Windows backend/voice behavior;
+- Caliberate and legacy Calibre providers.
+
+### A8.2 acceptance gates
+
+1. Native structured EPUB pretty rendering uses explicit source block identity, never Vec-position equivalence.
+2. Native structured EPUB pretty blocks are adapted from `StructuredDocument`, not independent whole-document raw HTML parsing.
+3. Source-born sentence ranges reach PrettySentenceTarget without sentence re-splitting/re-identification.
+4. Structured document reaches UI via shared immutable/lightweight ownership.
+5. ReaderSession has unambiguous canonical/global highlight identity and correct page-local derivation.
+6. Native structured EPUB page partitioning does not rediscover sentence ownership by string matching.
+7. Upgraded >128-sentence real EPUB fixture includes HR/table/nested-list/inline-image divergence and proves exact source->pretty->TTS identity across them.
+8. Runtime boundary test asserts Repeat/Next/Prev and exact prepare/normalization-window behavior.
+9. A8 first-sample markers, SentenceStarted semantics, and active repaint remain green.
+10. Windows normal workspace tests/QA/TTS probes pass.
+11. No human QA until director acceptance.
+
+### Human QA
+
+No human QA during A8.2.
+
+After director acceptance, repeat the same real EPUB playback/highlight test with no additional setup.

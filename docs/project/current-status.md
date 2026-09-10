@@ -136,7 +136,7 @@ Gate 3 native PDF visual stability begins only after Gate 2 real-desktop signoff
 
 ## Caliberate / Calibre library integration
 
-**GOAL 0008 A8.1 — AUDIO BOUNDARY/REPAINT GOOD; TRUE SOURCE-BORN PROVENANCE STILL REQUIRED**
+**GOAL 0008 A8.2 — CORE PROVENANCE/AUDIO IDs GOOD; STRUCTURED->PRETTY IDENTITY STILL UNSAFE**
 
 Accepted integration:
 
@@ -204,3 +204,8 @@ A7/A7.1 did not solve real spoken-sentence synchronization. Windows audio remain
 ### A8.1 director review
 
 The first A8 branch is not integrated. Rodio first-sample markers, semantic SentenceStarted events, removal of duration-timer cursor advancement, and active egui repaint scheduling are good. The central source-identity requirement was not met: EPUB provenance is still assigned by re-extracting block text and post-hoc matching it against a separately generated canonical sentence stream, with no neutral structured provenance model. The real EPUB and simulated-boundary tests also do not satisfy the required end-to-end/window/control coverage. A8.1 preserves the good A8 runtime work and replaces the fake provenance layer with one-pass structured extraction plus explicit canonical IDs on audio boundaries.
+
+
+### A8.2 director review
+
+A8.1 is not integrated despite green Windows CI. Core now has real source-born structured sentence provenance and audio boundaries carry explicit canonical IDs, but egui still independently parses raw HTML into a separate PrettyBlock coordinate system and assumes StructuredBlock.block_id equals PrettyBlock Vec index. HR/table/nested-list/inline-image rendering can shift that index and invalidate every later highlight. Pretty target ranges are also re-split from rendered text rather than using source ranges. A8.2 makes StructuredDocument the native pretty input, carries explicit source block/range identity into visual targets, gives ReaderSession unambiguous canonical/global cursor identity, and adds divergence-focused EPUB plus stronger runtime boundary tests.
