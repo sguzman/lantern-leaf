@@ -27,7 +27,7 @@ These priorities are ordered. They may be revised by ChatGPT/director as verifie
 - click-to-play;
 - bookmarks/config/search/navigation.
 
-## P2.5 — Connect LanternLeaf to Caliberate as a first-class library service — A8.1 TRUE SOURCE PROVENANCE
+## P2.5 — Connect LanternLeaf to Caliberate as a first-class library service — A8.2 STRUCTURED->PRETTY IDENTITY
 
 - use Caliberate's versioned HTTP/JSON API rather than direct database coupling;
 - default local provider target `http://127.0.0.1:8181`;
@@ -157,3 +157,15 @@ A8.1 correction priority:
 - upgrade the real EPUB fixture to >128 sentences with nested spans/entities/distant duplicates/image/quote and exact identity assertions;
 - add runtime-level controllable 128+ boundary tests with pause/resume/repeat/next/prev/window semantics;
 - no human QA until A8.1 director acceptance.
+
+
+A8.2 correction priority:
+- preserve A8.1 StructuredDocument source traversal and explicit audio boundary canonical IDs;
+- stop treating source block_id as egui Vec index;
+- build native EPUB pretty blocks from the structured document with explicit source lineage;
+- carry source sentence ranges directly into visual targets;
+- separate canonical/global highlight identity from page-local cursor fields;
+- remove structured EPUB sentence repartitioning by string search;
+- extend the >128-sentence EPUB fixture with HR/table/nested-list/inline-image block-index divergence cases and exact source->pretty->TTS assertions;
+- finish production runtime Repeat/Next/Prev/window boundary assertions;
+- no human QA until A8.2 director acceptance.
