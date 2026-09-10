@@ -7,7 +7,7 @@ use lanternleaf_app::pipeline::{
 };
 use tracing::trace;
 
-use super::{LanternLeafApp, StatusLogEntry};
+use super::{LanternLeafApp, LifecycleSignal, StatusLogEntry};
 use crate::shell::NotificationLevel;
 
 pub(crate) fn starter_startup_commands() -> Vec<AppCommand> {
@@ -62,7 +62,7 @@ impl LanternLeafApp {
     fn begin_close_reader(&mut self) {
         self.tts_runtime
             .apply_command(lanternleaf_app::tts_runtime::TtsCommand::Stop);
-        self.pending_close_after_persistence = true;
+        self.lifecycle.begin_close_book();
         self.show_reader_confirm_modal = false;
         self.last_reader_source_for_persistence = None;
         self.queue_persistence_flush(PersistenceTrigger::SessionClose);
@@ -72,6 +72,7 @@ impl LanternLeafApp {
     fn begin_safe_quit(&mut self) {
         self.tts_runtime
             .apply_command(lanternleaf_app::tts_runtime::TtsCommand::Stop);
+        self.lifecycle.begin_safe_quit();
         self.queue_persistence_flush(PersistenceTrigger::SafeQuit);
         self.push_status("Safe quit waiting for persistence completion".to_string());
     }
@@ -186,26 +187,37 @@ impl LanternLeafApp {
                     trigger: PersistenceTrigger::SessionClose,
                     outcome: PersistenceOutcome::Completed | PersistenceOutcome::SkippedNoSession,
                     ..
-                } if self.pending_close_after_persistence => {
-                    self.pending_close_after_persistence = false;
-                    self.effect_dispatcher.dispatch(PlannedEffect {
-                        request_id: self.runtime.next_request_id(),
-                        effect: RuntimeEffect::CloseReaderSession,
-                    });
+                } => {
+                    if self.lifecycle.persistence_completed(
+                        PersistenceTrigger::SessionClose,
+                        PersistenceOutcome::Completed,
+                    ) == LifecycleSignal::ClearReader
+                    {
+                        self.effect_dispatcher.dispatch(PlannedEffect {
+                            request_id: self.runtime.next_request_id(),
+                            effect: RuntimeEffect::CloseReaderSession,
+                        });
+                    }
                 }
                 AppEvent::PersistenceFlushed {
                     trigger: PersistenceTrigger::SafeQuit,
                     outcome: PersistenceOutcome::Completed | PersistenceOutcome::SkippedNoSession,
                     ..
                 } => {
-                    self.pending_native_close = true;
+                    let _ = self.lifecycle.persistence_completed(
+                        PersistenceTrigger::SafeQuit,
+                        PersistenceOutcome::Completed,
+                    );
                 }
                 AppEvent::PersistenceFlushed {
                     trigger: PersistenceTrigger::SessionClose,
                     outcome: PersistenceOutcome::Failed,
                     ..
-                } if self.pending_close_after_persistence => {
-                    self.pending_close_after_persistence = false;
+                } => {
+                    let _ = self.lifecycle.persistence_completed(
+                        PersistenceTrigger::SessionClose,
+                        PersistenceOutcome::Failed,
+                    );
                     self.show_reader_confirm_modal = true;
                     self.push_status("Book close canceled because persistence failed".to_string());
                 }
@@ -214,6 +226,10 @@ impl LanternLeafApp {
                     outcome: PersistenceOutcome::Failed,
                     ..
                 } => {
+                    let _ = self.lifecycle.persistence_completed(
+                        PersistenceTrigger::SafeQuit,
+                        PersistenceOutcome::Failed,
+                    );
                     self.show_safe_quit_modal = true;
                     self.push_status("Safe quit canceled because persistence failed".to_string());
                 }

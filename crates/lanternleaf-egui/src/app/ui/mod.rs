@@ -8,6 +8,23 @@ use lanternleaf_app::state::AppState;
 
 use super::LanternLeafApp;
 
+pub(crate) const READER_PANEL_MIN_WIDTH: f32 = 240.0;
+pub(crate) const READER_PANEL_DEFAULT_WIDTH: f32 = 320.0;
+pub(crate) const READER_PANEL_MAX_WIDTH: f32 = 460.0;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DiagnosticPresentation {
+    pub(crate) text: String,
+    pub(crate) max_width: u16,
+}
+
+pub(crate) fn bounded_diagnostic(message: &str) -> DiagnosticPresentation {
+    DiagnosticPresentation {
+        text: message.to_string(),
+        max_width: READER_PANEL_MAX_WIDTH as u16,
+    }
+}
+
 impl LanternLeafApp {
     pub(crate) fn render_navigation_row(&mut self, ctx: &Context, state: &AppState) {
         if !self.layout_policy.show_status_row || !self.layout_policy.is_narrow() {
@@ -144,9 +161,9 @@ impl LanternLeafApp {
             || !state.reader_ui.search_matches.is_empty();
         SidePanel::left("panel_toggle")
             .resizable(true)
-            .min_width(240.0)
-            .default_width(320.0)
-            .max_width(460.0)
+            .min_width(READER_PANEL_MIN_WIDTH)
+            .default_width(READER_PANEL_DEFAULT_WIDTH)
+            .max_width(READER_PANEL_MAX_WIDTH)
             .show(ctx, |ui| {
                 ui.set_max_width(ui.available_width());
                 ui.heading("Panels");
@@ -273,5 +290,18 @@ impl LanternLeafApp {
                 });
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{READER_PANEL_MAX_WIDTH, bounded_diagnostic};
+
+    #[test]
+    fn long_diagnostic_stays_available_inside_bounded_panel_policy() {
+        let message = format!("Piper path: {}", "C:\\models\\very-long\\".repeat(32));
+        let presentation = bounded_diagnostic(&message);
+        assert_eq!(presentation.text, message);
+        assert!(f32::from(presentation.max_width) <= READER_PANEL_MAX_WIDTH);
     }
 }

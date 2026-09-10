@@ -92,6 +92,13 @@ pub(crate) fn follow_target_for_transition(
     })
 }
 
+pub(crate) fn playback_event_matches_active_source(
+    active_source: Option<&str>,
+    event_source: &str,
+) -> bool {
+    active_source.is_some_and(|active| active == event_source)
+}
+
 impl LanternLeafApp {
     pub(crate) fn handle_tts_runtime_events(&mut self) {
         for event in self.tts_runtime.collect_events() {
@@ -147,13 +154,14 @@ impl LanternLeafApp {
 
             if let Some(playback) = event.playback.clone() {
                 let previous = self.runtime.state_snapshot();
-                if previous
-                    .reader_document
-                    .source
-                    .as_ref()
-                    .is_some_and(|source| source.source_path != playback.source_path)
-                    || previous.reader_document.source.is_none()
-                {
+                if !playback_event_matches_active_source(
+                    previous
+                        .reader_document
+                        .source
+                        .as_ref()
+                        .map(|source| source.source_path.as_str()),
+                    &playback.source_path,
+                ) {
                     warn!(
                         tts_request_id,
                         source_path = %playback.source_path,
@@ -295,6 +303,7 @@ impl LanternLeafApp {
 mod tests {
     use super::{
         PlaybackCursorProjection, actionable_tts_failure_message, follow_target_for_transition,
+        playback_event_matches_active_source,
     };
     use lanternleaf_core::config::TtsBackend;
 
@@ -319,6 +328,19 @@ mod tests {
             actionable_tts_failure_message(TtsBackend::Windows, "Opening audio output failed")
                 .contains("audio output")
         );
+    }
+
+    #[test]
+    fn stale_playback_from_old_source_is_rejected_after_new_source_opens() {
+        assert!(!playback_event_matches_active_source(
+            Some("new-book.epub"),
+            "old-book.epub"
+        ));
+        assert!(playback_event_matches_active_source(
+            Some("new-book.epub"),
+            "new-book.epub"
+        ));
+        assert!(!playback_event_matches_active_source(None, "old-book.epub"));
     }
 
     fn cursor(page: usize, display_idx: Option<usize>) -> PlaybackCursorProjection {

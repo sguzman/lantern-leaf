@@ -9,8 +9,11 @@ use lanternleaf_core::session::{ReaderSettingsPatch, SessionCommand};
 use lanternleaf_core::text_utils;
 use tracing::trace;
 
-use crate::app::ui::format::format_duration_secs;
-use crate::app::{AnchorFallback, LanternLeafApp, PrettySentenceSegment, PrettySentenceTarget};
+use crate::app::ui::{bounded_diagnostic, format::format_duration_secs};
+use crate::app::{
+    AnchorFallback, LanternLeafApp, PrettySentenceSegment, PrettySentenceTarget,
+    text_only_mode_transition,
+};
 use crate::pretty::{
     PrettyBlock, PrettyBlockKind, PrettyPageCacheKey, PrettySourceKind, PrettySpan, PrettyStyle,
     clamp_image_size, font_id_for, html_to_blocks, markdown_to_blocks, structured_to_blocks,
@@ -880,18 +883,21 @@ impl LanternLeafApp {
                 };
                 if ui.button(text_only_label).clicked() {
                     let current_playback = self.runtime.state_snapshot().reader_playback;
-                    if !current_text_only {
-                        self.text_only_override = Some(true);
-                    } else {
-                        self.text_only_override = None;
-                    }
-                    if let Some(canonical_idx) =
+                    let transition = text_only_mode_transition(
+                        current_text_only,
                         current_playback.highlighted_canonical_idx.or_else(|| {
                             current_playback
                                 .highlighted_sentence_idx
                                 .map(|local_idx| canonical_display_index(snapshot, local_idx))
-                        })
-                    {
+                        }),
+                    );
+                    if transition.text_only {
+                        self.text_only_override = Some(true);
+                    } else {
+                        self.text_only_override = None;
+                    }
+                    if transition.arm_follow {
+                        let canonical_idx = transition.canonical_idx.expect("armed follow target");
                         self.auto_scroll_state
                             .request_cursor(snapshot.source_path.clone(), canonical_idx);
                     }
@@ -1047,7 +1053,9 @@ impl LanternLeafApp {
                         ui.label(format!("Last TTS event: {:?}", event.kind));
                         ui.label(event.action.as_str());
                         if let Some(message) = event.message.as_ref() {
-                            ui.add(Label::new(message).wrap(true));
+                            let diagnostic = bounded_diagnostic(message);
+                            let width = ui.available_width().min(f32::from(diagnostic.max_width));
+                            ui.add_sized([width, 0.0], Label::new(diagnostic.text).wrap(true));
                         }
                         ui.end_row();
                     });
@@ -1792,12 +1800,39 @@ mod tests {
 
     #[test]
     fn text_only_projection_tracks_mode_switch_and_many_follow_boundaries() {
-        for canonical_idx in 0..48 {
-            let projection = text_only_row_projection_for_page(&[48], 0, 48, canonical_idx)
-                .expect("active playback sentence should remain visibly selectable");
-            assert_eq!(projection.local_idx, canonical_idx);
+        let source = "book.epub".to_string();
+        let counts = [16, 16, 16, 16];
+        let transition = crate::app::text_only_mode_transition(false, Some(3));
+        assert!(transition.text_only);
+        assert!(transition.arm_follow);
+        let mut follow = crate::app::AutoScrollState::default();
+        follow.request_cursor(source.clone(), transition.canonical_idx.unwrap());
+
+        for canonical_idx in 3..51 {
+            let page = canonical_idx / 16;
+            let projection =
+                text_only_row_projection_for_page(&counts, page, counts[page], canonical_idx)
+                    .expect("SentenceStarted cursor should select a visible text-only row");
             assert_eq!(projection.canonical_idx, canonical_idx);
+            assert_eq!(projection.local_idx, canonical_idx % 16);
+            assert!(follow.pending_for(&source, canonical_idx));
+            follow.last_jump_at = None;
+            assert!(matches!(
+                follow.decide_scroll(&source, canonical_idx, crate::app::AnchorFallback::Exact),
+                crate::app::ScrollDecision::Scroll
+            ));
+            follow.record(&source, canonical_idx, crate::app::AnchorFallback::Exact);
+            if canonical_idx < 50 {
+                follow.request_cursor(source.clone(), canonical_idx + 1);
+            }
         }
+
+        // Pause changes no cursor, so selection remains on the same row.
+        let paused = text_only_row_projection_for_page(&counts, 3, 16, 50).unwrap();
+        assert_eq!(paused.local_idx, 2);
+        let back_to_pretty = crate::app::text_only_mode_transition(true, Some(50));
+        assert!(!back_to_pretty.text_only);
+        assert_eq!(back_to_pretty.canonical_idx, Some(50));
     }
 
     #[test]

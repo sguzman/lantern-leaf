@@ -302,6 +302,97 @@ fn is_pid_running(pid: u32) -> bool {
     crate::os::is_pid_running(pid)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct LifecycleHandshake {
+    close_after_persistence: bool,
+    native_close_armed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LifecycleSignal {
+    None,
+    ClearReader,
+    CloseNativeViewport,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TextOnlyModeTransition {
+    pub(crate) text_only: bool,
+    pub(crate) canonical_idx: Option<usize>,
+    pub(crate) arm_follow: bool,
+}
+
+pub(crate) fn text_only_mode_transition(
+    current_text_only: bool,
+    canonical_idx: Option<usize>,
+) -> TextOnlyModeTransition {
+    let text_only = !current_text_only;
+    TextOnlyModeTransition {
+        text_only,
+        canonical_idx,
+        arm_follow: canonical_idx.is_some(),
+    }
+}
+
+impl LifecycleHandshake {
+    pub(crate) fn begin_close_book(&mut self) {
+        self.close_after_persistence = true;
+    }
+
+    pub(crate) fn begin_safe_quit(&mut self) {
+        self.native_close_armed = false;
+    }
+
+    pub(crate) fn persistence_completed(
+        &mut self,
+        trigger: lanternleaf_app::pipeline::PersistenceTrigger,
+        outcome: lanternleaf_app::pipeline::PersistenceOutcome,
+    ) -> LifecycleSignal {
+        use lanternleaf_app::pipeline::{PersistenceOutcome, PersistenceTrigger};
+        if !matches!(
+            outcome,
+            PersistenceOutcome::Completed | PersistenceOutcome::SkippedNoSession
+        ) {
+            if trigger == PersistenceTrigger::SessionClose {
+                self.close_after_persistence = false;
+            }
+            return LifecycleSignal::None;
+        }
+        match trigger {
+            PersistenceTrigger::SessionClose if self.close_after_persistence => {
+                self.close_after_persistence = false;
+                LifecycleSignal::ClearReader
+            }
+            PersistenceTrigger::SafeQuit => {
+                if self.native_close_armed {
+                    LifecycleSignal::None
+                } else {
+                    self.native_close_armed = true;
+                    LifecycleSignal::CloseNativeViewport
+                }
+            }
+            _ => LifecycleSignal::None,
+        }
+    }
+
+    pub(crate) fn consume_native_close(&mut self) -> bool {
+        if self.native_close_armed {
+            self.native_close_armed = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn close_pending(&self) -> bool {
+        self.close_after_persistence
+    }
+
+    pub(crate) fn native_close_armed(&self) -> bool {
+        self.native_close_armed
+    }
+}
+
 struct LanternLeafApp {
     runtime: AppRuntime,
     #[cfg(not(target_arch = "wasm32"))]
@@ -310,8 +401,7 @@ struct LanternLeafApp {
     status_log: Vec<StatusLogEntry>,
     show_safe_quit_modal: bool,
     show_reader_confirm_modal: bool,
-    pending_close_after_persistence: bool,
-    pending_native_close: bool,
+    lifecycle: LifecycleHandshake,
     pending_search_focus: bool,
     last_plan: Option<DispatchPlan>,
     auto_scroll_state: AutoScrollState,
@@ -766,8 +856,7 @@ impl LanternLeafApp {
             status_log: Vec::new(),
             show_safe_quit_modal: false,
             show_reader_confirm_modal: false,
-            pending_close_after_persistence: false,
-            pending_native_close: false,
+            lifecycle: LifecycleHandshake::default(),
             pending_search_focus: false,
             last_plan: None,
             auto_scroll_state: AutoScrollState::default(),
@@ -880,8 +969,7 @@ impl LanternLeafApp {
             status_log: Vec::new(),
             show_safe_quit_modal: false,
             show_reader_confirm_modal: false,
-            pending_close_after_persistence: false,
-            pending_native_close: false,
+            lifecycle: LifecycleHandshake::default(),
             pending_search_focus: false,
             last_plan: None,
             auto_scroll_state: AutoScrollState::default(),
@@ -1689,11 +1777,10 @@ impl LanternLeafApp {
                             }
                         }
                         if let Some(error) = &self.windows_voice_catalog_error {
+                            let diagnostic = crate::app::ui::bounded_diagnostic(error);
                             ui.add(
-                                egui::Label::new(
-                                    RichText::new(error).color(Color32::RED),
-                                )
-                                .wrap(true),
+                                egui::Label::new(RichText::new(diagnostic.text).color(Color32::RED))
+                                    .wrap(true),
                             );
                         }
                     }
@@ -2554,8 +2641,7 @@ impl eframe::App for LanternLeafApp {
         }
         self.handle_tts_runtime_events();
         self.handle_effect_events();
-        if self.pending_native_close {
-            self.pending_native_close = false;
+        if self.lifecycle.consume_native_close() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         let projection_started = Instant::now();
@@ -2802,6 +2888,55 @@ impl AudioBudgetEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn close_book_handshake_waits_for_persistence_before_clearing() {
+        let mut handshake = LifecycleHandshake::default();
+        handshake.begin_close_book();
+        assert_eq!(
+            handshake.persistence_completed(
+                lanternleaf_app::pipeline::PersistenceTrigger::SessionClose,
+                lanternleaf_app::pipeline::PersistenceOutcome::Failed,
+            ),
+            LifecycleSignal::None
+        );
+        assert!(!handshake.close_pending());
+
+        handshake.begin_close_book();
+        assert_eq!(
+            handshake.persistence_completed(
+                lanternleaf_app::pipeline::PersistenceTrigger::SessionClose,
+                lanternleaf_app::pipeline::PersistenceOutcome::Completed,
+            ),
+            LifecycleSignal::ClearReader
+        );
+        assert!(!handshake.close_pending());
+    }
+
+    #[test]
+    fn safe_quit_handshake_arms_one_native_close_only_after_flush() {
+        let mut handshake = LifecycleHandshake::default();
+        handshake.begin_safe_quit();
+        assert!(!handshake.native_close_armed());
+        assert_eq!(
+            handshake.persistence_completed(
+                lanternleaf_app::pipeline::PersistenceTrigger::SafeQuit,
+                lanternleaf_app::pipeline::PersistenceOutcome::Failed,
+            ),
+            LifecycleSignal::None
+        );
+        assert!(!handshake.native_close_armed());
+        assert_eq!(
+            handshake.persistence_completed(
+                lanternleaf_app::pipeline::PersistenceTrigger::SafeQuit,
+                lanternleaf_app::pipeline::PersistenceOutcome::Completed,
+            ),
+            LifecycleSignal::CloseNativeViewport
+        );
+        assert!(handshake.native_close_armed());
+        assert!(handshake.consume_native_close());
+        assert!(!handshake.consume_native_close());
+    }
     use lanternleaf_core::cache::{PdfOcrSentenceAlignment, PdfRect};
     use lanternleaf_core::epub_loader::{
         PdfOcrAlignmentSummary, PdfOcrGeometryQualityClass, PdfOcrSourceKind,

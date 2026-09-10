@@ -458,7 +458,8 @@ impl TtsRuntime {
         let sync_after_command = should_sync_tts_after_reader_command(&command_for_session);
         let request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
         if let TtsCommand::ApplySettings { patch } = &command {
-            if self.mode == TtsRuntimeMode::Real
+            if (self.mode == TtsRuntimeMode::Real
+                || patch.tts_backend == Some(config::TtsBackend::Piper))
                 && (patch.tts_backend.is_some() || patch.windows_voice_id.is_some())
             {
                 let validation = self.session.lock().ok().and_then(|guard| {
@@ -2053,7 +2054,7 @@ mod tests {
     #[test]
     fn failed_piper_switch_is_transactional_and_leaves_session_recoverable() {
         let normalizer = normalizer::TextNormalizer::default();
-        let runtime = TtsRuntime::new_with_mode(normalizer, TtsRuntimeMode::Real);
+        let runtime = TtsRuntime::new_with_mode(normalizer, TtsRuntimeMode::Simulated);
         let mut reader = build_test_session(&[&["A sentence.", "B sentence."]]);
         reader.config.tts_backend = config::TtsBackend::Windows;
         reader.config.tts_model_path = "missing-goal-0009-model.onnx".to_string();
@@ -2089,5 +2090,37 @@ mod tests {
             guard.as_ref().expect("session").config.tts_backend,
             config::TtsBackend::Windows
         );
+        drop(guard);
+
+        let windows = runtime
+            .apply_command(TtsCommand::ApplySettings {
+                patch: session::ReaderSettingsPatch {
+                    tts_backend: Some(config::TtsBackend::Windows),
+                    ..Default::default()
+                },
+            })
+            .expect("Windows should remain usable in the same session");
+        assert_eq!(windows.settings.tts_backend, config::TtsBackend::Windows);
+        let playing = runtime
+            .apply_command(TtsCommand::Play)
+            .expect("Windows Play should start without reopening");
+        assert_eq!(playing.tts.state, session::TtsPlaybackState::Playing);
+        let driver = runtime
+            .simulated_boundary_driver()
+            .expect("deterministic simulated boundary seam");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut saw_boundary = false;
+        while Instant::now() < deadline {
+            let _ = driver.emit_next();
+            if runtime.collect_events().iter().any(|event| {
+                event.kind == TtsRuntimeEventKind::SentenceStarted
+                    || event.kind == TtsRuntimeEventKind::Progress
+            }) {
+                saw_boundary = true;
+                break;
+            }
+            thread::yield_now();
+        }
+        assert!(saw_boundary, "Windows Play should deliver a first boundary");
     }
 }
