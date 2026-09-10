@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-10 after director acceptance of Goal 0009 A1 for real-desktop QA.
+Updated: 2026-09-10 after Goal 0009 A1 real-desktop partial pass and A2 correction authorization.
 
 This file contains current verified/bounded state. Detailed historical correction lineage lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -28,56 +28,56 @@ Accepted runtime shape:
 
 `canonical display sentence -> backend synthesis -> prepared audio -> Rodio first-sample boundary -> canonical ReaderSession cursor -> native UI projection`
 
-Real Windows evidence already proves audible Windows speech, Play/Pause, interactive installed-voice changes, and sentence-boundary-driven pretty synchronization.
+Real Windows evidence proves audible Windows speech, Play/Pause, installed voice switching, and sentence-boundary-driven pretty synchronization.
 
 ## Goal 0008 / Gate 2.5 — Caliberate first-class library service
 
 **COMPLETE — AUTOMATED + REAL-DESKTOP ACCEPTED**
 
-The large real Caliberate EPUB now opens quickly, remains responsive, speaks through Windows TTS, highlights the actually audible sentence in native pretty view, and follows playback correctly. Caliberate remains behind the existing provider/browser boundary and legacy Calibre compatibility remains available.
-
-Final Goal 0008 acceptance is recorded in `docs/work/reviews/0008-a8.3-director-acceptance.md`.
+The large real Caliberate EPUB opens quickly, remains responsive, speaks through Windows TTS, highlights the actually audible sentence in native pretty view, and follows playback correctly. Caliberate remains behind the existing provider/browser boundary and legacy Calibre compatibility remains available.
 
 ## Goal 0009 / Gate 2.6 — TTS playback polish and layered voice configuration
 
-**A1 IMPLEMENTATION ACCEPTED — REAL-DESKTOP SIGNOFF PENDING**
+**A1 PARTIAL REAL-DESKTOP PASS — A2 CORRECTION READY**
 
-Accepted implementation: `52ae85dad02f2e5588c14d33817abf0c5db69916`.
+A1 implementation: `52ae85dad02f2e5588c14d33817abf0c5db69916`.
 
-Accepted worker terminal head: `fcbe092cdf543e8095ce73c8317c3a777b68d88e`.
+A1 worker terminal: `fcbe092cdf543e8095ce73c8317c3a777b68d88e`.
 
-Authoritative Windows CI: `34517286850`.
+A1 Windows CI: `34517286850`.
 
-Implemented and director-reviewed:
+Real-desktop A1 PASS evidence to preserve:
 
-- `[tts].windows_voice_preference = "Zira"` is the portable app-level Windows preference;
-- explicit installed per-book Windows voice IDs win over the app preference;
-- absent/invalid preferred-name availability falls back to the Windows OS default rather than making speech unusable;
-- versioned `BookReaderOverrides` replaces whole-AppConfig book ownership for new persistence;
-- omitted book fields inherit current app configuration on every open;
-- legacy whole-AppConfig book caches migrate reader-local fields without inventing backend/voice override intent;
-- explicit reader TTS settings update book override intent while global runtime/resource settings remain app-owned;
-- TTS refill/window progression carries an explicit continuation cursor; a deterministic 300-boundary regression crosses repeated 8-item batches and 64-sentence windows with exact ordered ordinary starts and no duplicate boundary IDs;
-- text-only row selection now consumes the same high-frequency canonical playback identity as scroll follow;
-- real backend/voice changes are validated before session mutation; invalid/unready Piper selection leaves the last-known-good Windows configuration intact and emits an actionable failure;
-- Goal 0008 canonical session, source-born EPUB identity, first-sample boundaries, bounded rendering, and lightweight hot paths remain intact.
+- sustained playback on the same large EPUB produced no unsolicited duplicate just-finished line reads;
+- pretty view remains fast/responsive and its audible-sentence highlight + viewport follow remain correct;
+- a new/unoverridden Windows book selected Zira;
+- an explicit Mark voice selection persisted across restart/reopen;
+- unavailable Piper produced an actionable missing-model error without crashing the app.
 
-One real-desktop pass is still required because CI cannot prove audible duplicate absence, visible text-only styling, actual installed Zira selection, book-level reopen behavior through the GUI, or same-session recovery after a failed Piper attempt.
+Real-desktop A1 FAIL / A2 correction scope:
+
+- pretty -> text-only during active playback has neither visible highlight nor auto-scroll, regressing the earlier follow-working state;
+- long Piper error/path text can force the left TTS/settings panel excessively wide and make resizing unusable until content changes;
+- Safe quit confirmation does not exit the application; director audit confirms the egui `handle_safe_quit` path is currently a logging-only no-op;
+- leaving the current book is not discoverable/reliable: existing reader controls are buried in content and `Close reader session` dispatches close before showing its confirmation;
+- same-session Windows playback recovery after failed Piper still needs deterministic + eventual real-desktop proof.
+
+A2 is authorized on the same Goal 0009 branch/report lineage. It must repair production text-only highlight/follow, constrain diagnostics layout, provide a persistent ordered Close book/Back to library action, make Safe Quit actually close only after ordered persistence, and prove failed-Piper -> Windows playback recovery in the same session.
 
 ## Non-PDF reader status
 
-**PRETTY PATH ACCEPTED; GOAL 0009 DESKTOP POLISH SIGNOFF PENDING**
+**PRETTY EPUB PATH STRONG; TEXT-ONLY A2 CORRECTION OPEN**
 
-TXT/Markdown/HTML/EPUB automated parity remains covered. The large real EPUB already provides strong evidence for native pretty rendering, scrolling, Windows speech, and spoken-sentence synchronization. Goal 0009's accepted A1 patch targets the remaining text-only visual and TTS/configuration polish; desktop signoff is the only remaining Gate 2.6 evidence.
+TXT/Markdown/HTML/EPUB automated parity remains covered. The large real EPUB now has repeated real-desktop evidence for responsive pretty rendering, stable Windows speech, no duplicate ordinary lines, accurate spoken-sentence highlight, and viewport follow. Text-only remains the blocking non-PDF presentation defect because its actual production mode transition currently loses both highlight and follow.
 
 ## PDF
 
-**CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY WAITS FOR GOAL 0009 SIGNOFF**
+**CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY WAITS FOR GOAL 0009 A2**
 
-Earlier work repaired bounded PDF classification/OCR/reading-order/cache contracts. Gate 3 native PDF page rendering/viewport/texture stability is next, but it is not authorized until Goal 0009's bounded real-desktop signoff completes.
+Gate 3 native PDF visual stability remains next but is not authorized until Goal 0009 closes.
 
 ## Workflow status
 
 **MACRO-GOAL / MULTI-ATTEMPT PROTOCOL ACTIVE**
 
-Goal 0009 is integrated for human verification. No next macro-goal is authorized yet. If desktop QA passes, director closes 0009 and opens the PDF visual-stability goal. If it fails, the same Goal 0009 lineage is reopened for a bounded correction.
+Goal 0009 is reopened to `docs/work/ready/` for a fresh Codex Goal session as Attempt A2. The repository goal ID, implementation branch, and report lineage remain 0009. No human QA is requested during A2 implementation. PDF work remains unauthorized.

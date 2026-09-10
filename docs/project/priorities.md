@@ -18,12 +18,13 @@ Full Piper model/catalog/downloader UX remains future work.
 
 ## P2 — Non-PDF reader/TTS
 
-**PRETTY EPUB PATH ACCEPTED; GOAL 0009 A1 DESKTOP SIGNOFF PENDING**
+**PRETTY EPUB PATH ACCEPTED; TEXT-ONLY A2 CORRECTION OPEN**
 
 - TXT/Markdown/HTML/EPUB automated parity is established;
 - native pretty rendering is bounded and responsive on the real large EPUB;
-- pretty spoken-sentence highlight and viewport follow are accurate on the real Windows machine;
-- Goal 0009 A1 now makes text-only row selection consume the same high-frequency canonical playback ID as follow/scroll; visible real-desktop confirmation remains.
+- sustained A1 real-desktop playback had no duplicate ordinary line reads;
+- pretty spoken-sentence highlight and viewport follow remain accurate;
+- text-only production mode transition currently loses both visible highlight and auto-scroll and must be corrected before this gate closes.
 
 ## P2.5 — First-class Caliberate service
 
@@ -33,29 +34,33 @@ Caliberate catalog/materialization/native EPUB/Windows TTS and synchronized pret
 
 ## P2.6 — Goal 0009: TTS playback polish + layered voice configuration
 
-**A1 ACCEPTED — HUMAN SIGNOFF ONLY**
+**A2 CORRECTION READY — TEXT-ONLY + EXIT/PANEL UX**
 
-Accepted implementation: `52ae85dad02f2e5588c14d33817abf0c5db69916`.
+A1 implementation: `52ae85dad02f2e5588c14d33817abf0c5db69916`.
 
-Windows CI: `34517286850`.
+A1 Windows CI: `34517286850`.
 
-Implemented:
+A1 real-desktop wins to preserve:
 
-- portable app-level Windows voice preference, checked in as Zira;
-- explicit versioned per-book overrides rather than frozen whole-AppConfig persistence;
-- safe legacy book-config migration;
-- explicit per-book voice/backend persistence semantics;
-- continuation-cursor repair for TTS refill/window progression, with 300 ordered deterministic boundaries and no ordinary duplicate starts;
-- canonical text-only row selection/highlight ownership;
-- transactional Piper readiness validation that rejects an unusable switch before canonical session mutation.
+- unsolicited duplicate line replay was not reproduced over sustained playback;
+- pretty rendering/highlight/follow remain strong;
+- a new book inherited Zira;
+- an explicit Mark voice persisted across restart/reopen;
+- unavailable Piper produced a useful failure instead of crashing.
 
-One repo-native real-desktop run must confirm: no unsolicited replay over a sustained stretch, visible text-only highlighting, actual Zira inheritance, per-book voice reopen persistence, and same-session Windows playback after an unavailable Piper attempt.
+A2 blockers:
 
-Do not authorize PDF implementation until this signoff is known.
+1. repair actual pretty -> text-only production transition so visible canonical highlight and auto-scroll both work immediately and continue through subsequent boundaries;
+2. bound the left TTS/settings panel so long errors/paths wrap rather than resizing the shell and user resizing remains usable;
+3. provide a persistent, reliable Close book/Back to library lifecycle that stops TTS, persists, clears the reader, and returns to Starter without exiting;
+4. make Safe Quit actually close the native application after ordered TTS cancellation and persistence completion; current egui SafeQuit handler is a no-op;
+5. prove unavailable Piper -> Windows -> Play recovery in the same open session, while preserving transactional configuration behavior.
+
+The same Goal 0009 branch/report lineage is reopened for A2. Do not authorize PDF implementation until A2 passes director review and focused real-desktop signoff.
 
 ## P3 — Native PDF visual stability
 
-**NEXT CORE PRODUCT GATE AFTER GOAL 0009 SIGNOFF**
+**NEXT CORE PRODUCT GATE AFTER GOAL 0009; NOT AUTHORIZED YET**
 
 - page raster/render ownership;
 - texture/cache lifecycle;
@@ -74,4 +79,4 @@ DOCX/Word, further HTML edge cases, shared source/document boundaries, and broad
 
 ## P6 — Ergonomics, latency, packaging
 
-Startup/TTS latency, UI cleanup, large-document ergonomics, optional Piper model/voice management, library/import polish, release packaging, and measured dependency cleanup.
+Startup/TTS latency, broader UI cleanup, large-document ergonomics, optional Piper model/voice management, library/import polish, release packaging, and measured dependency cleanup.

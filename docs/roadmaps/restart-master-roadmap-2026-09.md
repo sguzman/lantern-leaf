@@ -26,17 +26,15 @@ Repository goal identity is durable; Codex Goal sessions are disposable attempts
 
 ## Gate 2 — Non-PDF reader/TTS
 
-**STATUS: CORE/PRETTY PATH ACCEPTED; GOAL 0009 A1 DESKTOP POLISH SIGNOFF PENDING**
+**STATUS: CORE/PRETTY PATH ACCEPTED; GOAL 0009 A2 CORRECTION OPEN**
 
 Goal 0006 established automated parity for TXT, Markdown, HTML, and EPUB. Goal 0008 strengthened native EPUB identity and proved fast responsive pretty rendering, audible Windows speech, accurate spoken-sentence highlight, and viewport follow on the real machine.
 
-Goal 0009 A1 is now integrated for human verification. Text-only row selection is driven by the same high-frequency canonical playback ID as follow/scroll, but real visible styling still requires desktop confirmation.
+Goal 0009 A1 additionally passed real-desktop sustained playback without the prior duplicate ordinary line reads, preserved pretty synchronization, established Zira inheritance, and proved explicit per-book Mark voice persistence. A1 did not close the gate because actual pretty -> text-only transition regressed: both visual highlight and auto-scroll disappear.
 
-Human workflow remains:
+A2 also owns bounded TTS diagnostic layout, a persistent Close book/Back to library path, actual ordered Safe Quit behavior, and explicit same-session Windows recovery after failed Piper.
 
-`git pull -> .\qa.ps1`
-
-No ordinary manual QA uses downloaded CI artifacts.
+Human workflow remains `git pull -> .\qa.ps1`; no ordinary manual QA uses downloaded CI artifacts.
 
 ## Gate 2.5 — First-class Caliberate library service
 
@@ -50,23 +48,23 @@ Large-catalog behavior, materialization, native EPUB ingestion, responsive rende
 
 ## Gate 2.6 — TTS playback polish + layered voice configuration
 
-**STATUS: A1 ACCEPTED FOR REAL-DESKTOP QA**
+**STATUS: A1 PARTIAL REAL-DESKTOP PASS; A2 READY**
 
-Goal 0009 A1 implements:
+Verified A1 wins:
 
-- portable app-level Windows voice preference with checked-in Zira default;
-- explicit versioned per-book overrides and legacy migration;
-- app-default inheritance for unoverridden books and explicit book-local voice/backend intent;
-- TTS continuation state across eight-item refill batches and bounded 64-sentence plan windows;
-- a 300-boundary deterministic ordinary-playback regression with exact ordered starts;
-- text-only row selection from the live canonical playback identity;
-- transactional validation of backend/voice changes so unavailable Piper resources are rejected before session mutation.
+- sustained ordinary Windows playback no longer exhibited the unsolicited duplicate-line behavior;
+- pretty highlight/follow remain synchronized and responsive;
+- new/unoverridden Windows book uses Zira;
+- explicit per-book voice choice persists across reopen/restart;
+- unavailable Piper produces actionable failure without crashing.
 
-Authoritative implementation: `52ae85dad02f2e5588c14d33817abf0c5db69916`.
+A2 must close:
 
-Authoritative Windows CI: `34517286850`.
-
-Exit requires one real-Windows run confirming no unsolicited replay over sustained playback, visible text-only highlight, Zira inheritance, book-level voice persistence, and immediate Windows recovery after an unavailable Piper attempt without reopening the book.
+- production text-only highlight + auto-follow across the actual mode switch and subsequent boundaries;
+- side-panel width containment for long diagnostics/paths;
+- reliable persistent Close book/Back to library lifecycle;
+- Safe Quit that actually closes only after ordered persistence;
+- failed-Piper -> Windows same-session playback recovery proof.
 
 Full Piper voice/model management remains outside this gate.
 
@@ -74,7 +72,7 @@ Full Piper voice/model management remains outside this gate.
 
 **STATUS: NEXT, NOT YET AUTHORIZED**
 
-After Gate 2.6 human signoff:
+After Gate 2.6 closes:
 
 - page raster/rendering;
 - texture/cache lifecycle;
@@ -93,7 +91,7 @@ DOCX/Word, further HTML edge cases, common source/document boundaries, and broad
 
 ## Gate 6 — Ergonomics, performance, packaging
 
-Startup/TTS latency, UI cleanup, large-document ergonomics, optional Piper model/voice management, library/import polish, release packaging, and dependency cleanup justified by measured problems.
+Startup/TTS latency, broader UI cleanup, large-document ergonomics, optional Piper model/voice management, library/import polish, release packaging, and dependency cleanup justified by measured problems.
 
 ## Director rule
 
