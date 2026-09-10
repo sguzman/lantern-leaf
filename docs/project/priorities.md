@@ -18,13 +18,13 @@ Full Piper model/catalog/downloader UX remains future work.
 
 ## P2 — Non-PDF reader/TTS
 
-**PRETTY EPUB PATH ACCEPTED; TEXT-ONLY A2 CORRECTION OPEN**
+**PRETTY EPUB PATH ACCEPTED; GOAL 0009 A2.1 REGRESSION PROOF OPEN**
 
 - TXT/Markdown/HTML/EPUB automated parity is established;
 - native pretty rendering is bounded and responsive on the real large EPUB;
 - sustained A1 real-desktop playback had no duplicate ordinary line reads;
 - pretty spoken-sentence highlight and viewport follow remain accurate;
-- text-only production mode transition currently loses both visible highlight and auto-scroll and must be corrected before this gate closes.
+- A2 contains a plausible text-only transition/follow repair, but its new regression still tests projection arithmetic rather than the real production mode-switch/follow lifecycle.
 
 ## P2.5 — First-class Caliberate service
 
@@ -34,29 +34,32 @@ Caliberate catalog/materialization/native EPUB/Windows TTS and synchronized pret
 
 ## P2.6 — Goal 0009: TTS playback polish + layered voice configuration
 
-**A2 CORRECTION READY — TEXT-ONLY + EXIT/PANEL UX**
+**A2 REJECTED BEFORE HUMAN QA — A2.1 REQUIRED**
 
-A1 implementation: `52ae85dad02f2e5588c14d33817abf0c5db69916`.
+A2 implementation: `e6bbc065462434950802818d0b4236464c244d5a`.
 
-A1 Windows CI: `34517286850`.
+A2 terminal: `87ec9257948bbc8dff277c8a7d8c8b3d44ef3d31`.
 
-A1 real-desktop wins to preserve:
+A2 Windows CI: `34528119986` — green.
 
-- unsolicited duplicate line replay was not reproduced over sustained playback;
-- pretty rendering/highlight/follow remain strong;
-- a new book inherited Zira;
-- an explicit Mark voice persisted across restart/reopen;
-- unavailable Piper produced a useful failure instead of crashing.
+Preserve A2 production work:
 
-A2 blockers:
+- ordered Safe Quit persistence-terminal/native-close path;
+- persistent confirmed Close book lifecycle;
+- stale old-source playback filtering;
+- bounded/resizable 240–460 px side panel with wrapped diagnostics;
+- production-owned text-only canonical row projection and follow re-arm/page refresh.
 
-1. repair actual pretty -> text-only production transition so visible canonical highlight and auto-scroll both work immediately and continue through subsequent boundaries;
-2. bound the left TTS/settings panel so long errors/paths wrap rather than resizing the shell and user resizing remains usable;
-3. provide a persistent, reliable Close book/Back to library lifecycle that stops TTS, persists, clears the reader, and returns to Starter without exiting;
-4. make Safe Quit actually close the native application after ordered TTS cancellation and persistence completion; current egui SafeQuit handler is a no-op;
-5. prove unavailable Piper -> Windows -> Play recovery in the same open session, while preserving transactional configuration behavior.
+A2.1 is narrowly about making the required evidence real and fixing anything those regressions expose:
 
-The same Goal 0009 branch/report lineage is reopened for A2. Do not authorize PDF implementation until A2 passes director review and focused real-desktop signoff.
+1. production pretty->text-only transition regression with selected-row styling + AutoScrollState pending/consume across 48+ boundaries, Pause, and a page transition;
+2. deterministic 300+ character diagnostic containment test against production panel/presentation policy;
+3. close-book lifecycle test covering active TTS, confirmation-before-destruction, persistence success/failure, Starter return, and stale-event isolation after a new source opens;
+4. Safe Quit persistence-terminal -> native-close handshake test, including the failure branch;
+5. failed Piper -> immediate Windows Play proof in the **same ReaderSession**, with actual playback/boundary evidence and no source reopen;
+6. preserve/re-run the existing no-repeat, pretty-sync, voice inheritance/persistence, Caliberate, workspace, Windows QA, Windows TTS probe, and renderer gates.
+
+No human QA until A2.1 receives director acceptance. Do not authorize PDF implementation first.
 
 ## P3 — Native PDF visual stability
 
