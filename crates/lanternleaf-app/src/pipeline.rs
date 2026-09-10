@@ -699,12 +699,12 @@ pub fn plan_command(state: &AppState, request_id: u64, command: AppCommand) -> D
                 scope: OperationScope::RuntimeConfig,
                 active: true,
             }],
-            vec![
-                RuntimeEffect::FlushPersistence {
-                    trigger: PersistenceTrigger::SafeQuit,
-                },
-                RuntimeEffect::SafeQuit,
-            ],
+            // The egui owner coordinates the ordered shutdown handshake.  Keeping
+            // this plan to the persistence terminal effect prevents the effect
+            // dispatcher from racing a native close request against the flush.
+            vec![RuntimeEffect::FlushPersistence {
+                trigger: PersistenceTrigger::SafeQuit,
+            }],
         ),
     };
 
@@ -1459,6 +1459,21 @@ mod tests {
             plan.effects.as_slice(),
             [PlannedEffect {
                 effect: RuntimeEffect::CloseReaderSession,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn safe_quit_plan_exposes_only_persistence_terminal_effect() {
+        let plan = plan_command(&AppState::default(), 56, AppCommand::SafeQuit);
+
+        assert!(matches!(
+            plan.effects.as_slice(),
+            [PlannedEffect {
+                effect: RuntimeEffect::FlushPersistence {
+                    trigger: PersistenceTrigger::SafeQuit
+                },
                 ..
             }]
         ));

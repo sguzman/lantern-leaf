@@ -2,7 +2,8 @@ use std::time::Instant;
 
 use lanternleaf_app::contracts::ReaderSnapshot;
 use lanternleaf_app::pipeline::{
-    AppCommand, DispatchPlan, PersistenceTrigger, PlannedEffect, ReaderCommand, RuntimeEffect,
+    AppCommand, AppEvent, DispatchPlan, PersistenceOutcome, PersistenceTrigger, PlannedEffect,
+    ReaderCommand, RuntimeEffect,
 };
 use tracing::trace;
 
@@ -27,6 +28,14 @@ impl LanternLeafApp {
     }
 
     pub(crate) fn execute_command(&mut self, command: AppCommand) {
+        if matches!(command, AppCommand::CloseReaderSession) {
+            self.begin_close_reader();
+            return;
+        }
+        if matches!(command, AppCommand::SafeQuit) {
+            self.begin_safe_quit();
+            return;
+        }
         let state_snapshot = self.runtime.state_snapshot();
         let reader_snapshot = state_snapshot.reader_document.snapshot.as_deref();
         self.maybe_record_audio_command(&command, reader_snapshot);
@@ -48,6 +57,23 @@ impl LanternLeafApp {
         if is_tts_command {
             self.apply_tts_command_if_needed(&command);
         }
+    }
+
+    fn begin_close_reader(&mut self) {
+        self.tts_runtime
+            .apply_command(lanternleaf_app::tts_runtime::TtsCommand::Stop);
+        self.pending_close_after_persistence = true;
+        self.show_reader_confirm_modal = false;
+        self.last_reader_source_for_persistence = None;
+        self.queue_persistence_flush(PersistenceTrigger::SessionClose);
+        self.push_status("Closing book after persistence completes".to_string());
+    }
+
+    fn begin_safe_quit(&mut self) {
+        self.tts_runtime
+            .apply_command(lanternleaf_app::tts_runtime::TtsCommand::Stop);
+        self.queue_persistence_flush(PersistenceTrigger::SafeQuit);
+        self.push_status("Safe quit waiting for persistence completion".to_string());
     }
 
     pub(crate) fn execute_reader_command(&mut self, command: ReaderCommand) {
@@ -155,6 +181,44 @@ impl LanternLeafApp {
     pub(crate) fn handle_effect_events(&mut self) {
         for event in self.effect_dispatcher.drain_events() {
             trace!(event = ?event, "Applying effect event");
+            match &event {
+                AppEvent::PersistenceFlushed {
+                    trigger: PersistenceTrigger::SessionClose,
+                    outcome: PersistenceOutcome::Completed | PersistenceOutcome::SkippedNoSession,
+                    ..
+                } if self.pending_close_after_persistence => {
+                    self.pending_close_after_persistence = false;
+                    self.effect_dispatcher.dispatch(PlannedEffect {
+                        request_id: self.runtime.next_request_id(),
+                        effect: RuntimeEffect::CloseReaderSession,
+                    });
+                }
+                AppEvent::PersistenceFlushed {
+                    trigger: PersistenceTrigger::SafeQuit,
+                    outcome: PersistenceOutcome::Completed | PersistenceOutcome::SkippedNoSession,
+                    ..
+                } => {
+                    self.pending_native_close = true;
+                }
+                AppEvent::PersistenceFlushed {
+                    trigger: PersistenceTrigger::SessionClose,
+                    outcome: PersistenceOutcome::Failed,
+                    ..
+                } if self.pending_close_after_persistence => {
+                    self.pending_close_after_persistence = false;
+                    self.show_reader_confirm_modal = true;
+                    self.push_status("Book close canceled because persistence failed".to_string());
+                }
+                AppEvent::PersistenceFlushed {
+                    trigger: PersistenceTrigger::SafeQuit,
+                    outcome: PersistenceOutcome::Failed,
+                    ..
+                } => {
+                    self.show_safe_quit_modal = true;
+                    self.push_status("Safe quit canceled because persistence failed".to_string());
+                }
+                _ => {}
+            }
             self.runtime.apply_event(event);
         }
     }

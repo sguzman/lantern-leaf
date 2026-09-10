@@ -1,4 +1,6 @@
-use lanternleaf_app::contracts::{BridgeError, ReaderPlaybackStateEvent, TtsStateEvent};
+use lanternleaf_app::contracts::{
+    BridgeError, ReaderPlaybackStateEvent, ReaderStateEvent, TtsStateEvent,
+};
 use lanternleaf_app::pipeline::{AppEvent, OperationScope};
 use lanternleaf_core::config::TtsBackend;
 use tracing::{info, trace, warn};
@@ -145,12 +147,28 @@ impl LanternLeafApp {
 
             if let Some(playback) = event.playback.clone() {
                 let previous = self.runtime.state_snapshot();
+                if previous
+                    .reader_document
+                    .source
+                    .as_ref()
+                    .is_some_and(|source| source.source_path != playback.source_path)
+                    || previous.reader_document.source.is_none()
+                {
+                    warn!(
+                        tts_request_id,
+                        source_path = %playback.source_path,
+                        "Ignoring stale TTS playback event for a closed or different book"
+                    );
+                    self.last_tts_runtime_event = Some(event);
+                    continue;
+                }
                 let auto_scroll_enabled = previous
                     .reader_ui
                     .settings
                     .as_ref()
                     .map(|settings| settings.auto_scroll_tts)
                     .unwrap_or(true);
+                let playback_page = playback.current_page;
                 let previous_cursor = previous.reader_playback.playback.as_ref().map(|value| {
                     PlaybackCursorProjection {
                         source_path: value.source_path.clone(),
@@ -201,6 +219,21 @@ impl LanternLeafApp {
                         playback,
                     },
                 ));
+                if previous
+                    .reader_document
+                    .snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.current_page != playback_page)
+                {
+                    if let Some(snapshot) = self.tts_runtime.snapshot() {
+                        self.runtime
+                            .apply_event(AppEvent::ReaderUpdated(ReaderStateEvent {
+                                request_id: app_request_id,
+                                action: "reader_tts_page_projection".to_string(),
+                                reader: snapshot,
+                            }));
+                    }
+                }
                 self.runtime.apply_event(AppEvent::OperationChanged {
                     scope: OperationScope::ReaderTts,
                     active: false,

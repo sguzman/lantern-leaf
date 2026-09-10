@@ -75,6 +75,13 @@ impl LanternLeafApp {
                     if ui.button("Safe quit (AppCommand::SafeQuit)").clicked() {
                         self.show_safe_quit_modal = true;
                     }
+                    if matches!(
+                        state.session.session.as_ref().map(|session| session.mode),
+                        Some(UiMode::Reader)
+                    ) && ui.button("Close book").clicked()
+                    {
+                        self.show_reader_confirm_modal = true;
+                    }
                     let session_mode = state.session.session.as_ref().map(|session| session.mode);
                     ui.label(format!(
                         "Mode: {:?}",
@@ -135,59 +142,67 @@ impl LanternLeafApp {
         let show_search_panel = self.pending_search_focus
             || !state.reader_ui.search_query.trim().is_empty()
             || !state.reader_ui.search_matches.is_empty();
-        SidePanel::left("panel_toggle").show(ctx, |ui| {
-            ui.heading("Panels");
-            if ui
-                .button("Toggle settings (AppCommand::ToggleSettingsPanel)")
-                .clicked()
-            {
-                self.execute_command(lanternleaf_app::pipeline::AppCommand::ToggleSettingsPanel);
-            }
-            if ui
-                .button("Toggle stats (AppCommand::ToggleStatsPanel)")
-                .clicked()
-            {
-                self.execute_command(lanternleaf_app::pipeline::AppCommand::ToggleStatsPanel);
-            }
-            if ui
-                .button("Toggle TTS (AppCommand::ToggleTtsPanel)")
-                .clicked()
-            {
-                self.execute_command(lanternleaf_app::pipeline::AppCommand::ToggleTtsPanel);
-            }
-            ui.label(format!("Settings: {}", panels.show_settings));
-            ui.label(format!("Stats: {}", panels.show_stats));
-            ui.label(format!("TTS: {}", panels.show_tts));
-            ui.label(format!("Search: {}", show_search_panel));
-            if panels.show_settings {
-                ui.separator();
-                ui.heading("Settings");
-                self.render_settings_sidebar(ui, reader_snapshot);
-            }
-            if panels.show_stats {
-                ui.separator();
-                ui.heading("Stats");
-                self.render_stats_panel(ui, reader_snapshot);
-            }
-            if show_search_panel {
-                ui.separator();
-                ui.heading("Search");
-                self.render_search_panel(ui, state);
-            }
-            if panels.show_tts {
-                ui.separator();
-                ui.heading("TTS");
-                if let Some(snapshot) = reader_snapshot {
-                    self.render_tts_widget(ui, snapshot);
-                } else {
-                    ui.label("No reader session.");
+        SidePanel::left("panel_toggle")
+            .resizable(true)
+            .min_width(240.0)
+            .default_width(320.0)
+            .max_width(460.0)
+            .show(ctx, |ui| {
+                ui.set_max_width(ui.available_width());
+                ui.heading("Panels");
+                if ui
+                    .button("Toggle settings (AppCommand::ToggleSettingsPanel)")
+                    .clicked()
+                {
+                    self.execute_command(
+                        lanternleaf_app::pipeline::AppCommand::ToggleSettingsPanel,
+                    );
                 }
-            }
-            ui.separator();
-            ui.heading("Status diagnostics");
-            self.render_status_diagnostics_panel(ui, state);
-            self.render_anchor_diagnostics(ui, reader_snapshot);
-        });
+                if ui
+                    .button("Toggle stats (AppCommand::ToggleStatsPanel)")
+                    .clicked()
+                {
+                    self.execute_command(lanternleaf_app::pipeline::AppCommand::ToggleStatsPanel);
+                }
+                if ui
+                    .button("Toggle TTS (AppCommand::ToggleTtsPanel)")
+                    .clicked()
+                {
+                    self.execute_command(lanternleaf_app::pipeline::AppCommand::ToggleTtsPanel);
+                }
+                ui.label(format!("Settings: {}", panels.show_settings));
+                ui.label(format!("Stats: {}", panels.show_stats));
+                ui.label(format!("TTS: {}", panels.show_tts));
+                ui.label(format!("Search: {}", show_search_panel));
+                if panels.show_settings {
+                    ui.separator();
+                    ui.heading("Settings");
+                    self.render_settings_sidebar(ui, reader_snapshot);
+                }
+                if panels.show_stats {
+                    ui.separator();
+                    ui.heading("Stats");
+                    self.render_stats_panel(ui, reader_snapshot);
+                }
+                if show_search_panel {
+                    ui.separator();
+                    ui.heading("Search");
+                    self.render_search_panel(ui, state);
+                }
+                if panels.show_tts {
+                    ui.separator();
+                    ui.heading("TTS");
+                    if let Some(snapshot) = reader_snapshot {
+                        self.render_tts_widget(ui, snapshot);
+                    } else {
+                        ui.label("No reader session.");
+                    }
+                }
+                ui.separator();
+                ui.heading("Status diagnostics");
+                self.render_status_diagnostics_panel(ui, state);
+                self.render_anchor_diagnostics(ui, reader_snapshot);
+            });
         SidePanel::right("shortcuts").show(ctx, |ui| {
             ui.heading("Shortcut registry");
             for binding in self.runtime.shortcut_registry().bindings() {

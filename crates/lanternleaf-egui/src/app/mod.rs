@@ -310,6 +310,8 @@ struct LanternLeafApp {
     status_log: Vec<StatusLogEntry>,
     show_safe_quit_modal: bool,
     show_reader_confirm_modal: bool,
+    pending_close_after_persistence: bool,
+    pending_native_close: bool,
     pending_search_focus: bool,
     last_plan: Option<DispatchPlan>,
     auto_scroll_state: AutoScrollState,
@@ -764,6 +766,8 @@ impl LanternLeafApp {
             status_log: Vec::new(),
             show_safe_quit_modal: false,
             show_reader_confirm_modal: false,
+            pending_close_after_persistence: false,
+            pending_native_close: false,
             pending_search_focus: false,
             last_plan: None,
             auto_scroll_state: AutoScrollState::default(),
@@ -876,6 +880,8 @@ impl LanternLeafApp {
             status_log: Vec::new(),
             show_safe_quit_modal: false,
             show_reader_confirm_modal: false,
+            pending_close_after_persistence: false,
+            pending_native_close: false,
             pending_search_focus: false,
             last_plan: None,
             auto_scroll_state: AutoScrollState::default(),
@@ -1683,7 +1689,12 @@ impl LanternLeafApp {
                             }
                         }
                         if let Some(error) = &self.windows_voice_catalog_error {
-                            ui.colored_label(Color32::RED, error);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(error).color(Color32::RED),
+                                )
+                                .wrap(true),
+                            );
                         }
                     }
                     let mut voice_id = settings.windows_voice_id.clone().unwrap_or_default();
@@ -2090,17 +2101,29 @@ impl LanternLeafApp {
         reader_snapshot: Option<&ReaderSnapshot>,
     ) {
         let mut open = self.show_reader_confirm_modal;
-        eframe::egui::Window::new("Reader session closed")
+        eframe::egui::Window::new("Close book")
             .collapsible(false)
             .resizable(false)
             .open(&mut open)
             .show(ctx, |ui| {
                 if let Some(snapshot) = reader_snapshot {
-                    ui.label(format!("Closed session for {}", snapshot.source_name));
+                    ui.label(format!(
+                        "Close {} and return to the library?",
+                        snapshot.source_name
+                    ));
                 } else {
-                    ui.label("Reader session closed.");
+                    ui.label("Close the current book and return to the library?");
                 }
-                if ui.button("OK").clicked() {
+                ui.horizontal(|ui| {
+                    if ui.button("Close book").clicked() {
+                        self.execute_command(AppCommand::CloseReaderSession);
+                        self.show_reader_confirm_modal = false;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.show_reader_confirm_modal = false;
+                    }
+                });
+                if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
                     self.show_reader_confirm_modal = false;
                 }
             });
@@ -2531,6 +2554,10 @@ impl eframe::App for LanternLeafApp {
         }
         self.handle_tts_runtime_events();
         self.handle_effect_events();
+        if self.pending_native_close {
+            self.pending_native_close = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         let projection_started = Instant::now();
         let snapshot = self.runtime.state_snapshot();
         trace!(
@@ -2540,6 +2567,9 @@ impl eframe::App for LanternLeafApp {
             "Prepared lightweight egui state projection"
         );
         let reader_snapshot = snapshot.reader_document.snapshot.as_deref();
+        if let Some(reader_snapshot) = reader_snapshot {
+            self.maybe_reapply_text_only(reader_snapshot);
+        }
         self.update_persistence_lifecycle(reader_snapshot);
         self.update_shell_state(ctx, &snapshot);
         let panels = snapshot

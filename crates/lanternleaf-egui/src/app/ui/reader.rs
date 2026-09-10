@@ -3,7 +3,7 @@ use eframe::egui::{
     TextFormat, Ui, text::LayoutJob,
 };
 use lanternleaf_app::contracts::{PrettyKind, ReaderSnapshot};
-use lanternleaf_app::pipeline::{AppCommand, ReaderCommand};
+use lanternleaf_app::pipeline::ReaderCommand;
 use lanternleaf_app::state::AppState;
 use lanternleaf_core::session::{ReaderSettingsPatch, SessionCommand};
 use lanternleaf_core::text_utils;
@@ -35,13 +35,7 @@ impl LanternLeafApp {
             );
             ui.heading("Reader shell");
             ui.horizontal(|ui| {
-                if ui.button("Back to starter").clicked() {
-                    self.execute_command(AppCommand::ReturnToStarter);
-                }
-                if ui.button("Close reader session").clicked() {
-                    self.execute_command(AppCommand::CloseReaderSession);
-                    self.show_reader_confirm_modal = true;
-                }
+                ui.label("Use Close book in the top bar to return to the library.");
             });
             self.render_quick_actions_dock(ui, snapshot);
             ui.separator();
@@ -662,17 +656,20 @@ impl LanternLeafApp {
                 return;
             }
             let target_canonical_idx = effective_highlighted_canonical_idx;
-            let auto_scroll_requested = target_canonical_idx.is_some_and(|idx| {
+            let projection =
+                target_canonical_idx.and_then(|idx| text_only_row_projection(snapshot, idx));
+            let auto_scroll_requested = projection.as_ref().is_some_and(|target| {
                 self.auto_scroll_state
-                    .pending_for(&snapshot.source_path, idx)
+                    .pending_for(&snapshot.source_path, target.canonical_idx)
             });
             ScrollArea::vertical()
                 .id_source("sentence_list")
                 .max_height(240.0)
                 .show(ui, |ui| {
                     for (idx, sentence) in snapshot.sentences.iter().enumerate() {
-                        let selected =
-                            target_canonical_idx == Some(canonical_display_index(snapshot, idx));
+                        let selected = projection
+                            .as_ref()
+                            .is_some_and(|target| target.local_idx == idx);
                         let label = format!("{:03} {}", idx + 1, sentence);
                         let response = ui.selectable_label(selected, label);
                         if response.clicked() {
@@ -696,7 +693,10 @@ impl LanternLeafApp {
                             if matches!(
                                 self.auto_scroll_state.decide_scroll(
                                     &snapshot.source_path,
-                                    target_canonical_idx.unwrap_or(idx),
+                                    projection
+                                        .as_ref()
+                                        .map(|target| target.canonical_idx)
+                                        .unwrap_or(idx),
                                     fallback,
                                 ),
                                 crate::app::ScrollDecision::Scroll
@@ -709,7 +709,10 @@ impl LanternLeafApp {
                                 response.scroll_to_me(Some(align));
                                 self.auto_scroll_state.record(
                                     &snapshot.source_path,
-                                    target_canonical_idx.unwrap_or(idx),
+                                    projection
+                                        .as_ref()
+                                        .map(|target| target.canonical_idx)
+                                        .unwrap_or(idx),
                                     fallback,
                                 );
                             }
@@ -876,10 +879,21 @@ impl LanternLeafApp {
                     "Switch to text-only"
                 };
                 if ui.button(text_only_label).clicked() {
+                    let current_playback = self.runtime.state_snapshot().reader_playback;
                     if !current_text_only {
                         self.text_only_override = Some(true);
                     } else {
                         self.text_only_override = None;
+                    }
+                    if let Some(canonical_idx) =
+                        current_playback.highlighted_canonical_idx.or_else(|| {
+                            current_playback
+                                .highlighted_sentence_idx
+                                .map(|local_idx| canonical_display_index(snapshot, local_idx))
+                        })
+                    {
+                        self.auto_scroll_state
+                            .request_cursor(snapshot.source_path.clone(), canonical_idx);
                     }
                     self.text_only_toggle_pending = false;
                     self.execute_reader_command(ReaderCommand::Session(
@@ -1033,7 +1047,7 @@ impl LanternLeafApp {
                         ui.label(format!("Last TTS event: {:?}", event.kind));
                         ui.label(event.action.as_str());
                         if let Some(message) = event.message.as_ref() {
-                            ui.label(message);
+                            ui.add(Label::new(message).wrap(true));
                         }
                         ui.end_row();
                     });
@@ -1124,6 +1138,44 @@ impl LanternLeafApp {
             self.push_status("Search focus requested".to_string());
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TextOnlyRowProjection {
+    pub(crate) canonical_idx: usize,
+    pub(crate) local_idx: usize,
+}
+
+/// Resolve the row that the currently rendered text-only page can actually
+/// select.  The canonical playback cursor is authoritative; page-local
+/// snapshot identity is only used to project that cursor into a visible row.
+pub(crate) fn text_only_row_projection(
+    snapshot: &ReaderSnapshot,
+    canonical_idx: usize,
+) -> Option<TextOnlyRowProjection> {
+    text_only_row_projection_for_page(
+        &snapshot.page_sentence_counts,
+        snapshot.current_page,
+        snapshot.sentences.len(),
+        canonical_idx,
+    )
+}
+
+fn text_only_row_projection_for_page(
+    page_sentence_counts: &[usize],
+    current_page: usize,
+    visible_sentence_count: usize,
+    canonical_idx: usize,
+) -> Option<TextOnlyRowProjection> {
+    let page_base = page_sentence_counts
+        .iter()
+        .take(current_page)
+        .sum::<usize>();
+    let local_idx = canonical_idx.checked_sub(page_base)?;
+    (local_idx < visible_sentence_count).then_some(TextOnlyRowProjection {
+        canonical_idx,
+        local_idx,
+    })
 }
 
 fn normalize_whitespace(input: &str) -> String {
@@ -1736,6 +1788,16 @@ mod tests {
             canonical_highlight_index(&[2, 2], 1, None, None, Some(1)),
             Some(3)
         );
+    }
+
+    #[test]
+    fn text_only_projection_tracks_mode_switch_and_many_follow_boundaries() {
+        for canonical_idx in 0..48 {
+            let projection = text_only_row_projection_for_page(&[48], 0, 48, canonical_idx)
+                .expect("active playback sentence should remain visibly selectable");
+            assert_eq!(projection.local_idx, canonical_idx);
+            assert_eq!(projection.canonical_idx, canonical_idx);
+        }
     }
 
     #[test]
