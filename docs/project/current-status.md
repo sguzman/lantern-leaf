@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-10 after Goal 0008 final real-desktop acceptance and Goal 0009 authorization.
+Updated: 2026-09-10 after director acceptance of Goal 0009 A1 for real-desktop QA.
 
 This file contains current verified/bounded state. Detailed historical correction lineage lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -9,7 +9,6 @@ This file contains current verified/bounded state. Detailed historical correctio
 **VERIFIED / AUTHORITATIVE**
 
 - Native Rust + `eframe`/`egui` is the production desktop architecture.
-- Workspace includes the root package plus `lanternleaf-core`, `lanternleaf-app`, and `lanternleaf-egui`.
 - Rust owns canonical document/session/playback state.
 - Tauri/React/WebView is historical reference only.
 - Windows human workflow is repo-native: `git pull -> .\qa.ps1`.
@@ -29,92 +28,56 @@ Accepted runtime shape:
 
 `canonical display sentence -> backend synthesis -> prepared audio -> Rodio first-sample boundary -> canonical ReaderSession cursor -> native UI projection`
 
-Verified on the human Windows machine:
-
-- Windows speech is audible;
-- Play and Pause work;
-- installed Windows voices can be changed interactively;
-- voice changes preserve the reader session;
-- first-sample sentence boundaries now drive visible sentence synchronization instead of predicted-duration timers.
-
-Piper exists as a backend, but Windows live-switch readiness/recovery is not yet robust. Goal 0009 owns that bounded defect; full Piper model/voice provisioning remains future work.
+Real Windows evidence already proves audible Windows speech, Play/Pause, interactive installed-voice changes, and sentence-boundary-driven pretty synchronization.
 
 ## Goal 0008 / Gate 2.5 — Caliberate first-class library service
 
 **COMPLETE — AUTOMATED + REAL-DESKTOP ACCEPTED**
 
-Accepted relationship:
+The large real Caliberate EPUB now opens quickly, remains responsive, speaks through Windows TTS, highlights the actually audible sentence in native pretty view, and follows playback correctly. Caliberate remains behind the existing provider/browser boundary and legacy Calibre compatibility remains available.
 
-`Caliberate 127.0.0.1:8181 -> versioned HTTP/JSON provider -> existing library browser -> materialized source -> normal ReaderSession/TTS`
+Final Goal 0008 acceptance is recorded in `docs/work/reviews/0008-a8.3-director-acceptance.md`.
 
-Verified:
+## Goal 0009 / Gate 2.6 — TTS playback polish and layered voice configuration
 
-- Caliberate is the preferred local provider while legacy Calibre compatibility remains available;
-- large Caliberate catalog retrieval is Arc-backed and no longer copied per frame;
-- supported book formats materialize into the normal source/session path;
-- valid EPUB materialization/native ingestion and cache recovery are covered;
-- the previously problematic large EPUB opens quickly and native UI interaction is snappy;
-- bounded pretty rendering avoids laying out the entire large document every frame;
-- one canonical shared ReaderSession serves reader effects, TTS, and persistence;
-- TTS/persistence hot paths avoid heavyweight full ReaderSnapshot construction;
-- native EPUB structured sentence identity is source-born and carried through TTS and pretty rendering;
-- semantic first-sample audio boundaries carry canonical sentence identity;
-- active TTS wakes egui without depending on incidental user input;
-- real-desktop pretty-view highlight now tracks the actually audible sentence accurately;
-- real-desktop pretty viewport follows playback correctly;
-- Windows audio, Play/Pause, and Windows voice selection work on the same real book.
+**A1 IMPLEMENTATION ACCEPTED — REAL-DESKTOP SIGNOFF PENDING**
 
-Authoritative A8.3 implementation: `771c31ae90e0bf331195979fffebac8eb2f4ffd6`.
+Accepted implementation: `52ae85dad02f2e5588c14d33817abf0c5db69916`.
 
-Authoritative A8.3 Windows CI: `34431615684`.
+Accepted worker terminal head: `fcbe092cdf543e8095ce73c8317c3a777b68d88e`.
 
-Final acceptance is recorded in `docs/work/reviews/0008-a8.3-director-acceptance.md`.
+Authoritative Windows CI: `34517286850`.
 
-## Goal 0009 — TTS playback polish and layered voice configuration
+Implemented and director-reviewed:
 
-**READY / NEXT AUTHORIZED GOAL**
+- `[tts].windows_voice_preference = "Zira"` is the portable app-level Windows preference;
+- explicit installed per-book Windows voice IDs win over the app preference;
+- absent/invalid preferred-name availability falls back to the Windows OS default rather than making speech unusable;
+- versioned `BookReaderOverrides` replaces whole-AppConfig book ownership for new persistence;
+- omitted book fields inherit current app configuration on every open;
+- legacy whole-AppConfig book caches migrate reader-local fields without inventing backend/voice override intent;
+- explicit reader TTS settings update book override intent while global runtime/resource settings remain app-owned;
+- TTS refill/window progression carries an explicit continuation cursor; a deterministic 300-boundary regression crosses repeated 8-item batches and 64-sentence windows with exact ordered ordinary starts and no duplicate boundary IDs;
+- text-only row selection now consumes the same high-frequency canonical playback identity as scroll follow;
+- real backend/voice changes are validated before session mutation; invalid/unready Piper selection leaves the last-known-good Windows configuration intact and emits an actionable failure;
+- Goal 0008 canonical session, source-born EPUB identity, first-sample boundaries, bounded rendering, and lightweight hot paths remain intact.
 
-Goal 0009 owns four residuals from the successful Goal 0008 QA:
-
-- occasional unsolicited replay of a just-finished audio sentence/item while pretty highlight remains synchronized;
-- text-only scroll follows correctly but its visual sentence highlight is missing/broken;
-- failed/unready Piper selection can leave TTS unusable for the current session until reopen;
-- configuration ownership needs explicit app-default -> per-book override layering.
-
-Configuration target:
-
-```text
-compiled/platform defaults
-        ↓
-app conf/config.toml
-        ↓
-per-book reader overrides
-        ↓
-live session
-```
-
-On Windows, a new/unoverridden book should prefer **Zira** through a portable app-level voice preference. An explicit voice selected for a book should persist as that book's stable voice-ID override. A book with no override continues to inherit future app-default changes.
-
-The current legacy per-book cache serializes a whole `AppConfig`, while the loader explicitly replaces cached `tts_backend` and `windows_voice_id` with app/base values. Goal 0009 replaces that inverse ownership with explicit optional book overrides and safe migration.
-
-Piper scope in 0009 is recovery/readiness only: a failed Piper attempt must not poison the session, must not persist a broken backend, and Windows playback must be recoverable without reopening the book. Full Piper model downloading/catalog UX remains deferred.
+One real-desktop pass is still required because CI cannot prove audible duplicate absence, visible text-only styling, actual installed Zira selection, book-level reopen behavior through the GUI, or same-session recovery after a failed Piper attempt.
 
 ## Non-PDF reader status
 
-**CORE/PRETTY PATH STRONG; BOUNDED TEXT-ONLY POLISH REMAINS**
+**PRETTY PATH ACCEPTED; GOAL 0009 DESKTOP POLISH SIGNOFF PENDING**
 
-TXT/Markdown/HTML/EPUB automated parity remains covered from Goal 0006 onward. The large real EPUB now provides strong real-desktop evidence for native pretty rendering, scrolling, Windows speech, and canonical spoken-sentence synchronization.
-
-Known remaining non-PDF presentation defect: text-only mode scrolls to the correct sentence during TTS but does not visibly highlight that row. Goal 0009 owns the rendering fix.
+TXT/Markdown/HTML/EPUB automated parity remains covered. The large real EPUB already provides strong evidence for native pretty rendering, scrolling, Windows speech, and spoken-sentence synchronization. Goal 0009's accepted A1 patch targets the remaining text-only visual and TTS/configuration polish; desktop signoff is the only remaining Gate 2.6 evidence.
 
 ## PDF
 
-**CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY IS NEXT AFTER GOAL 0009**
+**CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY WAITS FOR GOAL 0009 SIGNOFF**
 
-Earlier work repaired bounded PDF classification/OCR/reading-order/cache contracts. After Goal 0009 closes the residual TTS/readability polish, the next core product gate is native PDF page rendering/viewport/texture stability, followed by PDF text/TTS/highlight synchronization.
+Earlier work repaired bounded PDF classification/OCR/reading-order/cache contracts. Gate 3 native PDF page rendering/viewport/texture stability is next, but it is not authorized until Goal 0009's bounded real-desktop signoff completes.
 
 ## Workflow status
 
 **MACRO-GOAL / MULTI-ATTEMPT PROTOCOL ACTIVE**
 
-The repository is the durable agent-to-agent communication surface. Only the single goal under `docs/work/ready/` is authorized to start. Codex owns implementation/validation/reporting and goal notifications; ChatGPT owns goal definition/review/integration; the human owns local GUI/audio verification only when requested.
+Goal 0009 is integrated for human verification. No next macro-goal is authorized yet. If desktop QA passes, director closes 0009 and opens the PDF visual-stability goal. If it fails, the same Goal 0009 lineage is reopened for a bounded correction.
