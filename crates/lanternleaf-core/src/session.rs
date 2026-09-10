@@ -275,6 +275,7 @@ pub struct ReaderSession {
     pdf_ocr_pipeline: Option<crate::epub_loader::PdfOcrPipelineSummary>,
     images: Vec<SessionImage>,
     pub config: config::AppConfig,
+    pub book_overrides: config::BookReaderOverrides,
     pages: Vec<String>,
     markdown_pages: Vec<String>,
     raw_page_sentences: Vec<Vec<String>>,
@@ -312,6 +313,14 @@ impl ReaderSession {
         self.global_display_idx().or(self.highlighted_canonical_idx)
     }
 
+    /// Whether the canonical document still has a display sentence after the
+    /// current first-sample identity. This is intentionally lightweight and is
+    /// used by the TTS runtime when a bounded normalization window is exhausted.
+    pub fn has_canonical_sentence_after_current(&self) -> bool {
+        self.highlighted_canonical_idx()
+            .is_some_and(|idx| idx.saturating_add(1) < self.page_sentence_counts.iter().sum())
+    }
+
     /// Lightweight constructor for test-only sessions without IO.
     pub fn from_pages_for_test(
         source_path: PathBuf,
@@ -342,6 +351,7 @@ impl ReaderSession {
             pdf_ocr_pipeline: None,
             images: Vec::new(),
             config: config::AppConfig::default(),
+            book_overrides: config::BookReaderOverrides::default(),
             pages,
             markdown_pages: Vec::new(),
             raw_page_sentences,
@@ -2090,6 +2100,7 @@ mod tests {
             pdf_ocr_pipeline: None,
             images: Vec::new(),
             config: config::AppConfig::default(),
+            book_overrides: config::BookReaderOverrides::default(),
             pages,
             markdown_pages: Vec::new(),
             raw_page_sentences,
@@ -3189,7 +3200,10 @@ mod tests {
             PathBuf::from("/tmp/multi-page-boundary.epub"),
             "multi-page-boundary.epub".to_string(),
             vec!["A. B.".to_string(), "C. D.".to_string()],
-            vec![vec!["A.".to_string(), "B.".to_string()], vec!["C.".to_string(), "D.".to_string()]],
+            vec![
+                vec!["A.".to_string(), "B.".to_string()],
+                vec!["C.".to_string(), "D.".to_string()],
+            ],
         );
         session.tts_state = TtsPlaybackState::Playing;
         let delta = session

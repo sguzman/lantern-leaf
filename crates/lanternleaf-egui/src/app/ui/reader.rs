@@ -10,9 +10,7 @@ use lanternleaf_core::text_utils;
 use tracing::trace;
 
 use crate::app::ui::format::format_duration_secs;
-use crate::app::{
-    AnchorFallback, LanternLeafApp, PrettySentenceSegment, PrettySentenceTarget,
-};
+use crate::app::{AnchorFallback, LanternLeafApp, PrettySentenceSegment, PrettySentenceTarget};
 use crate::pretty::{
     PrettyBlock, PrettyBlockKind, PrettyPageCacheKey, PrettySourceKind, PrettySpan, PrettyStyle,
     clamp_image_size, font_id_for, html_to_blocks, markdown_to_blocks, structured_to_blocks,
@@ -64,12 +62,7 @@ impl LanternLeafApp {
                     snapshot.highlighted_canonical_idx,
                     highlighted_sentence_idx,
                 );
-                self.render_sentence_list(
-                    ui,
-                    snapshot,
-                    highlighted_sentence_idx,
-                    highlighted_canonical_idx,
-                );
+                self.render_sentence_list(ui, snapshot, highlighted_canonical_idx);
                 ui.add_space(6.0);
                 self.render_canonical_preview(ui, snapshot);
             }
@@ -235,12 +228,12 @@ impl LanternLeafApp {
                                 }
 
                                 let mut response = None;
-                                let highlight_matched = highlight_target
-                                    .as_ref()
-                                    .is_some_and(|target| {
-                                        target.segments.iter().any(|segment| {
-                                            segment.block_index == block_i
-                                        })
+                                let highlight_matched =
+                                    highlight_target.as_ref().is_some_and(|target| {
+                                        target
+                                            .segments
+                                            .iter()
+                                            .any(|segment| segment.block_index == block_i)
                                     });
                                 let block_highlight_bg = if highlight_matched {
                                     Some(highlight_color)
@@ -284,9 +277,7 @@ impl LanternLeafApp {
                                                 let segment = target
                                                     .segments
                                                     .iter()
-                                                    .find(|segment| {
-                                                        segment.block_index == block_i
-                                                    })
+                                                    .find(|segment| segment.block_index == block_i)
                                                     .cloned();
                                                 spans_to_job_with_sentence_target(
                                                     ui,
@@ -662,7 +653,6 @@ impl LanternLeafApp {
         &mut self,
         ui: &mut Ui,
         snapshot: &ReaderSnapshot,
-        effective_highlighted_sentence_idx: Option<usize>,
         effective_highlighted_canonical_idx: Option<usize>,
     ) {
         ui.group(|ui| {
@@ -671,7 +661,6 @@ impl LanternLeafApp {
                 ui.label("No sentence data available.");
                 return;
             }
-            let target_idx = effective_highlighted_sentence_idx;
             let target_canonical_idx = effective_highlighted_canonical_idx;
             let auto_scroll_requested = target_canonical_idx.is_some_and(|idx| {
                 self.auto_scroll_state
@@ -682,8 +671,8 @@ impl LanternLeafApp {
                 .max_height(240.0)
                 .show(ui, |ui| {
                     for (idx, sentence) in snapshot.sentences.iter().enumerate() {
-                        let selected = target_canonical_idx
-                            == Some(canonical_display_index(snapshot, idx));
+                        let selected =
+                            target_canonical_idx == Some(canonical_display_index(snapshot, idx));
                         let label = format!("{:03} {}", idx + 1, sentence);
                         let response = ui.selectable_label(selected, label);
                         if response.clicked() {
@@ -698,7 +687,10 @@ impl LanternLeafApp {
                                 canonical_display_index(snapshot, idx),
                             );
                         }
-                        if auto_scroll_requested && target_idx == Some(idx) {
+                        // Playback identity is canonical; the page-local sentence index can be
+                        // stale after a lightweight boundary update or a mode switch. Selection
+                        // and follow must therefore agree on the same canonical comparison.
+                        if auto_scroll_requested && selected {
                             let (_anchor, fallback) =
                                 LanternLeafApp::resolve_sentence_anchor(snapshot, idx);
                             if matches!(
@@ -1259,15 +1251,15 @@ fn canonical_highlight_index(
     snapshot_canonical: Option<usize>,
     snapshot_local: Option<usize>,
 ) -> Option<usize> {
-    playback_canonical
-        .or(snapshot_canonical)
-        .or_else(|| snapshot_local.map(|idx| {
+    playback_canonical.or(snapshot_canonical).or_else(|| {
+        snapshot_local.map(|idx| {
             page_sentence_counts
                 .iter()
                 .take(snapshot_page)
                 .sum::<usize>()
                 .saturating_add(idx)
-        }))
+        })
+    })
 }
 
 fn aligned_targets_for_snapshot(

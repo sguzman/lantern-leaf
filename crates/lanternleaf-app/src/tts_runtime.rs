@@ -50,8 +50,14 @@ impl SimulatedBoundaryDriver {
         if self.paused.load(Ordering::SeqCst) {
             return false;
         }
-        let boundary = self.pending.lock().ok().and_then(|mut queue| queue.pop_front());
-        let Some(boundary) = boundary else { return false };
+        let boundary = self
+            .pending
+            .lock()
+            .ok()
+            .and_then(|mut queue| queue.pop_front());
+        let Some(boundary) = boundary else {
+            return false;
+        };
         self.output
             .lock()
             .ok()
@@ -230,6 +236,7 @@ struct TtsPlaybackPlan {
     espeak_path: PathBuf,
     backend: config::TtsBackend,
     windows_voice_id: Option<String>,
+    windows_voice_preference: String,
 }
 
 #[derive(Default)]
@@ -450,6 +457,43 @@ impl TtsRuntime {
         let action = command_for_session.action();
         let sync_after_command = should_sync_tts_after_reader_command(&command_for_session);
         let request_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
+        if let TtsCommand::ApplySettings { patch } = &command {
+            if self.mode == TtsRuntimeMode::Real
+                && (patch.tts_backend.is_some() || patch.windows_voice_id.is_some())
+            {
+                let validation = self.session.lock().ok().and_then(|guard| {
+                    let reader = guard.as_ref()?;
+                    let backend = patch.tts_backend.unwrap_or(reader.config.tts_backend);
+                    let voice_id = match patch.windows_voice_id.as_deref() {
+                        Some(value) if !value.trim().is_empty() => Some(value),
+                        Some(_) => None,
+                        None => reader.config.windows_voice_id.as_deref(),
+                    };
+                    Some(lanternleaf_core::tts::validate_backend_configuration(
+                        backend,
+                        PathBuf::from(&reader.config.tts_model_path).as_path(),
+                        PathBuf::from(&reader.config.tts_espeak_path).as_path(),
+                        voice_id,
+                        &reader.config.windows_voice_preference,
+                    ))
+                });
+                if let Some(Err(error)) = validation {
+                    let message = format!("TTS settings were not applied: {error:#}");
+                    warn!(request_id, error = %message, "Rejected unsafe TTS backend/voice change");
+                    self.emit_event(TtsRuntimeEvent {
+                        request_id,
+                        action: "reader_tts_settings_rejected".to_string(),
+                        kind: TtsRuntimeEventKind::Failed,
+                        snapshot: None,
+                        playback: None,
+                        tts: None,
+                        message: Some(message),
+                        cursor: None,
+                    });
+                    return None;
+                }
+            }
+        }
         let playback = {
             let mut guard = self.session.lock().ok()?;
             let reader = match guard.as_mut() {
@@ -727,6 +771,7 @@ impl TtsRuntime {
             espeak_path: PathBuf::from(reader.config.tts_espeak_path.clone()),
             backend: reader.config.tts_backend,
             windows_voice_id: reader.config.windows_voice_id.clone(),
+            windows_voice_preference: reader.config.windows_voice_preference.clone(),
         })
     }
 }
@@ -767,15 +812,30 @@ fn run_tts_runtime_loop(
     let runtime_started_at = Instant::now();
     let mut playback_started_at: Option<Instant> = None;
     let mut ready_prefetch: Option<PrefetchedBatch> = None;
+    // The last first-sample boundary remains visible until the next item starts,
+    // but it must not also be used as the next preparation cursor. Keeping this
+    // cursor in the runtime avoids replay at every prepare-window boundary.
+    let mut resume_start_override: Option<usize> = None;
 
     loop {
         if cancel_token.is_cancelled() {
             break;
         }
 
-        let Some(plan) = collect_tts_playback_plan(&ctx, runtime_request_id) else {
+        let Some(mut plan) = collect_tts_playback_plan(&ctx, runtime_request_id) else {
             break;
         };
+        if let Some(start) = resume_start_override.take() {
+            // A boundary can invalidate a bounded normalization window. In that
+            // case the freshly rebuilt plan already carries the correct local
+            // cursor. Advance once so the already-started boundary is not
+            // replayed as the first item of the rebuilt window.
+            if start < plan.sentences.len() {
+                plan.start_idx = start;
+            } else {
+                plan.start_idx = plan.start_idx.saturating_add(1).min(plan.sentences.len());
+            }
+        }
         if plan.start_idx >= plan.sentences.len() {
             break;
         }
@@ -786,6 +846,7 @@ fn run_tts_runtime_loop(
                 plan.espeak_path.clone(),
                 plan.backend,
                 plan.windows_voice_id.clone(),
+                plan.windows_voice_preference.clone(),
             ) {
                 Ok(engine) => engine,
                 Err(err) => {
@@ -873,13 +934,7 @@ fn run_tts_runtime_loop(
         };
 
         let (boundary_tx, boundary_rx) = mpsc::channel::<tts::TtsSentenceBoundary>();
-        let playback = match build_playback(
-            &ctx,
-            &plan,
-            &prepared,
-            engine.as_ref(),
-            boundary_tx,
-        ) {
+        let playback = match build_playback(&ctx, &plan, &prepared, engine.as_ref(), boundary_tx) {
             Ok(playback) => playback,
             Err(err) => {
                 if cancel_token.is_cancelled() {
@@ -997,6 +1052,37 @@ fn run_tts_runtime_loop(
             break;
         }
 
+        let next_start = plan.start_idx.saturating_add(prepared.len());
+        if next_start < plan.sentences.len() {
+            resume_start_override = Some(next_start);
+        } else {
+            let has_more_canonical = ctx
+                .session
+                .lock()
+                .ok()
+                .and_then(|guard| {
+                    guard
+                        .as_ref()
+                        .map(session::ReaderSession::has_canonical_sentence_after_current)
+                })
+                .unwrap_or(false);
+            if has_more_canonical {
+                // The bounded normalization window ended, but the document did
+                // not. Rebuild the next local window around the current identity.
+                resume_start_override = Some(next_start);
+            } else if let Ok(mut guard) = ctx.session.lock() {
+                // The actual page/document is exhausted. Do not let the last
+                // boundary become the next plan's start and replay indefinitely.
+                if let Some(reader) = guard.as_mut() {
+                    let _ = reader.apply_command_lightweight(
+                        session::SessionCommand::TtsStop,
+                        &ctx.normalizer,
+                    );
+                }
+                break;
+            }
+        }
+
         if let Some(pending) = pending_prefetch {
             match pending.handle.join() {
                 Ok(Ok(prepared)) => {
@@ -1084,6 +1170,7 @@ fn collect_tts_playback_plan(
         espeak_path: PathBuf::from(reader.config.tts_espeak_path.clone()),
         backend: reader.config.tts_backend,
         windows_voice_id: reader.config.windows_voice_id.clone(),
+        windows_voice_preference: reader.config.windows_voice_preference.clone(),
     })
 }
 
@@ -1744,7 +1831,7 @@ mod tests {
         let driver = runtime
             .simulated_boundary_driver()
             .expect("simulated runtime exposes its boundary driver");
-        let sentences: Vec<String> = (0..136)
+        let sentences: Vec<String> = (0..320)
             .map(|idx| format!("Boundary sentence {idx} is source-born."))
             .collect();
         runtime.set_session(Some(session::ReaderSession::from_pages_for_test(
@@ -1754,26 +1841,25 @@ mod tests {
             vec![sentences.clone()],
         )));
 
-        let wait_for_boundary = |runtime: &TtsRuntime,
-                                 driver: &SimulatedBoundaryDriver|
-         -> Option<usize> {
-            let deadline = Instant::now() + Duration::from_secs(2);
-            let mut emitted = false;
-            while Instant::now() < deadline {
-                if !emitted {
-                    emitted = driver.emit_next();
+        let wait_for_boundary =
+            |runtime: &TtsRuntime, driver: &SimulatedBoundaryDriver| -> Option<usize> {
+                let deadline = Instant::now() + Duration::from_secs(2);
+                let mut emitted = false;
+                while Instant::now() < deadline {
+                    if !emitted {
+                        emitted = driver.emit_next();
+                    }
+                    if let Some(event) = runtime
+                        .collect_events()
+                        .into_iter()
+                        .find(|event| event.kind == TtsRuntimeEventKind::SentenceStarted)
+                    {
+                        return event.cursor.and_then(|cursor| cursor.display_idx);
+                    }
+                    thread::yield_now();
                 }
-                if let Some(event) = runtime
-                    .collect_events()
-                    .into_iter()
-                    .find(|event| event.kind == TtsRuntimeEventKind::SentenceStarted)
-                {
-                    return event.cursor.and_then(|cursor| cursor.display_idx);
-                }
-                thread::yield_now();
-            }
-            None
-        };
+                None
+            };
 
         assert!(runtime.submit_command(TtsCommand::Play));
         let first = wait_for_boundary(&runtime, &driver).expect("first boundary");
@@ -1784,7 +1870,10 @@ mod tests {
             let _ = runtime.collect_events();
             thread::yield_now();
         }
-        assert!(!driver.emit_next(), "paused simulated audio must not emit a boundary");
+        assert!(
+            !driver.emit_next(),
+            "paused simulated audio must not emit a boundary"
+        );
         assert_eq!(
             runtime
                 .snapshot()
@@ -1839,13 +1928,17 @@ mod tests {
         )));
         assert!(window_runtime.submit_command(TtsCommand::Play));
         let mut observed = Vec::new();
-        while observed.len() < 131 {
+        while observed.len() < 300 {
             let Some(idx) = wait_for_boundary(&window_runtime, &window_driver) else {
                 break;
             };
             observed.push(idx);
         }
-        assert!(observed.len() >= 131, "expected 128+ runtime boundaries");
+        assert_eq!(
+            observed,
+            (0..300).collect::<Vec<_>>(),
+            "ordinary boundaries must start exactly once and remain ordered across refill windows"
+        );
         assert!(
             observed.iter().any(|idx| *idx >= 64),
             "boundary identities did not cross the second window: max={:?}",
@@ -1954,6 +2047,47 @@ mod tests {
                 .collect_events()
                 .iter()
                 .any(|event| event.kind == TtsRuntimeEventKind::Cancelled)
+        );
+    }
+
+    #[test]
+    fn failed_piper_switch_is_transactional_and_leaves_session_recoverable() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let runtime = TtsRuntime::new_with_mode(normalizer, TtsRuntimeMode::Real);
+        let mut reader = build_test_session(&[&["A sentence.", "B sentence."]]);
+        reader.config.tts_backend = config::TtsBackend::Windows;
+        reader.config.tts_model_path = "missing-goal-0009-model.onnx".to_string();
+        let shared = Arc::new(Mutex::new(Some(reader)));
+        runtime.set_session(
+            shared
+                .clone()
+                .lock()
+                .ok()
+                .and_then(|mut guard| guard.take()),
+        );
+
+        assert!(
+            runtime
+                .apply_command(TtsCommand::ApplySettings {
+                    patch: session::ReaderSettingsPatch {
+                        tts_backend: Some(config::TtsBackend::Piper),
+                        ..Default::default()
+                    },
+                })
+                .is_none()
+        );
+        let events = runtime.collect_events();
+        assert!(events.iter().any(|event| {
+            event.kind == TtsRuntimeEventKind::Failed
+                && event
+                    .message
+                    .as_deref()
+                    .is_some_and(|message| message.contains("Piper model not found"))
+        }));
+        let guard = runtime.session.lock().expect("session lock");
+        assert_eq!(
+            guard.as_ref().expect("session").config.tts_backend,
+            config::TtsBackend::Windows
         );
     }
 }

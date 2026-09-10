@@ -33,6 +33,62 @@ impl ReaderSession {
         patch: ReaderSettingsPatch,
         normalizer: &normalizer::TextNormalizer,
     ) {
+        self.book_overrides.schema_version = config::BookReaderOverrides::SCHEMA_VERSION;
+        if let Some(value) = patch.theme {
+            self.book_overrides.theme = Some(value);
+        }
+        if let Some(value) = patch.font_family {
+            self.book_overrides.font_family = Some(value);
+        }
+        if let Some(value) = patch.font_weight {
+            self.book_overrides.font_weight = Some(value);
+        }
+        if let Some(value) = patch.font_size {
+            self.book_overrides.font_size = Some(value);
+        }
+        if let Some(value) = patch.line_spacing {
+            self.book_overrides.line_spacing = Some(value);
+        }
+        if let Some(value) = patch.word_spacing {
+            self.book_overrides.word_spacing = Some(value);
+        }
+        if let Some(value) = patch.letter_spacing {
+            self.book_overrides.letter_spacing = Some(value);
+        }
+        if let Some(value) = patch.margin_horizontal {
+            self.book_overrides.margin_horizontal = Some(value);
+        }
+        if let Some(value) = patch.margin_vertical {
+            self.book_overrides.margin_vertical = Some(value);
+        }
+        if let Some(value) = patch.lines_per_page {
+            self.book_overrides.lines_per_page = Some(value);
+        }
+        if let Some(value) = patch.pause_after_sentence {
+            self.book_overrides.pause_after_sentence = Some(value);
+        }
+        if let Some(value) = patch.auto_scroll_tts {
+            self.book_overrides.auto_scroll_tts = Some(value);
+        }
+        if let Some(value) = patch.center_spoken_sentence {
+            self.book_overrides.center_spoken_sentence = Some(value);
+        }
+        if let Some(value) = patch.text_only_show_original_text {
+            self.book_overrides.text_only_show_original_text = Some(value);
+        }
+        if let Some(value) = patch.tts_speed {
+            self.book_overrides.tts_speed = Some(value);
+        }
+        if let Some(value) = patch.tts_volume {
+            self.book_overrides.tts_volume = Some(value);
+        }
+        if let Some(value) = patch.tts_backend {
+            self.book_overrides.tts_backend = Some(value);
+        }
+        if let Some(value) = patch.windows_voice_id.as_ref() {
+            self.book_overrides.windows_voice_id =
+                (!value.trim().is_empty()).then(|| value.clone());
+        }
         let preserve = self.global_display_idx();
         let mut repaginate = false;
 

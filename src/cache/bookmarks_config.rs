@@ -1,4 +1,4 @@
-use crate::config::{AppConfig, parse_config, serialize_config};
+use crate::config::{AppConfig, BookReaderOverrides, parse_config, serialize_config};
 use crate::epub_loader::PdfOcrGeometryQualityClass;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
@@ -153,8 +153,7 @@ pub(super) fn save_bookmark(source_path: &Path, bookmark: &Bookmark) {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn save_bookmark(_source_path: &Path, _bookmark: &Bookmark) {
-}
+pub(super) fn save_bookmark(_source_path: &Path, _bookmark: &Bookmark) {}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn load_epub_config(source_path: &Path) -> Option<AppConfig> {
@@ -202,6 +201,67 @@ pub(super) fn save_epub_config(source_path: &Path, config: &AppConfig) {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-pub(super) fn save_epub_config(_source_path: &Path, _config: &AppConfig) {
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn load_book_reader_overrides(source_path: &Path) -> Option<BookReaderOverrides> {
+    let path = hash_dir(source_path).join("config.toml");
+    let data = fs::read_to_string(&path).ok()?;
+    if let Ok(overrides) = toml::from_str::<BookReaderOverrides>(&data) {
+        if overrides.schema_version == BookReaderOverrides::SCHEMA_VERSION {
+            return Some(overrides);
+        }
+    }
+    // Legacy whole-AppConfig files may contain intentionally book-local reader
+    // appearance/behavior. Preserve those fields, but never promote copied
+    // backend/voice/resource values to override intent.
+    let legacy = parse_config(&data).ok()?;
+    debug!(path = %path.display(), "Migrating legacy whole-AppConfig book config to explicit reader overrides");
+    Some(BookReaderOverrides {
+        schema_version: BookReaderOverrides::SCHEMA_VERSION,
+        theme: Some(legacy.theme),
+        font_family: Some(legacy.font_family),
+        font_weight: Some(legacy.font_weight),
+        font_size: Some(legacy.font_size),
+        line_spacing: Some(legacy.line_spacing),
+        word_spacing: Some(legacy.word_spacing),
+        letter_spacing: Some(legacy.letter_spacing),
+        margin_horizontal: Some(legacy.margin_horizontal),
+        margin_vertical: Some(legacy.margin_vertical),
+        lines_per_page: Some(legacy.lines_per_page),
+        pause_after_sentence: Some(legacy.pause_after_sentence),
+        auto_scroll_tts: Some(legacy.auto_scroll_tts),
+        center_spoken_sentence: Some(legacy.center_spoken_sentence),
+        text_only_show_original_text: Some(legacy.text_only_show_original_text),
+        tts_speed: Some(legacy.tts_speed),
+        tts_volume: Some(legacy.tts_volume),
+        tts_backend: None,
+        windows_voice_id: None,
+        pretty: Some(legacy.pretty),
+    })
 }
+
+#[cfg(target_arch = "wasm32")]
+pub(super) fn load_book_reader_overrides(_source_path: &Path) -> Option<BookReaderOverrides> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn save_book_reader_overrides(source_path: &Path, overrides: &BookReaderOverrides) {
+    let dir = hash_dir(source_path);
+    let path = dir.join("config.toml");
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(contents) = toml::to_string(overrides) {
+        if let Err(err) = fs::write(&path, contents) {
+            warn!(path = %path.display(), "Failed to save book reader overrides: {err}");
+        } else {
+            debug!(path = %path.display(), "Persisted explicit book reader overrides");
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(super) fn save_book_reader_overrides(_source_path: &Path, _overrides: &BookReaderOverrides) {}
+
+#[cfg(target_arch = "wasm32")]
+pub(super) fn save_epub_config(_source_path: &Path, _config: &AppConfig) {}

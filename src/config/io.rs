@@ -117,7 +117,7 @@ fn normalize_config(mut cfg: AppConfig) -> AppConfig {
 #[cfg(test)]
 mod tests {
     use super::parse_config;
-    use crate::config::TtsBackend;
+    use crate::config::{AppConfig, BookReaderOverrides, TtsBackend};
 
     #[test]
     fn omitted_tts_backend_uses_platform_default() {
@@ -139,5 +139,30 @@ mod tests {
         let windows = parse_config("[tts]\ntts_backend = \"windows\"\n")
             .expect("explicit Windows config should parse");
         assert_eq!(windows.tts_backend, TtsBackend::Windows);
+    }
+
+    #[test]
+    fn windows_voice_preference_defaults_to_portable_zira_name() {
+        let config = parse_config("[tts]\n").expect("minimal table config should parse");
+        assert_eq!(config.windows_voice_preference, "Zira");
+    }
+
+    #[test]
+    fn book_overrides_apply_without_freezing_global_tts_resources() {
+        let base = AppConfig::default();
+        let overrides = BookReaderOverrides {
+            schema_version: BookReaderOverrides::SCHEMA_VERSION,
+            tts_backend: Some(TtsBackend::Windows),
+            windows_voice_id: Some("voice-b".to_string()),
+            tts_speed: Some(3.25),
+            ..Default::default()
+        };
+        let mut effective = base.clone();
+        overrides.apply_to(&mut effective);
+        assert_eq!(effective.tts_backend, TtsBackend::Windows);
+        assert_eq!(effective.windows_voice_id.as_deref(), Some("voice-b"));
+        assert!((effective.tts_speed - 3.25).abs() < f32::EPSILON);
+        assert_eq!(effective.tts_model_path, base.tts_model_path);
+        assert_eq!(effective.tts_threads, base.tts_threads);
     }
 }

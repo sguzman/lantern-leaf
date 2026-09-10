@@ -87,6 +87,7 @@ browsr_timeout_ms = 8000
 close_browser_tab_on_recent_delete = true
 
 [tts]
+windows_voice_preference = "Zira"
 tts_speed = 2.5
 tts_volume = 1.0
 tts_threads = 4

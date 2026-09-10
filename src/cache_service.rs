@@ -5,7 +5,16 @@ use tracing::{debug, info, warn};
 
 pub trait CacheService: Send + Sync {
     fn save_bookmark(&self, source_path: &Path, bookmark: &cache::Bookmark);
-    fn save_epub_config(&self, source_path: &Path, config: &config::AppConfig);
+    fn save_epub_config(&self, source_path: &Path, config: &config::AppConfig) {
+        let _ = (source_path, config);
+    }
+    fn save_book_reader_overrides(
+        &self,
+        source_path: &Path,
+        overrides: &config::BookReaderOverrides,
+    ) {
+        let _ = (source_path, overrides);
+    }
     fn delete_recent_source_and_cache(&self, source_path: &Path) -> Result<(), String>;
     fn remember_source_path(&self, source_path: &Path);
     fn persist_clipboard_text_source(&self, text: &str) -> Result<PathBuf, String>;
@@ -63,6 +72,15 @@ impl CacheService for FilesystemCacheService {
             source_path = %source_path.display(),
             "Saved epub config"
         );
+    }
+
+    fn save_book_reader_overrides(
+        &self,
+        source_path: &Path,
+        overrides: &config::BookReaderOverrides,
+    ) {
+        cache::save_book_reader_overrides(source_path, overrides);
+        debug!(source_path = %source_path.display(), "Saved book reader overrides");
     }
 
     fn delete_recent_source_and_cache(&self, source_path: &Path) -> Result<(), String> {

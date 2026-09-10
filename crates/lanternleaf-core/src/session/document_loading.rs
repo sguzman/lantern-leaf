@@ -106,6 +106,7 @@ impl ReaderSession {
                 })
                 .collect(),
             config,
+            book_overrides: config::BookReaderOverrides::default(),
             pages: Vec::new(),
             markdown_pages: Vec::new(),
             raw_page_sentences: Vec::new(),
@@ -165,35 +166,17 @@ pub fn load_session_for_source_with_cancel(
     cancel: Option<&CancellationToken>,
 ) -> Result<ReaderSession, String> {
     let mut effective_config = base_config.clone();
-    if let Some(mut overrides) = crate::cache::load_epub_config(&source_path) {
-        overrides.log_level = base_config.log_level;
-        overrides.tts_model_path = base_config.tts_model_path.clone();
-        overrides.tts_backend = base_config.tts_backend;
-        overrides.windows_voice_id = base_config.windows_voice_id.clone();
-        overrides.tts_espeak_path = base_config.tts_espeak_path.clone();
-        overrides.tts_threads = base_config.tts_threads;
-        overrides.normalizer_threads = base_config.normalizer_threads;
-        overrides.tts_progress_log_interval_secs = base_config.tts_progress_log_interval_secs;
-        overrides.tts_pause_resume_behavior = base_config.tts_pause_resume_behavior;
-        overrides.key_toggle_play_pause = base_config.key_toggle_play_pause.clone();
-        overrides.key_safe_quit = base_config.key_safe_quit.clone();
-        overrides.key_next_sentence = base_config.key_next_sentence.clone();
-        overrides.key_prev_sentence = base_config.key_prev_sentence.clone();
-        overrides.key_repeat_sentence = base_config.key_repeat_sentence.clone();
-        overrides.key_toggle_search = base_config.key_toggle_search.clone();
-        overrides.key_toggle_settings = base_config.key_toggle_settings.clone();
-        overrides.key_toggle_stats = base_config.key_toggle_stats.clone();
-        overrides.key_toggle_tts = base_config.key_toggle_tts.clone();
-        effective_config = overrides;
-    }
+    let book_overrides = crate::cache::load_book_reader_overrides(&source_path).unwrap_or_default();
+    book_overrides.apply_to(&mut effective_config);
     let bookmark = crate::cache::load_bookmark(&source_path);
-    let session = ReaderSession::load_with_cancel(
+    let mut session = ReaderSession::load_with_cancel(
         source_path,
         effective_config,
         normalizer,
         bookmark,
         cancel,
     )?;
+    session.book_overrides = book_overrides;
     Ok(session)
 }
 
@@ -203,7 +186,8 @@ pub fn persist_session_housekeeping_with_cache(
 ) {
     let bookmark = session.to_bookmark();
     cache_service.save_bookmark(Path::new(&session.source_path), &bookmark);
-    cache_service.save_epub_config(Path::new(&session.source_path), &session.config);
+    cache_service
+        .save_book_reader_overrides(Path::new(&session.source_path), &session.book_overrides);
 }
 
 pub fn persist_session_housekeeping(session: &ReaderSession) {

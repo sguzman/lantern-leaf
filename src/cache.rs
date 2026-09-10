@@ -14,6 +14,8 @@ mod browser_tab_cache;
 mod content_artifacts;
 
 #[cfg(not(target_arch = "wasm32"))]
+use crate::config::AppConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::workspace::workspace_root_from_cwd;
 #[cfg(not(target_arch = "wasm32"))]
 use epub::doc::EpubDoc;
@@ -21,8 +23,6 @@ use epub::doc::EpubDoc;
 use image::codecs::jpeg::JpegEncoder;
 #[cfg(not(target_arch = "wasm32"))]
 use image::imageops::FilterType;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::config::AppConfig;
 #[cfg(not(target_arch = "wasm32"))]
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -242,8 +242,7 @@ pub fn save_bookmark(epub_path: &Path, bookmark: &Bookmark) {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn save_bookmark(_epub_path: &Path, _bookmark: &Bookmark) {
-}
+pub fn save_bookmark(_epub_path: &Path, _bookmark: &Bookmark) {}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn source_hash(path: &Path) -> String {
@@ -375,8 +374,7 @@ pub fn persist_pdf_sentence_map(source_path: &Path, locations: &[PdfSentenceLoca
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn persist_pdf_sentence_map(_source_path: &Path, _locations: &[PdfSentenceLocation]) {
-}
+pub fn persist_pdf_sentence_map(_source_path: &Path, _locations: &[PdfSentenceLocation]) {}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_pdf_sentence_map(source_path: &Path) -> Option<Vec<PdfSentenceLocation>> {
@@ -394,7 +392,10 @@ pub fn persist_pdf_ocr_alignment_artifact(source_path: &Path, artifact: &PdfOcrA
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn persist_pdf_ocr_alignment_artifact(_source_path: &Path, _artifact: &PdfOcrAlignmentArtifact) {
+pub fn persist_pdf_ocr_alignment_artifact(
+    _source_path: &Path,
+    _artifact: &PdfOcrAlignmentArtifact,
+) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -446,8 +447,7 @@ pub fn remember_source_path(source_path: &Path) {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn remember_source_path(_source_path: &Path) {
-}
+pub fn remember_source_path(_source_path: &Path) {}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn persist_clipboard_text_source(text: &str) -> Result<PathBuf, String> {
@@ -1050,9 +1050,19 @@ pub fn save_epub_config(epub_path: &Path, config: &crate::config::AppConfig) {
     bookmarks_config::save_epub_config(epub_path, config)
 }
 
-#[cfg(target_arch = "wasm32")]
-pub fn save_epub_config(_epub_path: &Path, _config: &crate::config::AppConfig) {
+pub fn load_book_reader_overrides(epub_path: &Path) -> Option<crate::config::BookReaderOverrides> {
+    bookmarks_config::load_book_reader_overrides(epub_path)
 }
+
+pub fn save_book_reader_overrides(
+    epub_path: &Path,
+    overrides: &crate::config::BookReaderOverrides,
+) {
+    bookmarks_config::save_book_reader_overrides(epub_path, overrides)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn save_epub_config(_epub_path: &Path, _config: &crate::config::AppConfig) {}
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
@@ -1117,12 +1127,12 @@ mod tests {
                 .unwrap_or(0)
         ));
 
-        let configured_root = resolve_configured_cache_root(
-            None,
-            Some(override_path.as_os_str()),
-        );
+        let configured_root = resolve_configured_cache_root(None, Some(override_path.as_os_str()));
         assert_eq!(configured_root, override_path);
-        assert_eq!(app_cache_root(&configured_root), override_path.join(CACHE_APP_SUBDIR));
+        assert_eq!(
+            app_cache_root(&configured_root),
+            override_path.join(CACHE_APP_SUBDIR)
+        );
     }
 
     #[test]
@@ -1568,6 +1578,31 @@ sentence_text = "legacy bookmark entry"
         assert!((loaded.pause_after_sentence - 0.19).abs() < f32::EPSILON);
         assert!((loaded.tts_speed - 2.7).abs() < f32::EPSILON);
         assert_eq!(loaded.key_toggle_tts, "ctrl+alt+y");
+
+        cleanup_source_and_cache(&source);
+    }
+
+    #[test]
+    fn book_reader_overrides_are_versioned_and_legacy_full_configs_are_not_promoted() {
+        let source = unique_source_path("override");
+        write_source_file(&source);
+
+        let overrides = crate::config::BookReaderOverrides {
+            schema_version: crate::config::BookReaderOverrides::SCHEMA_VERSION,
+            tts_backend: Some(crate::config::TtsBackend::Windows),
+            windows_voice_id: Some("voice-b".to_string()),
+            ..Default::default()
+        };
+        save_book_reader_overrides(&source, &overrides);
+        assert_eq!(load_book_reader_overrides(&source), Some(overrides));
+
+        let mut legacy = AppConfig::default();
+        legacy.tts_backend = crate::config::TtsBackend::Windows;
+        legacy.windows_voice_id = Some("legacy-voice".to_string());
+        save_epub_config(&source, &legacy);
+        let migrated = load_book_reader_overrides(&source).expect("legacy config migrates");
+        assert_eq!(migrated.tts_backend, None);
+        assert_eq!(migrated.windows_voice_id, None);
 
         cleanup_source_and_cache(&source);
     }

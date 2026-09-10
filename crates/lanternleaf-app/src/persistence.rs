@@ -39,7 +39,7 @@ impl PersistenceInventory {
                     owner: "cache::bookmarks_config",
                     path_hint: ".cache/lantern-leaf/<source_hash>/epub-config.toml",
                     version_hint: None,
-                    notes: "Overrides applied when opening a source.",
+                    notes: "Versioned BookReaderOverrides only; absent fields inherit app config.",
                 },
                 PersistenceItem {
                     name: "bookmarks",
@@ -159,6 +159,7 @@ pub struct ReaderHousekeeping {
     pub source_path: String,
     pub bookmark: cache::Bookmark,
     pub config: config::AppConfig,
+    pub book_overrides: config::BookReaderOverrides,
     pub playback: Option<ReaderPlaybackState>,
 }
 
@@ -169,7 +170,29 @@ impl ReaderHousekeeping {
         config: config::AppConfig,
         playback: Option<ReaderPlaybackState>,
     ) -> Self {
-        Self { source_path: source_path.into(), bookmark, config, playback }
+        Self {
+            source_path: source_path.into(),
+            bookmark,
+            config,
+            book_overrides: config::BookReaderOverrides::default(),
+            playback,
+        }
+    }
+
+    pub fn from_parts_with_overrides(
+        source_path: impl Into<String>,
+        bookmark: cache::Bookmark,
+        config: config::AppConfig,
+        book_overrides: config::BookReaderOverrides,
+        playback: Option<ReaderPlaybackState>,
+    ) -> Self {
+        Self {
+            source_path: source_path.into(),
+            bookmark,
+            config,
+            book_overrides,
+            playback,
+        }
     }
 }
 
@@ -182,6 +205,12 @@ pub trait PersistenceService: Send + Sync {
     fn load_bookmark(&self, source_path: &Path) -> Option<cache::Bookmark>;
 
     fn load_epub_config(&self, source_path: &Path) -> Option<config::AppConfig>;
+    fn load_book_reader_overrides(
+        &self,
+        _source_path: &Path,
+    ) -> Option<config::BookReaderOverrides> {
+        None
+    }
 
     fn list_recent_books(&self, limit: usize) -> Vec<cache::RecentBook>;
 
@@ -215,7 +244,7 @@ impl PersistenceService for FilesystemPersistenceService {
         self.cache_service
             .save_bookmark(source_path, &housekeeping.bookmark);
         self.cache_service
-            .save_epub_config(source_path, &housekeeping.config);
+            .save_book_reader_overrides(source_path, &housekeeping.book_overrides);
         Ok(())
     }
 
@@ -224,7 +253,15 @@ impl PersistenceService for FilesystemPersistenceService {
     }
 
     fn load_epub_config(&self, source_path: &Path) -> Option<config::AppConfig> {
-        cache::load_epub_config(source_path)
+        let _ = source_path;
+        None
+    }
+
+    fn load_book_reader_overrides(
+        &self,
+        source_path: &Path,
+    ) -> Option<config::BookReaderOverrides> {
+        cache::load_book_reader_overrides(source_path)
     }
 
     fn list_recent_books(&self, limit: usize) -> Vec<cache::RecentBook> {
@@ -317,19 +354,18 @@ fn reader_playback_state_from_housekeeping(
             .unwrap_or(housekeeping.bookmark.page),
         highlighted_sentence_idx: playback_view.and_then(|p| p.highlighted_sentence_idx),
         highlighted_canonical_idx: playback_view.and_then(|p| p.highlighted_canonical_idx),
-        tts: playback_view
-            .map(|p| p.tts.clone())
-            .unwrap_or_else(|| crate::contracts::ReaderTtsView {
+        tts: playback_view.map(|p| p.tts.clone()).unwrap_or_else(|| {
+            crate::contracts::ReaderTtsView {
                 state: lanternleaf_core::session::TtsPlaybackState::Idle,
                 current_sentence_idx: None,
                 sentence_count: 0,
                 can_seek_prev: false,
                 can_seek_next: false,
                 progress_pct: 0.0,
-            }),
-        stats: playback_view
-            .map(|p| p.stats.clone())
-            .unwrap_or_else(|| crate::contracts::ReaderStats {
+            }
+        }),
+        stats: playback_view.map(|p| p.stats.clone()).unwrap_or_else(|| {
+            crate::contracts::ReaderStats {
                 page_index: housekeeping.bookmark.page + 1,
                 total_pages: 0,
                 tts_progress_pct: 0.0,
@@ -346,7 +382,8 @@ fn reader_playback_state_from_housekeeping(
                 sentences_read_up_to_page_end: 0,
                 words_read_up_to_current_position: 0,
                 sentences_read_up_to_current_position: 0,
-            }),
+            }
+        }),
         updated_at,
     }
 }
@@ -367,7 +404,7 @@ impl PersistenceService for RemotePersistenceService {
 
         let update = serde_json::json!({
             "bookmark": housekeeping.bookmark,
-            "config": housekeeping.config,
+            "config": housekeeping.book_overrides,
             "playback": playback,
         });
 
@@ -394,6 +431,14 @@ impl PersistenceService for RemotePersistenceService {
     }
 
     fn load_epub_config(&self, source_path: &Path) -> Option<config::AppConfig> {
+        let _ = source_path;
+        None
+    }
+
+    fn load_book_reader_overrides(
+        &self,
+        source_path: &Path,
+    ) -> Option<config::BookReaderOverrides> {
         let resp = self.client.get(self.book_url(source_path)).send().ok()?;
         if resp.status().is_success() {
             let data: serde_json::Value = resp.json().ok()?;
@@ -537,6 +582,16 @@ impl PersistenceLifecycle {
         (
             self.service.load_bookmark(source_path),
             self.service.load_epub_config(source_path),
+        )
+    }
+
+    pub fn load_bookmark_and_overrides(
+        &self,
+        source_path: &Path,
+    ) -> (Option<cache::Bookmark>, Option<config::BookReaderOverrides>) {
+        (
+            self.service.load_bookmark(source_path),
+            self.service.load_book_reader_overrides(source_path),
         )
     }
 
@@ -738,11 +793,15 @@ mod tests {
 
     struct TestCacheService {
         saved_bookmark: Arc<AtomicBool>,
-        saved_config: Arc<Mutex<Option<config::AppConfig>>>,
+        saved_config: Arc<Mutex<Option<config::BookReaderOverrides>>>,
     }
 
     impl TestCacheService {
-        fn new() -> (Self, Arc<AtomicBool>, Arc<Mutex<Option<config::AppConfig>>>) {
+        fn new() -> (
+            Self,
+            Arc<AtomicBool>,
+            Arc<Mutex<Option<config::BookReaderOverrides>>>,
+        ) {
             let saved_bookmark = Arc::new(AtomicBool::new(false));
             let saved_config = Arc::new(Mutex::new(None));
             (
@@ -761,9 +820,13 @@ mod tests {
             self.saved_bookmark.store(true, Ordering::SeqCst);
         }
 
-        fn save_epub_config(&self, _source_path: &Path, config: &config::AppConfig) {
+        fn save_book_reader_overrides(
+            &self,
+            _source_path: &Path,
+            overrides: &config::BookReaderOverrides,
+        ) {
             let mut guard = self.saved_config.lock().expect("config lock");
-            *guard = Some(config.clone());
+            *guard = Some(overrides.clone());
         }
 
         fn delete_recent_source_and_cache(&self, _source_path: &Path) -> Result<(), String> {
@@ -946,20 +1009,25 @@ mod tests {
     fn filesystem_persistence_uses_cache_service_config() {
         let (cache_service, saved_bookmark, saved_config) = TestCacheService::new();
         let service = FilesystemPersistenceService::new(Arc::new(cache_service));
-        let mut cfg = config::AppConfig::default();
-        cfg.tts_speed = 3.5;
+        let cfg = config::AppConfig::default();
+        let overrides = config::BookReaderOverrides {
+            schema_version: config::BookReaderOverrides::SCHEMA_VERSION,
+            tts_speed: Some(3.5),
+            ..Default::default()
+        };
         service
-            .persist_reader_housekeeping(ReaderHousekeeping::from_parts(
+            .persist_reader_housekeeping(ReaderHousekeeping::from_parts_with_overrides(
                 "/tmp/test.epub",
                 sample_bookmark(),
                 cfg,
+                overrides,
                 None,
             ))
             .expect("persist should succeed");
         assert!(saved_bookmark.load(Ordering::SeqCst));
         let guard = saved_config.lock().expect("config lock");
         let saved = guard.as_ref().expect("config saved");
-        assert!((saved.tts_speed - 3.5).abs() < f32::EPSILON);
+        assert_eq!(saved.tts_speed, Some(3.5));
     }
 
     struct RecordingCacheService {
@@ -987,8 +1055,12 @@ mod tests {
             self.record("save_bookmark");
         }
 
-        fn save_epub_config(&self, _source_path: &Path, _config: &config::AppConfig) {
-            self.record("save_epub_config");
+        fn save_book_reader_overrides(
+            &self,
+            _source_path: &Path,
+            _overrides: &config::BookReaderOverrides,
+        ) {
+            self.record("save_book_reader_overrides");
         }
 
         fn delete_recent_source_and_cache(&self, _source_path: &Path) -> Result<(), String> {
@@ -1084,7 +1156,11 @@ mod tests {
         let recorded = calls.lock().expect("calls lock").clone();
         assert_eq!(
             recorded,
-            vec!["remember_source_path", "save_bookmark", "save_epub_config"]
+            vec![
+                "remember_source_path",
+                "save_bookmark",
+                "save_book_reader_overrides"
+            ]
         );
     }
 }

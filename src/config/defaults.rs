@@ -44,6 +44,10 @@ pub(crate) fn default_tts_backend() -> crate::config::TtsBackend {
     }
 }
 
+pub(crate) fn default_windows_voice_preference() -> String {
+    "Zira".to_string()
+}
+
 pub(crate) fn default_tts_speed() -> f32 {
     2.5
 }

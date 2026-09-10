@@ -690,6 +690,29 @@ fn handle_reader_command(
     let reader = guard
         .as_mut()
         .ok_or_else(|| bridge_error("no_session", "No reader session available"))?;
+    if let session::SessionCommand::ApplySettings { patch } = &command
+        && (patch.tts_backend.is_some() || patch.windows_voice_id.is_some())
+    {
+        let backend = patch.tts_backend.unwrap_or(reader.config.tts_backend);
+        let voice_id = match patch.windows_voice_id.as_deref() {
+            Some(value) if !value.trim().is_empty() => Some(value),
+            Some(_) => None,
+            None => reader.config.windows_voice_id.as_deref(),
+        };
+        lanternleaf_core::tts::validate_backend_configuration(
+            backend,
+            PathBuf::from(&reader.config.tts_model_path).as_path(),
+            PathBuf::from(&reader.config.tts_espeak_path).as_path(),
+            voice_id,
+            &reader.config.windows_voice_preference,
+        )
+        .map_err(|error| {
+            bridge_error(
+                "tts_settings_rejected",
+                format!("TTS settings were not applied: {error:#}"),
+            )
+        })?;
+    }
     let panels = context
         .panels
         .lock()
@@ -873,6 +896,7 @@ fn handle_persistence_flush(
             source_path: view.source_path,
             bookmark: session.to_bookmark(),
             config: session.config.clone(),
+            book_overrides: session.book_overrides.clone(),
             playback: Some(playback),
         }
     };
@@ -1338,8 +1362,7 @@ mod tests {
             .expect("large persistence session")
             .snapshot_construction_count();
         assert_eq!(
-            snapshot_count,
-            0,
+            snapshot_count, 0,
             "persistence flush constructed a full ReaderSnapshot"
         );
     }

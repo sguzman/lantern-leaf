@@ -15,8 +15,15 @@ pub struct WindowsVoiceDescriptor {
 }
 
 pub fn resolve_voice_id(configured_id: Option<&str>) -> Result<String> {
+    resolve_voice_id_with_preference(configured_id, "Zira")
+}
+
+pub fn resolve_voice_id_with_preference(
+    configured_id: Option<&str>,
+    preferred_name: &str,
+) -> Result<String> {
+    let voices = SpeechSynthesizer::AllVoices()?;
     if let Some(configured_id) = configured_id {
-        let voices = SpeechSynthesizer::AllVoices()?;
         for index in 0..voices.Size()? {
             let voice = voices.GetAt(index)?;
             if voice.Id()?.to_string_lossy() == configured_id {
@@ -25,7 +32,55 @@ pub fn resolve_voice_id(configured_id: Option<&str>) -> Result<String> {
         }
         return Err(anyhow!("Windows voice ID was not found: {configured_id}"));
     }
+    let normalized_preference = normalize_voice_name(preferred_name);
+    if !normalized_preference.is_empty() {
+        let mut candidates = Vec::new();
+        for index in 0..voices.Size()? {
+            let voice = voices.GetAt(index)?;
+            let display_name = voice.DisplayName()?.to_string_lossy();
+            let normalized_name = normalize_voice_name(&display_name);
+            if normalized_name == normalized_preference
+                || normalized_name
+                    .split_whitespace()
+                    .any(|token| token == normalized_preference)
+            {
+                candidates.push((
+                    voice.Language()?.to_string_lossy().to_ascii_lowercase(),
+                    voice.Id()?.to_string_lossy(),
+                ));
+            }
+        }
+        candidates.sort_by(|left, right| {
+            let left_en = !left.0.starts_with("en-us");
+            let right_en = !right.0.starts_with("en-us");
+            (left_en, &left.1).cmp(&(right_en, &right.1))
+        });
+        if let Some((_, id)) = candidates.into_iter().next() {
+            tracing::info!(preferred_name, voice_id = %id, "Resolved Windows voice preference");
+            return Ok(id);
+        }
+        tracing::warn!(
+            preferred_name,
+            "Preferred Windows voice unavailable; using OS default"
+        );
+    }
     Ok(SpeechSynthesizer::DefaultVoice()?.Id()?.to_string_lossy())
+}
+
+fn normalize_voice_name(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub fn enumerate_voices() -> Result<Vec<WindowsVoiceDescriptor>> {

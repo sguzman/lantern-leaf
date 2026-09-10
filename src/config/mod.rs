@@ -11,6 +11,7 @@ mod tables;
 
 pub use io::{load_config, parse_config, serialize_config};
 pub use models::{
-    AppConfig, FontFamily, FontWeight, HighlightColor, LogLevel, NativeHtmlPaginationMode,
-    PrettyUiConfig, ThemeMode, TimeRemainingDisplay, TtsBackend, TtsPauseResumeBehavior,
+    AppConfig, BookReaderOverrides, FontFamily, FontWeight, HighlightColor, LogLevel,
+    NativeHtmlPaginationMode, PrettyUiConfig, ThemeMode, TimeRemainingDisplay, TtsBackend,
+    TtsPauseResumeBehavior,
 };

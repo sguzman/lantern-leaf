@@ -26,6 +26,51 @@ mod windows_backend;
 
 use crate::config::TtsBackend;
 
+/// Validate a backend switch before mutating the live reader session.
+pub fn validate_backend_configuration(
+    backend: TtsBackend,
+    model_path: &Path,
+    espeak_path: &Path,
+    voice_id: Option<&str>,
+    voice_preference: &str,
+) -> Result<()> {
+    match backend {
+        TtsBackend::Piper => {
+            if !model_path.is_file() {
+                anyhow::bail!("Piper model not found at {}", model_path.display());
+            }
+            let config_path = if model_path.extension().is_some_and(|ext| ext == "onnx") {
+                model_path.with_extension("onnx.json")
+            } else {
+                model_path.to_path_buf()
+            };
+            if !config_path.is_file() {
+                anyhow::bail!(
+                    "Piper model configuration not found at {}",
+                    config_path.display()
+                );
+            }
+            let root = sanitize_espeak_root(espeak_path.to_path_buf());
+            let phonindex = root.join("espeak-ng-data").join("phonindex");
+            if !phonindex.is_file() {
+                anyhow::bail!("Piper eSpeak data not found at {}", phonindex.display());
+            }
+        }
+        TtsBackend::Windows => {
+            #[cfg(windows)]
+            {
+                windows_backend::resolve_voice_id_with_preference(voice_id, voice_preference)?;
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = (voice_id, voice_preference);
+                anyhow::bail!("Windows TTS backend is only available on Windows");
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(windows)]
 pub use windows_backend::WindowsVoiceDescriptor;
 
@@ -37,6 +82,14 @@ pub fn enumerate_windows_voices() -> Result<Vec<WindowsVoiceDescriptor>> {
 #[cfg(windows)]
 pub fn resolve_windows_voice_id(configured_id: Option<&str>) -> Result<String> {
     windows_backend::resolve_voice_id(configured_id)
+}
+
+#[cfg(windows)]
+pub fn resolve_windows_voice_id_with_preference(
+    configured_id: Option<&str>,
+    preferred_name: &str,
+) -> Result<String> {
+    windows_backend::resolve_voice_id_with_preference(configured_id, preferred_name)
 }
 
 #[cfg(windows)]
@@ -64,6 +117,7 @@ impl TtsEngine {
         espeak_path: PathBuf,
         backend: TtsBackend,
         windows_voice_id: Option<String>,
+        windows_voice_preference: String,
     ) -> Result<Self> {
         let (espeak_root, effective_windows_voice_id) = match backend {
             TtsBackend::Piper => {
@@ -78,7 +132,10 @@ impl TtsEngine {
             }
             TtsBackend::Windows => {
                 #[cfg(windows)]
-                let resolved = windows_backend::resolve_voice_id(windows_voice_id.as_deref())?;
+                let resolved = windows_backend::resolve_voice_id_with_preference(
+                    windows_voice_id.as_deref(),
+                    &windows_voice_preference,
+                )?;
                 #[cfg(not(windows))]
                 let resolved = windows_voice_id.clone().ok_or_else(|| {
                     anyhow::anyhow!("Windows TTS backend is only available on Windows")

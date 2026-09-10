@@ -39,6 +39,8 @@ pub struct AppConfig {
     pub tts_backend: TtsBackend,
     #[serde(default)]
     pub windows_voice_id: Option<String>,
+    #[serde(default = "crate::config::defaults::default_windows_voice_preference")]
+    pub windows_voice_preference: String,
     #[serde(default = "crate::config::defaults::default_tts_speed")]
     pub tts_speed: f32,
     #[serde(default = "crate::config::defaults::default_tts_volume")]
@@ -137,6 +139,7 @@ impl Default for AppConfig {
             tts_model_path: crate::config::defaults::default_tts_model(),
             tts_backend: crate::config::defaults::default_tts_backend(),
             windows_voice_id: None,
+            windows_voice_preference: crate::config::defaults::default_windows_voice_preference(),
             tts_speed: crate::config::defaults::default_tts_speed(),
             tts_volume: crate::config::defaults::default_tts_volume(),
             tts_espeak_path: crate::config::defaults::default_tts_espeak_path(),
@@ -181,6 +184,131 @@ impl Default for AppConfig {
             key_toggle_stats: crate::config::defaults::default_key_toggle_stats(),
             key_toggle_tts: crate::config::defaults::default_key_toggle_tts(),
             remote_url: None,
+        }
+    }
+}
+
+/// Explicit per-book reader intent. `None` means the book inherits the app
+/// configuration on every open; this is deliberately not a frozen AppConfig.
+#[derive(Debug, Clone, Deserialize, serde::Serialize, PartialEq, TS)]
+#[ts(export)]
+pub struct BookReaderOverrides {
+    pub schema_version: u32,
+    pub theme: Option<ThemeMode>,
+    pub font_family: Option<FontFamily>,
+    pub font_weight: Option<FontWeight>,
+    pub font_size: Option<u32>,
+    pub line_spacing: Option<f32>,
+    pub word_spacing: Option<u32>,
+    pub letter_spacing: Option<u32>,
+    pub margin_horizontal: Option<u16>,
+    pub margin_vertical: Option<u16>,
+    pub lines_per_page: Option<usize>,
+    pub pause_after_sentence: Option<f32>,
+    pub auto_scroll_tts: Option<bool>,
+    pub center_spoken_sentence: Option<bool>,
+    pub text_only_show_original_text: Option<bool>,
+    pub tts_speed: Option<f32>,
+    pub tts_volume: Option<f32>,
+    pub tts_backend: Option<TtsBackend>,
+    pub windows_voice_id: Option<String>,
+    pub pretty: Option<PrettyUiConfig>,
+}
+
+impl Default for BookReaderOverrides {
+    fn default() -> Self {
+        Self {
+            schema_version: Self::SCHEMA_VERSION,
+            ..Self::empty()
+        }
+    }
+}
+
+impl BookReaderOverrides {
+    pub const SCHEMA_VERSION: u32 = 1;
+
+    fn empty() -> Self {
+        Self {
+            schema_version: 0,
+            theme: None,
+            font_family: None,
+            font_weight: None,
+            font_size: None,
+            line_spacing: None,
+            word_spacing: None,
+            letter_spacing: None,
+            margin_horizontal: None,
+            margin_vertical: None,
+            lines_per_page: None,
+            pause_after_sentence: None,
+            auto_scroll_tts: None,
+            center_spoken_sentence: None,
+            text_only_show_original_text: None,
+            tts_speed: None,
+            tts_volume: None,
+            tts_backend: None,
+            windows_voice_id: None,
+            pretty: None,
+        }
+    }
+
+    pub fn apply_to(&self, config: &mut AppConfig) {
+        if let Some(value) = self.theme {
+            config.theme = value;
+        }
+        if let Some(value) = self.font_family {
+            config.font_family = value;
+        }
+        if let Some(value) = self.font_weight {
+            config.font_weight = value;
+        }
+        if let Some(value) = self.font_size {
+            config.font_size = value;
+        }
+        if let Some(value) = self.line_spacing {
+            config.line_spacing = value;
+        }
+        if let Some(value) = self.word_spacing {
+            config.word_spacing = value;
+        }
+        if let Some(value) = self.letter_spacing {
+            config.letter_spacing = value;
+        }
+        if let Some(value) = self.margin_horizontal {
+            config.margin_horizontal = value;
+        }
+        if let Some(value) = self.margin_vertical {
+            config.margin_vertical = value;
+        }
+        if let Some(value) = self.lines_per_page {
+            config.lines_per_page = value;
+        }
+        if let Some(value) = self.pause_after_sentence {
+            config.pause_after_sentence = value;
+        }
+        if let Some(value) = self.auto_scroll_tts {
+            config.auto_scroll_tts = value;
+        }
+        if let Some(value) = self.center_spoken_sentence {
+            config.center_spoken_sentence = value;
+        }
+        if let Some(value) = self.text_only_show_original_text {
+            config.text_only_show_original_text = value;
+        }
+        if let Some(value) = self.tts_speed {
+            config.tts_speed = value;
+        }
+        if let Some(value) = self.tts_volume {
+            config.tts_volume = value;
+        }
+        if let Some(value) = self.tts_backend {
+            config.tts_backend = value;
+        }
+        if let Some(value) = self.windows_voice_id.as_ref() {
+            config.windows_voice_id = Some(value.clone());
+        }
+        if let Some(value) = self.pretty {
+            config.pretty = value;
         }
     }
 }
