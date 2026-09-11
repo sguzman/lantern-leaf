@@ -14,6 +14,7 @@ use std::thread;
 use crate::app::ui::{bounded_diagnostic, format::format_duration_secs};
 use crate::app::{
     AnchorFallback, LanternLeafApp, PrettySentenceSegment, PrettySentenceTarget,
+    RepaintNotifier,
     text_only_mode_transition,
 };
 use crate::pretty::{
@@ -32,7 +33,7 @@ pub(crate) struct PrettyBuildResult {
     pub(crate) targets: Vec<Option<PrettySentenceTarget>>,
 }
 
-pub(crate) fn start_pretty_builder() -> (
+pub(crate) fn start_pretty_builder(notify_repaint: RepaintNotifier) -> (
     mpsc::SyncSender<PrettyBuildRequest>,
     mpsc::Receiver<PrettyBuildResult>,
 ) {
@@ -52,6 +53,7 @@ pub(crate) fn start_pretty_builder() -> (
             {
                 break;
             }
+            notify_repaint();
         }
     });
     (request_tx, result_rx)

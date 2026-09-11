@@ -71,6 +71,13 @@ use lanternleaf_core::{
 use serde::{Deserialize, Serialize};
 use tracing::{Level, info, trace, warn};
 
+pub(crate) type RepaintNotifier = Arc<dyn Fn() + Send + Sync + 'static>;
+
+pub(crate) fn repaint_notifier(ctx: &Context) -> RepaintNotifier {
+    let ctx = ctx.clone();
+    Arc::new(move || ctx.request_repaint())
+}
+
 #[derive(Debug)]
 pub enum NativeRunError {
     LockIo(std::io::Error),
@@ -668,10 +675,10 @@ struct PrettyImageCache {
 }
 
 impl PrettyImageCache {
-    fn new() -> Self {
+    fn new(notify_repaint: RepaintNotifier) -> Self {
         let (tx, worker_rx) = mpsc::sync_channel(32);
         let (worker_tx, rx) = mpsc::channel();
-        thread::spawn(move || pretty_image_worker(worker_rx, worker_tx));
+        thread::spawn(move || pretty_image_worker(worker_rx, worker_tx, notify_repaint));
         Self {
             tx,
             rx,
@@ -791,7 +798,11 @@ struct ImageReady {
     error: Option<String>,
 }
 
-fn pretty_image_worker(rx: mpsc::Receiver<ImageRequest>, tx: mpsc::Sender<ImageReady>) {
+fn pretty_image_worker(
+    rx: mpsc::Receiver<ImageRequest>,
+    tx: mpsc::Sender<ImageReady>,
+    notify_repaint: RepaintNotifier,
+) {
     for req in rx {
         let start = Instant::now();
         match decode_pretty_image(&req.path, req.max_width_px, req.max_height_px) {
@@ -803,15 +814,22 @@ fn pretty_image_worker(rx: mpsc::Receiver<ImageRequest>, tx: mpsc::Sender<ImageR
                     decode_ms = start.elapsed().as_millis(),
                     "Decoded pretty image"
                 );
-                let _ = tx.send(ready);
+                if tx.send(ready).is_ok() {
+                    notify_repaint();
+                }
             }
             Err(err) => {
-                let _ = tx.send(ImageReady {
-                    path: req.path,
-                    size: [0, 0],
-                    pixels: Vec::new(),
-                    error: Some(err),
-                });
+                if tx
+                    .send(ImageReady {
+                        path: req.path,
+                        size: [0, 0],
+                        pixels: Vec::new(),
+                        error: Some(err),
+                    })
+                    .is_ok()
+                {
+                    notify_repaint();
+                }
             }
         }
     }
@@ -880,7 +898,9 @@ impl LanternLeafApp {
         let effect_session = Arc::clone(&effect_context.session);
         let effect_dispatcher = EffectDispatcher::new(effect_context, Some(cc.egui_ctx.clone()));
         persistence.start_sync_thread(effect_dispatcher.event_tx());
-        let (pretty_build_tx, pretty_build_rx) = ui::reader::start_pretty_builder();
+        let repaint = repaint_notifier(&cc.egui_ctx);
+        let (pretty_build_tx, pretty_build_rx) =
+            ui::reader::start_pretty_builder(repaint.clone());
 
         let mut app = Self {
             runtime,
@@ -935,7 +955,7 @@ impl LanternLeafApp {
             pretty_build_pending: None,
             pretty_block_heights: Vec::new(),
             thumbnail_cache: ThumbnailCache::new(),
-            pretty_image_cache: PrettyImageCache::new(),
+            pretty_image_cache: PrettyImageCache::new(repaint),
             sentence_scroll_offset: None,
             overlay_eviction_warning_at: None,
             timeline_history: Vec::new(),
@@ -998,7 +1018,9 @@ impl LanternLeafApp {
         let effect_session = Arc::clone(&effect_context.session);
         let effect_dispatcher = EffectDispatcher::new(effect_context, Some(cc.egui_ctx.clone()));
         persistence.start_sync_thread(effect_dispatcher.event_tx());
-        let (pretty_build_tx, pretty_build_rx) = ui::reader::start_pretty_builder();
+        let repaint = repaint_notifier(&cc.egui_ctx);
+        let (pretty_build_tx, pretty_build_rx) =
+            ui::reader::start_pretty_builder(repaint.clone());
 
         let mut app = Self {
             runtime,
@@ -1052,7 +1074,7 @@ impl LanternLeafApp {
             pretty_build_pending: None,
             pretty_block_heights: Vec::new(),
             thumbnail_cache: ThumbnailCache::new(),
-            pretty_image_cache: PrettyImageCache::new(),
+            pretty_image_cache: PrettyImageCache::new(repaint),
             sentence_scroll_offset: None,
             overlay_eviction_warning_at: None,
             timeline_history: Vec::new(),
@@ -3299,6 +3321,124 @@ impl AudioBudgetEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn wait_for_repaints(count: &AtomicUsize, expected: usize) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while count.load(Ordering::SeqCst) < expected && Instant::now() < deadline {
+            thread::yield_now();
+        }
+        assert!(
+            count.load(Ordering::SeqCst) >= expected,
+            "expected at least {expected} worker repaint notification(s), got {}",
+            count.load(Ordering::SeqCst)
+        );
+    }
+
+    #[test]
+    fn pretty_image_worker_notifies_idle_completion_for_success_and_failure() {
+        let root = std::env::temp_dir().join(format!(
+            "lanternleaf-pretty-wakeup-{}",
+            std::process::id()
+        ));
+        let good_path = root.with_extension("png");
+        let bad_path = root.with_extension("bad");
+        fs::write(
+            &good_path,
+            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../branding/icon.png")),
+        )
+        .expect("write valid image fixture");
+        fs::write(&bad_path, b"not an image").expect("write corrupt image fixture");
+
+        let (request_tx, request_rx) = mpsc::sync_channel(2);
+        let (result_tx, result_rx) = mpsc::channel();
+        let repaint_count = Arc::new(AtomicUsize::new(0));
+        let count_for_worker = Arc::clone(&repaint_count);
+        let notifier: RepaintNotifier = Arc::new(move || {
+            count_for_worker.fetch_add(1, Ordering::SeqCst);
+        });
+        let worker = thread::spawn(move || pretty_image_worker(request_rx, result_tx, notifier));
+
+        request_tx
+            .send(ImageRequest {
+                path: good_path.clone(),
+                max_width_px: 64,
+                max_height_px: 64,
+            })
+            .expect("send successful decode request");
+        request_tx
+            .send(ImageRequest {
+                path: bad_path.clone(),
+                max_width_px: 64,
+                max_height_px: 64,
+            })
+            .expect("send failed decode request");
+        drop(request_tx);
+
+        // Wait only on worker completion notifications. The receiver is intentionally
+        // untouched until both wakeups have fired, proving polling is not the trigger.
+        wait_for_repaints(&repaint_count, 2);
+        let results = result_rx.try_iter().collect::<Vec<_>>();
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().any(|result| result.path == good_path && result.error.is_none()));
+        assert!(results.iter().any(|result| result.path == bad_path && result.error.is_some()));
+        worker.join().expect("image worker should exit after requests close");
+        let _ = fs::remove_file(good_path);
+        let _ = fs::remove_file(bad_path);
+    }
+
+    #[test]
+    fn pretty_image_request_submission_remains_nonblocking_when_queue_is_full() {
+        let repaint: RepaintNotifier = Arc::new(|| {});
+        let cache = PrettyImageCache::new(repaint);
+        let start = Instant::now();
+        for index in 0..256 {
+            let _ = cache.tx.try_send(ImageRequest {
+                path: PathBuf::from(format!("missing-{index}.png")),
+                max_width_px: 64,
+                max_height_px: 64,
+            });
+        }
+        assert!(start.elapsed() < Duration::from_millis(250));
+    }
+
+    #[test]
+    fn pretty_build_worker_notifies_idle_completion_without_tts() {
+        let mut snapshot = make_reader_snapshot();
+        snapshot.pretty_kind = PrettyKind::Markdown;
+        snapshot.reading_markdown_page = Some("Idle pretty build.".to_string());
+        snapshot.sentences = vec!["Idle pretty build.".to_string()];
+        snapshot.canonical_sentences = snapshot.sentences.clone();
+        snapshot.page_sentence_counts = vec![1];
+        let key = PrettyPageCacheKey {
+            source_path: snapshot.source_path.clone(),
+            page: 0,
+            pretty_kind: snapshot.pretty_kind,
+            text_only: false,
+        };
+        let (request_tx, result_rx) = {
+            let repaint_count = Arc::new(AtomicUsize::new(0));
+            let count_for_worker = Arc::clone(&repaint_count);
+            let notifier: RepaintNotifier = Arc::new(move || {
+                count_for_worker.fetch_add(1, Ordering::SeqCst);
+            });
+            let (request_tx, result_rx) = ui::reader::start_pretty_builder(notifier);
+            request_tx
+                .send(ui::reader::PrettyBuildRequest {
+                    key: key.clone(),
+                    snapshot,
+                })
+                .expect("send pretty build request");
+            wait_for_repaints(&repaint_count, 1);
+            (request_tx, result_rx)
+        };
+        let result = result_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("pretty build result should be published");
+        assert_eq!(result.key, key);
+        assert!(!result.blocks.is_empty());
+        drop(request_tx);
+    }
 
     #[test]
     fn close_book_handshake_waits_for_persistence_before_clearing() {
