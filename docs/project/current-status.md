@@ -1,8 +1,8 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-10 after director acceptance/integration of Goal 0009 A2.1 for focused real-desktop signoff.
+Updated: 2026-09-10 after Goal 0009 A2.1 real-desktop QA exposed a source-dependent text-only presentation defect.
 
-This file contains current verified/bounded state. Detailed historical correction lineage lives in `docs/work/reports/` and `docs/work/reviews/`.
+This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
 ## Workspace / architecture
 
@@ -28,61 +28,60 @@ Accepted runtime shape:
 
 `canonical display sentence -> backend synthesis -> prepared audio -> Rodio first-sample boundary -> canonical ReaderSession cursor -> native UI projection`
 
-Real Windows evidence proves audible Windows speech, Play/Pause, installed voice switching, and sentence-boundary-driven pretty synchronization.
+Real Windows evidence proves audible Windows speech, Play/Pause, ordinary installed voice switching, and sentence-boundary-driven pretty synchronization.
 
-## Goal 0008 / Gate 2.5 — Caliberate first-class library service
+## Goal 0008 / Gate 2.5 — Caliberate first-class reader integration
 
 **COMPLETE — AUTOMATED + REAL-DESKTOP ACCEPTED**
 
-The large real Caliberate EPUB opens quickly, remains responsive, speaks through Windows TTS, highlights the actually audible sentence in native pretty view, and follows playback correctly. Caliberate remains behind the existing provider/browser boundary and legacy Calibre compatibility remains available.
+The large real Caliberate EPUB opens quickly, remains responsive, speaks through Windows TTS, highlights the actually audible sentence in native pretty view, and follows playback correctly.
 
 ## Goal 0009 / Gate 2.6 — TTS playback polish and layered voice configuration
 
-**A2.1 ACCEPTED AND INTEGRATED — FOCUSED REAL-DESKTOP SIGNOFF PENDING**
+**A3 REOPENED — TEXT-ONLY PRESENTATION MUST BE DECOUPLED FROM TTS AUDIO PLAN**
 
-A1 real-desktop wins remain authoritative:
+Accepted/verified wins that remain authoritative:
 
-- sustained playback on the large EPUB had no unsolicited duplicate just-finished line reads;
-- pretty rendering remained responsive and its audible-sentence highlight + viewport follow were correct;
-- a new/unoverridden Windows book selected Zira;
-- an explicit Mark selection persisted across restart/reopen;
-- unavailable Piper produced an actionable missing-model failure without crashing.
+- pretty EPUB rendering and spoken-sentence synchronization remain spotlessly correct in the latest desktop pass;
+- sustained ordinary Windows playback no longer shows the prior unsolicited duplicate-line behavior;
+- a new/unoverridden Windows book resolves to Zira;
+- explicit per-book voice selection persists across reopen;
+- unavailable Piper is transactionally rejected;
+- A2.1 adds ordered Close book / Safe Quit lifecycle handshakes, stale-source rejection, and bounded diagnostics with green Windows CI `34532877674`.
 
-Accepted A2.1 implementation: `b5e348f06a1ff730d2363dc61bc4ac864d871f07`.
+A2.1 real desktop QA exposed a new source-dependent text-only failure:
 
-Accepted A2.1 worker terminal: `66091555e41f03fe2fbce049c8d773024af55425`.
+- `A General History and Collection of Voyages`: text-only shows no text and no highlight;
+- `Buffalo Bill`: text-only works correctly.
 
-Authoritative Windows CI: `34532877674` — both `native-workspace` and `hosted-renderer-probe` passed.
+Director code audit found the ownership defect: while text-only is active, `ReaderSession::current_sentences()` can populate visible rows from `ensure_current_plan(normalizer).audio_sentences`, and `current_highlight_idx()` can use `highlighted_audio_idx`. Visible document text therefore depends on a transient bounded synthesis-normalization plan.
 
-Director-accepted A2/A2.1 corrections:
+Goal 0009 A3 is reopened in `docs/work/ready/`. It must make text-only a canonical document presentation with exactly one row per canonical/display sentence, independent of TTS plan existence/chunking/backend state, while preserving canonical highlight/follow identity and all verified pretty/TTS/config/lifecycle behavior.
 
-- production text-only mode transition re-arms follow from the live canonical cursor and text-only row styling + scroll consume the same canonical projection;
-- page transitions refresh the low-frequency document projection only when lightweight playback actually changes page;
-- stale old-source playback events are rejected;
-- left TTS/settings panel is resizable and bounded to 240–460 px with wrapped long diagnostics;
-- persistent top-chrome Close book confirms before destruction and sequences TTS stop -> persistence -> CloseReaderSession -> Starter;
-- Safe Quit sequences TTS stop -> persistence terminal success -> one native `ViewportCommand::Close`; persistence failure leaves the app open;
-- failed Piper selection remains transactional and deterministic tests now prove immediate Windows Play plus first boundary/progress in the same ReaderSession;
-- A1 continuation/no-repeat, Zira inheritance, per-book voice override, and Goal 0008 synchronization regressions remain green.
+No human QA is requested until A3 passes director review.
 
-The acceptance record is `docs/work/reviews/0009-a2.1-director-acceptance.md`.
+## Caliberate catalog reliability
 
-One focused desktop pass still must confirm visible text-only selection/follow, panel containment, same-session Piper recovery, Close book, and actual Safe Quit behavior before Goal 0009 closes.
+**QUEUED AS GOAL 0010**
 
-## Non-PDF reader status
+Latest desktop QA also produced a separate provider failure: Caliberate book `42866` failed during materialization before reader open. Current diagnostics expose only the top-level `calibre_open_failed` / materialization message, so format/stage/transport detail remains insufficient.
 
-**PRETTY EPUB ACCEPTED; TEXT-ONLY/EXIT FIXES ACCEPTED FOR FINAL DESKTOP SIGNOFF**
+Catalog covers are also a separate provider problem: Caliberate catalog entries can show black placeholders before open, while Recents can display covers after the EPUB has been materialized and its embedded cover becomes locally available. Goal 0010 will address first-class lazy Caliberate covers plus actionable materialization diagnostics/recovery without bulk-fetching the ~100k catalog.
 
-TXT/Markdown/HTML/EPUB automated parity remains covered. The large real EPUB has strong evidence for responsive pretty rendering, stable Windows speech, no duplicate ordinary lines, accurate spoken-sentence highlight, and viewport follow. A2.1 now has deterministic coverage for the text-only transition/follow and exit lifecycles that were missing from A2.
+## Windows Natural/HD voices
+
+**QUEUED AS GOAL 0011**
+
+The user has installed additional Windows Natural voices such as Aria, Guy, and Jenny, but LanternLeaf's current `SpeechSynthesizer::AllVoices()` catalog does not surface them on this machine. Goal 0011 will first establish the supported Windows application API/capability boundary, then integrate supported Natural/HD voices if available without regressing the current WinRT voice backend. Do not change the user's default voice until requested.
 
 ## PDF
 
-**CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY WAITS FOR GOAL 0009 FINAL SIGNOFF**
+**CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY WAITS FOR GOAL 0009**
 
-Gate 3 native PDF visual stability remains next but is not authorized until Goal 0009 closes.
+Gate 3 native PDF visual stability remains future work and is not authorized while Goal 0009 A3 is active.
 
 ## Workflow status
 
 **MACRO-GOAL / MULTI-ATTEMPT PROTOCOL ACTIVE**
 
-Goal 0009 is integrated on `main` for focused human verification. Do not start another Codex Goal unless the real-desktop pass exposes a concrete remaining defect. If the pass succeeds, close Goal 0009 and authorize Gate 3 native PDF visual stability.
+Goal 0009 is the single authorized goal in `docs/work/ready/`. Continue the existing branch/report lineage as A3. Goals 0010 and 0011 are queued only. No PDF implementation is authorized yet.
