@@ -18,13 +18,13 @@ Full Piper model/catalog/downloader UX remains future work.
 
 ## P2 — Non-PDF reader/TTS
 
-**PRETTY EPUB PATH ACCEPTED; GOAL 0009 A2.1 REGRESSION PROOF OPEN**
+**PRETTY EPUB ACCEPTED; A2.1 TEXT-ONLY/EXIT FIXES ACCEPTED FOR DESKTOP SIGNOFF**
 
 - TXT/Markdown/HTML/EPUB automated parity is established;
 - native pretty rendering is bounded and responsive on the real large EPUB;
 - sustained A1 real-desktop playback had no duplicate ordinary line reads;
 - pretty spoken-sentence highlight and viewport follow remain accurate;
-- A2 contains a plausible text-only transition/follow repair, but its new regression still tests projection arithmetic rather than the real production mode-switch/follow lifecycle.
+- A2.1 now deterministically covers pretty->text-only mode transition, canonical selected-row/follow behavior across 48+ transitions/page changes, Pause retention, and return-to-pretty identity.
 
 ## P2.5 — First-class Caliberate service
 
@@ -34,36 +34,29 @@ Caliberate catalog/materialization/native EPUB/Windows TTS and synchronized pret
 
 ## P2.6 — Goal 0009: TTS playback polish + layered voice configuration
 
-**A2 REJECTED BEFORE HUMAN QA — A2.1 REQUIRED**
+**A2.1 ACCEPTED — FINAL FOCUSED REAL-DESKTOP SIGNOFF**
 
-A2 implementation: `e6bbc065462434950802818d0b4236464c244d5a`.
+Accepted A2.1 implementation: `b5e348f06a1ff730d2363dc61bc4ac864d871f07`.
 
-A2 terminal: `87ec9257948bbc8dff277c8a7d8c8b3d44ef3d31`.
+Accepted worker terminal: `66091555e41f03fe2fbce049c8d773024af55425`.
 
-A2 Windows CI: `34528119986` — green.
+Authoritative Windows CI: `34532877674` — green.
 
-Preserve A2 production work:
+Accepted automated behavior:
 
-- ordered Safe Quit persistence-terminal/native-close path;
-- persistent confirmed Close book lifecycle;
-- stale old-source playback filtering;
-- bounded/resizable 240–460 px side panel with wrapped diagnostics;
-- production-owned text-only canonical row projection and follow re-arm/page refresh.
+1. text-only selection and auto-follow share one canonical production projection and survive mode switch, 48+ cursor transitions, page transition, Pause, and return-to-pretty;
+2. 300+ character diagnostics retain full text under the production 460 px panel maximum;
+3. Close book is confirmation-first and persistence-gated before session destruction/Starter return;
+4. Safe Quit is persistence-gated and arms one native viewport close only on successful terminal persistence;
+5. stale old-source playback cannot mutate the newly active reader source;
+6. unavailable Piper is transactionally rejected and the same ReaderSession can immediately use Windows Play through a first boundary/progress signal;
+7. the A1 300-boundary no-repeat path, layered Zira/book voice behavior, and Goal 0008 synchronization remain green.
 
-A2.1 is narrowly about making the required evidence real and fixing anything those regressions expose:
-
-1. production pretty->text-only transition regression with selected-row styling + AutoScrollState pending/consume across 48+ boundaries, Pause, and a page transition;
-2. deterministic 300+ character diagnostic containment test against production panel/presentation policy;
-3. close-book lifecycle test covering active TTS, confirmation-before-destruction, persistence success/failure, Starter return, and stale-event isolation after a new source opens;
-4. Safe Quit persistence-terminal -> native-close handshake test, including the failure branch;
-5. failed Piper -> immediate Windows Play proof in the **same ReaderSession**, with actual playback/boundary evidence and no source reopen;
-6. preserve/re-run the existing no-repeat, pretty-sync, voice inheritance/persistence, Caliberate, workspace, Windows QA, Windows TTS probe, and renderer gates.
-
-No human QA until A2.1 receives director acceptance. Do not authorize PDF implementation first.
+One real-desktop signoff remains. Do not authorize PDF implementation until it passes.
 
 ## P3 — Native PDF visual stability
 
-**NEXT CORE PRODUCT GATE AFTER GOAL 0009; NOT AUTHORIZED YET**
+**NEXT CORE PRODUCT GATE AFTER GOAL 0009 FINAL SIGNOFF; NOT AUTHORIZED YET**
 
 - page raster/render ownership;
 - texture/cache lifecycle;

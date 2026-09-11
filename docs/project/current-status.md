@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-10 after director review of Goal 0009 A2.
+Updated: 2026-09-10 after director acceptance/integration of Goal 0009 A2.1 for focused real-desktop signoff.
 
 This file contains current verified/bounded state. Detailed historical correction lineage lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -38,9 +38,7 @@ The large real Caliberate EPUB opens quickly, remains responsive, speaks through
 
 ## Goal 0009 / Gate 2.6 — TTS playback polish and layered voice configuration
 
-**A2 IMPLEMENTATION DIRECTIONALLY GOOD; DIRECTOR REJECTED BEFORE HUMAN QA; A2.1 REQUIRED**
-
-A1 implementation: `52ae85dad02f2e5588c14d33817abf0c5db69916`.
+**A2.1 ACCEPTED AND INTEGRATED — FOCUSED REAL-DESKTOP SIGNOFF PENDING**
 
 A1 real-desktop wins remain authoritative:
 
@@ -50,39 +48,36 @@ A1 real-desktop wins remain authoritative:
 - an explicit Mark selection persisted across restart/reopen;
 - unavailable Piper produced an actionable missing-model failure without crashing.
 
-A2 implementation: `e6bbc065462434950802818d0b4236464c244d5a`.
+Accepted A2.1 implementation: `b5e348f06a1ff730d2363dc61bc4ac864d871f07`.
 
-A2 worker terminal: `87ec9257948bbc8dff277c8a7d8c8b3d44ef3d31`.
+Accepted A2.1 worker terminal: `66091555e41f03fe2fbce049c8d773024af55425`.
 
-A2 Windows CI: `34528119986` — both `native-workspace` and `hosted-renderer-probe` passed.
+Authoritative Windows CI: `34532877674` — both `native-workspace` and `hosted-renderer-probe` passed.
 
-Director-reviewed A2 production changes are promising and should be preserved:
+Director-accepted A2/A2.1 corrections:
 
-- Safe Quit now uses an ordered persistence-terminal -> egui native-close handshake rather than the old no-op/race;
-- persistent top-chrome `Close book` confirms before destruction and sequences TTS stop, persistence, session close, and Starter return;
-- stale playback events for a closed/different source are filtered;
-- left panel width is bounded/resizable and long TTS/voice diagnostics wrap;
-- text-only has a production-owned canonical row projection, mode-switch follow re-arming, and page-transition document refresh.
+- production text-only mode transition re-arms follow from the live canonical cursor and text-only row styling + scroll consume the same canonical projection;
+- page transitions refresh the low-frequency document projection only when lightweight playback actually changes page;
+- stale old-source playback events are rejected;
+- left TTS/settings panel is resizable and bounded to 240–460 px with wrapped long diagnostics;
+- persistent top-chrome Close book confirms before destruction and sequences TTS stop -> persistence -> CloseReaderSession -> Starter;
+- Safe Quit sequences TTS stop -> persistence terminal success -> one native `ViewportCommand::Close`; persistence failure leaves the app open;
+- failed Piper selection remains transactional and deterministic tests now prove immediate Windows Play plus first boundary/progress in the same ReaderSession;
+- A1 continuation/no-repeat, Zira inheritance, per-book voice override, and Goal 0008 synchronization regressions remain green.
 
-A2 is **not accepted** because the explicit regression gates that were designed to prevent another A1-style false positive are missing or incomplete:
+The acceptance record is `docs/work/reviews/0009-a2.1-director-acceptance.md`.
 
-- the new text-only test still proves only canonical->local arithmetic and does not exercise the real pretty->text-only transition, auto-scroll pending/consume lifecycle, subsequent SentenceStarted boundaries, Pause, or page transition;
-- no app-level close-book lifecycle + persistence failure + stale-next-book isolation regression was supplied;
-- Safe Quit has a planning test but no persistence-terminal -> native-close handshake regression;
-- the 300+ character diagnostic/panel-width containment regression is absent;
-- the existing failed-Piper test still stops after confirming backend remains Windows and never immediately calls Play/proves playback in the same ReaderSession.
-
-The A2.1 correction contract is recorded in `docs/work/reviews/0009-a2-director-rejection.md`. No human QA is requested yet.
+One focused desktop pass still must confirm visible text-only selection/follow, panel containment, same-session Piper recovery, Close book, and actual Safe Quit behavior before Goal 0009 closes.
 
 ## Non-PDF reader status
 
-**PRETTY EPUB PATH STRONG; TEXT-ONLY/EXIT RECOVERY A2.1 EVIDENCE OPEN**
+**PRETTY EPUB ACCEPTED; TEXT-ONLY/EXIT FIXES ACCEPTED FOR FINAL DESKTOP SIGNOFF**
 
-TXT/Markdown/HTML/EPUB automated parity remains covered. The real large EPUB has strong evidence for responsive pretty rendering, stable Windows speech, no duplicate ordinary lines, accurate spoken-sentence highlight, and viewport follow. A2 contains plausible fixes for the remaining text-only and exit UX defects, but they must be protected by the required production-lifecycle regressions before another desktop pass.
+TXT/Markdown/HTML/EPUB automated parity remains covered. The large real EPUB has strong evidence for responsive pretty rendering, stable Windows speech, no duplicate ordinary lines, accurate spoken-sentence highlight, and viewport follow. A2.1 now has deterministic coverage for the text-only transition/follow and exit lifecycles that were missing from A2.
 
 ## PDF
 
-**CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY WAITS FOR GOAL 0009**
+**CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY WAITS FOR GOAL 0009 FINAL SIGNOFF**
 
 Gate 3 native PDF visual stability remains next but is not authorized until Goal 0009 closes.
 
@@ -90,4 +85,4 @@ Gate 3 native PDF visual stability remains next but is not authorized until Goal
 
 **MACRO-GOAL / MULTI-ATTEMPT PROTOCOL ACTIVE**
 
-Goal 0009 remains the active repository macro-goal. A2 terminalized on the existing branch but failed director acceptance because required deterministic gates were omitted. Start a fresh Codex Goal session as A2.1 on the same Goal 0009 branch/report lineage, synchronize the latest director review from `main`, re-arm the watcher, and continue without human QA until director acceptance.
+Goal 0009 is integrated on `main` for focused human verification. Do not start another Codex Goal unless the real-desktop pass exposes a concrete remaining defect. If the pass succeeds, close Goal 0009 and authorize Gate 3 native PDF visual stability.
