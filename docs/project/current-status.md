@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-10 after Goal 0009 A2.1 real-desktop QA exposed a source-dependent text-only presentation defect.
+Updated: 2026-09-10 after Goal 0009 A3 canonical text-only correction director acceptance.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -38,50 +38,41 @@ The large real Caliberate EPUB opens quickly, remains responsive, speaks through
 
 ## Goal 0009 / Gate 2.6 — TTS playback polish and layered voice configuration
 
-**A3 REOPENED — TEXT-ONLY PRESENTATION MUST BE DECOUPLED FROM TTS AUDIO PLAN**
+**A3 ACCEPTED — FINAL REAL-DESKTOP TEXT-ONLY SIGNOFF PENDING**
 
-Accepted/verified wins that remain authoritative:
+Verified wins remain authoritative:
 
-- pretty EPUB rendering and spoken-sentence synchronization remain spotlessly correct in the latest desktop pass;
-- sustained ordinary Windows playback no longer shows the prior unsolicited duplicate-line behavior;
-- a new/unoverridden Windows book resolves to Zira;
-- explicit per-book voice selection persists across reopen;
+- pretty EPUB rendering and spoken-sentence synchronization are correct on the real large EPUB;
+- sustained ordinary Windows playback no longer shows the prior duplicate-line refill bug;
+- new/unoverridden Windows books resolve to Zira;
+- explicit per-book Windows voice selection persists across reopen;
 - unavailable Piper is transactionally rejected;
-- A2.1 adds ordered Close book / Safe Quit lifecycle handshakes, stale-source rejection, and bounded diagnostics with green Windows CI `34532877674`.
+- bounded diagnostics, persistent Close book, persistence-gated Safe Quit, and stale-source filtering are implemented and covered by green Windows CI.
 
-A2.1 real desktop QA exposed a new source-dependent text-only failure:
+A2.1 desktop QA exposed source-dependent text-only behavior: `A General History and Collection of Voyages` had no text/highlight while `Buffalo Bill` worked. A3 fixes the ownership defect: visible text-only rows now come from stable canonical/display document sentences, not `TtsNormalizationPlan.audio_sentences`; text-only row identity remains canonical/display-owned rather than `highlighted_audio_idx`; and snapshot/stats presentation no longer constructs a TTS plan merely to show document text.
 
-- `A General History and Collection of Voyages`: text-only shows no text and no highlight;
-- `Buffalo Bill`: text-only works correctly.
-
-Director code audit found the ownership defect: while text-only is active, `ReaderSession::current_sentences()` can populate visible rows from `ensure_current_plan(normalizer).audio_sentences`, and `current_highlight_idx()` can use `highlighted_audio_idx`. Visible document text therefore depends on a transient bounded synthesis-normalization plan.
-
-Goal 0009 A3 is reopened in `docs/work/ready/`. It must make text-only a canonical document presentation with exactly one row per canonical/display sentence, independent of TTS plan existence/chunking/backend state, while preserving canonical highlight/follow identity and all verified pretty/TTS/config/lifecycle behavior.
-
-No human QA is requested until A3 passes director review.
+A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` and Windows CI `34558938955` are accepted. Remaining evidence is one focused desktop pass on both real EPUBs plus a brief pretty-view sanity check.
 
 ## Caliberate catalog reliability
 
 **QUEUED AS GOAL 0010**
 
-Latest desktop QA also produced a separate provider failure: Caliberate book `42866` failed during materialization before reader open. Current diagnostics expose only the top-level `calibre_open_failed` / materialization message, so format/stage/transport detail remains insufficient.
-
-Catalog covers are also a separate provider problem: Caliberate catalog entries can show black placeholders before open, while Recents can display covers after the EPUB has been materialized and its embedded cover becomes locally available. Goal 0010 will address first-class lazy Caliberate covers plus actionable materialization diagnostics/recovery without bulk-fetching the ~100k catalog.
+A separate provider failure remains: Caliberate book `42866` failed during materialization before reader open, and provider/stage/format diagnostics are not yet rich enough. Catalog covers can also appear black before open while Recents display a cover after materialization. Goal 0010 owns first-class lazy catalog covers plus actionable materialization diagnostics/recovery without bulk-fetching the ~100k catalog.
 
 ## Windows Natural/HD voices
 
-**QUEUED AS GOAL 0011**
+**DEFERRED BY USER — DO NOT WORK ON OR TEST UNTIL RE-AUTHORIZED**
 
-The user has installed additional Windows Natural voices such as Aria, Guy, and Jenny, but LanternLeaf's current `SpeechSynthesizer::AllVoices()` catalog does not surface them on this machine. Goal 0011 will first establish the supported Windows application API/capability boundary, then integrate supported Natural/HD voices if available without regressing the current WinRT voice backend. Do not change the user's default voice until requested.
+Additional Windows Natural/Narrator voices such as Aria, Guy, and Jenny are being handled in another context. LanternLeaf should preserve the existing working Windows voice backend and ignore Natural/Narrator/HD capability work until the user explicitly reopens that surface. Goal 0011 remains queued/dormant only as a placeholder.
 
 ## PDF
 
-**CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY WAITS FOR GOAL 0009**
+**CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY WAITS FOR GOAL 0009 CLOSE**
 
-Gate 3 native PDF visual stability remains future work and is not authorized while Goal 0009 A3 is active.
+Gate 3 native PDF visual stability remains future work and is not authorized until Goal 0009 receives final real-desktop signoff.
 
 ## Workflow status
 
 **MACRO-GOAL / MULTI-ATTEMPT PROTOCOL ACTIVE**
 
-Goal 0009 is the single authorized goal in `docs/work/ready/`. Continue the existing branch/report lineage as A3. Goals 0010 and 0011 are queued only. No PDF implementation is authorized yet.
+Goal 0009 A3 is integrated and awaiting one human text-only signoff. Goal 0010 is queued. Goal 0011 is deferred by user. No PDF implementation is authorized yet.
