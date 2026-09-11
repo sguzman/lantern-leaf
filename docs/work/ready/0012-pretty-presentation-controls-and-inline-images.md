@@ -1,14 +1,37 @@
-# 0012 — A2 correction: async pretty/image worker wakeups
+# 0012 — A3 correction: synchronize director state and implement async wakeups
 
 ## Outcome
 
-Preserve the successful A1 presentation-controls and inline-image implementation while fixing the one director-blocking lifecycle defect: asynchronous pretty-build and image-decode completions must wake an otherwise idle native egui event loop so ready content appears without mouse/keyboard input or active TTS.
+Preserve the successful Goal 0012 presentation-controls and inline-image implementation while completing the one remaining director-blocking lifecycle correction: asynchronous pretty-build and image-decode completions must wake an otherwise idle native egui event loop so ready content appears without mouse/keyboard input or active TTS.
 
-## Starting evidence
+## Why A3 exists
 
-A1 implementation `03a315b61d9cf4449b2de94ed59c1287fd2efba0` plus fixup `b60f83b26e6579c99382c85049250d060748c1c4` is substantively aligned with Goal 0012 and Windows CI run `34628740493` is green.
+A1 (`03a315b61d9cf4449b2de94ed59c1287fd2efba0` + `b60f83b26e6579c99382c85049250d060748c1c4`) implemented the substantive presentation/image work and passed Windows CI `34628740493`.
 
-Accepted A1 work to preserve:
+Director review then reopened Goal 0012 as A2 with one narrow wakeup contract. The next worker attempt (`f952ad680040a625c8009f5a206709b9cf351562`, terminal `9d6c332b23430ebdde0710894163c9af1ea9ce2e`, Windows CI `34652876171`) did **not** synchronize the latest director state from `main`. It therefore terminalized against the stale original Goal 0012 contract and added useful evidence/normalization fixes without implementing the requested async wakeup correction.
+
+See:
+
+- `docs/work/reviews/0012-a1-director-rejection.md`
+- `docs/work/reviews/0012-a2-director-rejection.md`
+
+A3 is not a new product goal. It is the same Goal 0012 branch/report lineage with the workflow synchronization failure made explicit.
+
+## Mandatory first step — synchronize director state
+
+Before implementing anything:
+
+1. fetch current `main`;
+2. synchronize current director `main` into `codex/0012-pretty-presentation-controls-and-inline-images` by merge or rebase while preserving the A1 implementation and useful prior A2 additions;
+3. resolve the goal lifecycle files so **this A3 contract from current `main` is authoritative**;
+4. re-arm the Goal 0012 watcher;
+5. only then implement the correction below.
+
+Do not terminalize against the stale original `done/0012...` copy. Do not discard A1 merely because the branch diverged from `main`.
+
+## Accepted implementation to preserve
+
+Preserve the working Goal 0012 implementation unless a direct conflict requires a minimal adjustment:
 
 - native Presentation section separate from TTS;
 - live font family/weight/size, line spacing, margins, word/letter spacing, highlight colors, heading/base/paragraph/block/media controls;
@@ -20,108 +43,96 @@ Accepted A1 work to preserve:
 - bounded nonblocking image request queue;
 - disk read/image decode off the render thread;
 - bounded texture cache, transient negative cache, aspect-ratio/media sizing, visible failure placeholders;
+- useful A2 additions for normalized provenance lookup, UTF-8 percent decoding, query/fragment handling, production-chain EPUB coverage, and layered presentation-reset coverage;
 - all Goal 0008/0009 TTS and large-document regressions.
 
-Director rejection detail is recorded in `docs/work/reviews/0012-a1-director-rejection.md`.
-
-## Blocking defect
-
-A1's workers publish completion into channels but do not themselves wake egui.
+## Blocking lifecycle defect
 
 ### Image decode
 
-`PrettyImageCache::poll_ready()` calls `ctx.request_repaint()` only after a later frame has already begun and polled the result. `pretty_image_worker` has no `egui::Context` or equivalent repaint notifier.
+`PrettyImageCache::poll_ready()` can call `ctx.request_repaint()` only after a frame already exists and polls the result. Worker completion itself must create the future frame.
 
-When TTS is stopped and there is no user input, a completed decode is therefore not guaranteed to produce the frame needed to consume/upload it. A placeholder may remain until unrelated UI activity.
+A successful decode and a failed/corrupt decode must both wake egui after publishing their result.
 
 ### Pretty build
 
-`start_pretty_builder()` has the same lifecycle gap: the worker sends `PrettyBuildResult`, but does not request a repaint. An idle reader can remain on `Preparing pretty view…` until another event happens to create a frame.
+The pretty-build worker must wake egui after successfully publishing `PrettyBuildResult` so an idle reader cannot remain stuck on `Preparing pretty view…`.
 
-The global 24 ms repaint cadence is conditional on `tts_runtime.needs_repaint()` and cannot be used as the wakeup mechanism for independent presentation work.
+The TTS repaint cadence is not an acceptable substitute because Goal 0012 presentation work must complete correctly with TTS inactive.
 
-## Authorized A2 correction
+## Authorized A3 correction
 
 ### A — explicit completion wakeup
 
-Give both worker paths an explicit native-egui wakeup mechanism.
+Give both worker paths an explicit repaint notifier.
 
 Preferred shape:
 
-- clone `egui::Context` (or pass a narrow repaint callback/notifier) into the pretty-build worker and pretty-image worker;
-- after a result is successfully published to the result channel, call `request_repaint()` immediately;
-- image failures must wake the UI just like successful decodes so failure/placeholder state becomes current;
-- a pretty-build completion must wake the UI so the new blocks/targets are consumed promptly.
-
-The exact abstraction is flexible, but the semantic contract is not: **worker completion itself causes the future frame**.
+- clone `egui::Context` into the worker, or inject a narrow `RepaintNotifier`/callback abstraction;
+- after a result is successfully sent to the result channel, invoke repaint notification immediately;
+- image success and image failure both notify;
+- pretty-build completion notifies;
+- notification must happen from worker completion semantics, not from later receiver polling.
 
 ### B — preserve render-thread discipline
 
-Do not fix this by polling continuously or blocking the render thread.
+Do **not** fix this with continuous polling or a permanent high-frequency repaint loop.
 
 Preserve:
 
-- bounded `sync_channel` request queues;
-- `try_send`/nonblocking submission from egui;
+- bounded request queues;
+- nonblocking render-thread submission (`try_send` or equivalent);
 - no file reads on the render thread;
-- no image decode on the render thread;
+- no image decoding on the render thread;
 - no structured pretty parsing/alignment on the render thread;
-- lightweight result polling + egui texture upload only on the UI thread.
+- UI thread limited to lightweight result polling and egui texture upload.
 
-Do not create a permanent 24/60 Hz repaint loop merely to discover worker completions.
+### C — deterministic idle/TTS-off regressions
 
-### C — regression the idle-event-loop failure class
+Add production-adjacent tests or seams proving:
 
-Add deterministic production-adjacent tests/seams proving wakeup occurs independently of a later frame poll.
-
-At minimum prove:
-
-1. successful image worker completion publishes a result and emits one repaint notification;
+1. successful image worker completion publishes a result and emits repaint notification;
 2. failed/corrupt image worker completion publishes failure and emits repaint notification;
 3. pretty-build worker completion publishes blocks/targets and emits repaint notification;
-4. request queue full behavior remains nonblocking;
-5. no test satisfies the contract merely by calling `poll_ready()` and observing that *polling* requests another repaint;
-6. TTS does not need to be active for any of the above.
+4. request-queue-full behavior remains nonblocking;
+5. none of these tests relies on calling `poll_ready()` to create the repaint;
+6. TTS is inactive/unneeded for all completion-wakeup tests.
 
-A small injected `RepaintNotifier`/counter test seam is acceptable if direct `egui::Context` repaint observation is awkward.
-
-## Preserve A1 and prior goals
-
-A2 must not broaden into presentation redesign. Preserve all A1 behavior and all accepted Goal 0008/0009 behavior, including:
-
-- pretty/text-only audible sentence sync and follow;
-- no duplicate ordinary TTS lines;
-- Windows Zira/default/per-book voice behavior;
-- transactional Piper failure recovery;
-- close/safe-quit lifecycle;
-- bounded pretty virtualization;
-- presentation persistence/reset;
-- real EPUB image provenance/order/path containment;
-- lazy bounded image decode/cache;
-- inline image placeholders and sizing.
-
-Windows Natural/Narrator/HD voice work remains deferred. Goal 0010 Caliberate catalog covers and PDF work remain out of scope.
+A small injected repaint-counter/notifier seam is acceptable if direct `egui::Context` repaint observation is awkward.
 
 ## Acceptance gates
 
-1. Image success completion wakes egui from worker context/notifier, not from a later poll.
-2. Image failure completion also wakes egui.
-3. Pretty-build completion wakes egui.
-4. No continuous repaint loop is introduced as a workaround.
-5. Request submission remains bounded and nonblocking.
-6. Disk/decode/pretty-build heavy work remains off the render thread.
-7. Deterministic tests cover all three completion wakeup cases while TTS is inactive.
-8. All existing Goal 0012 A1 presentation/image tests remain green.
-9. All Goal 0008/0009 TTS/canonical sync regressions remain green.
-10. `cargo check --workspace`, repository-policy workspace tests, `git diff --check`, repo-native Windows QA preparation, Windows TTS probe, hosted renderer probe, and Windows CI pass.
-11. No human QA until director accepts A2.
+1. Worker branch is synchronized with current director `main` before implementation and uses this A3 contract.
+2. Image success completion wakes egui from worker completion semantics.
+3. Image failure completion wakes egui from worker completion semantics.
+4. Pretty-build completion wakes egui from worker completion semantics.
+5. No continuous repaint loop is introduced as a workaround.
+6. Request submission remains bounded and nonblocking.
+7. Disk/decode/pretty-build heavy work remains off the render thread.
+8. Deterministic idle/TTS-off tests cover all three completion wakeup cases.
+9. A1 presentation/image behavior and useful prior A2 evidence remain green.
+10. Goal 0008/0009 TTS/canonical sync regressions remain green.
+11. `cargo check --workspace`, repository-policy workspace tests, `git diff --check`, repo-native Windows QA preparation, Windows TTS probe, hosted renderer probe, and Windows CI pass.
+12. No human QA until director accepts A3.
+
+## Explicit non-goals
+
+Do not broaden this attempt into:
+
+- presentation redesign;
+- additional media-format work unrelated to the wakeup correction;
+- Caliberate catalog-cover work from Goal 0010;
+- Windows Natural/Narrator/HD voice work;
+- PDF work;
+- Piper model/catalog management;
+- a new UI architecture.
 
 ## Repository handoff
 
-Continue branch `codex/0012-pretty-presentation-controls-and-inline-images` and report `docs/work/reports/0012.md`.
+Continue branch `codex/0012-pretty-presentation-controls-and-inline-images` and existing report `docs/work/reports/0012.md`.
 
-Preserve the A1 implementation and append Attempt A2 to the existing report. Synchronize the latest director state from `main`, move this goal `ready -> active`, re-arm the Goal 0012 watcher, implement only this bounded correction, validate, terminalize `done` or `blocked`, push, signal terminal state, and restore the shared checkout to `main` without merging.
+Append **Attempt A3** to the report. Move this goal `ready -> active`, implement only this bounded correction, validate, terminalize `done` or `blocked`, push, signal terminal state, and restore the shared checkout to `main` without merging.
 
 ## Human verification
 
-None during A2. After director acceptance, one focused Windows desktop QA pass will verify presentation controls, persistence/reset, inline real-EPUB images while idle, and a short Goal 0009 TTS synchronization regression.
+None during A3. After director acceptance, one focused Windows desktop QA pass will verify live presentation controls, persistence/reset, inline real-EPUB images including idle appearance, and a short Goal 0009 TTS synchronization regression.
