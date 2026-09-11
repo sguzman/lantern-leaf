@@ -929,22 +929,22 @@ fn resolve_epub_reference_key(chapter_path: &Path, raw_reference: &str) -> Strin
 
 fn percent_decode_path(raw: &str) -> String {
     let bytes = raw.as_bytes();
-    let mut out = String::with_capacity(raw.len());
+    let mut out = Vec::with_capacity(raw.len());
     let mut index = 0usize;
     while index < bytes.len() {
         if bytes[index] == b'%' && index + 2 < bytes.len() {
             let hi = (bytes[index + 1] as char).to_digit(16);
             let lo = (bytes[index + 2] as char).to_digit(16);
             if let (Some(hi), Some(lo)) = (hi, lo) {
-                out.push((hi * 16 + lo) as u8 as char);
+                out.push((hi * 16 + lo) as u8);
                 index += 3;
                 continue;
             }
         }
-        out.push(bytes[index] as char);
+        out.push(bytes[index]);
         index += 1;
     }
-    out
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn normalize_markdown_image_target(raw: &str) -> Option<&str> {
@@ -1142,7 +1142,20 @@ mod tests {
             ],
         );
 
-        let images = collect_images(&path).expect("EPUB image fixture should load");
+        let loaded = load_book_content(&path).expect("EPUB image fixture should load");
+        let images = loaded.images;
+        let structured = loaded
+            .structured_document
+            .expect("EPUB fixture should retain structured provenance");
+        assert!(structured.blocks.iter().any(|block| block.kind == "img"));
+        assert!(structured
+            .sentences
+            .iter()
+            .any(|sentence| sentence.display_text == "Before PNG."));
+        assert!(structured
+            .sentences
+            .iter()
+            .any(|sentence| sentence.display_text == "Between."));
         assert_eq!(images.len(), 3, "each inline occurrence keeps its source position");
         assert_eq!(images[0].chapter_index, 0);
         assert_eq!(images[0].source_order, 0);

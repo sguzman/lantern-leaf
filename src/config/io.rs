@@ -117,7 +117,9 @@ fn normalize_config(mut cfg: AppConfig) -> AppConfig {
 #[cfg(test)]
 mod tests {
     use super::parse_config;
-    use crate::config::{AppConfig, BookReaderOverrides, TtsBackend};
+    use crate::config::{
+        AppConfig, BookReaderOverrides, FontFamily, PrettyUiConfig, TtsBackend,
+    };
 
     #[test]
     fn omitted_tts_backend_uses_platform_default() {
@@ -164,5 +166,47 @@ mod tests {
         assert!((effective.tts_speed - 3.25).abs() < f32::EPSILON);
         assert_eq!(effective.tts_model_path, base.tts_model_path);
         assert_eq!(effective.tts_threads, base.tts_threads);
+    }
+
+    #[test]
+    fn presentation_overrides_inherit_reset_and_leave_other_books_and_tts_alone() {
+        let mut app = AppConfig::default();
+        app.font_family = FontFamily::Serif;
+        app.margin_horizontal = 37;
+        app.pretty.base_font_scale = 1.25;
+
+        let book_a = BookReaderOverrides {
+            schema_version: BookReaderOverrides::SCHEMA_VERSION,
+            font_family: Some(FontFamily::Monospace),
+            margin_horizontal: Some(52),
+            pretty: Some(PrettyUiConfig {
+                base_font_scale: 1.6,
+                ..app.pretty
+            }),
+            tts_backend: Some(TtsBackend::Windows),
+            windows_voice_id: Some("book-a-voice".to_string()),
+            ..Default::default()
+        };
+
+        let mut effective_a = app.clone();
+        book_a.apply_to(&mut effective_a);
+        assert_eq!(effective_a.font_family, FontFamily::Monospace);
+        assert_eq!(effective_a.margin_horizontal, 52);
+        assert_eq!(effective_a.pretty.base_font_scale, 1.6);
+
+        let effective_b = app.clone();
+        assert_eq!(effective_b.font_family, FontFamily::Serif);
+        assert_eq!(effective_b.margin_horizontal, 37);
+        assert_eq!(effective_b.pretty.base_font_scale, 1.25);
+
+        let mut reset = book_a;
+        reset.clear_presentation();
+        let mut effective_reset = app.clone();
+        reset.apply_to(&mut effective_reset);
+        assert_eq!(effective_reset.font_family, FontFamily::Serif);
+        assert_eq!(effective_reset.margin_horizontal, 37);
+        assert_eq!(effective_reset.pretty.base_font_scale, 1.25);
+        assert_eq!(effective_reset.tts_backend, TtsBackend::Windows);
+        assert_eq!(effective_reset.windows_voice_id.as_deref(), Some("book-a-voice"));
     }
 }

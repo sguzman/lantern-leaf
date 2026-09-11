@@ -107,6 +107,7 @@ pub fn resolve_image_path(src_raw: &str, images: &[ReaderImageRef]) -> Option<Pa
             || img.local_path == src_raw
             || normalize_image_key(&img.raw_path) == requested
             || normalize_image_key(&img.local_path) == requested
+            || normalize_image_key(&img.normalized_path) == requested
             || img.aliases.iter().any(|alias| normalize_image_key(alias) == requested)
     }) {
         return Some(PathBuf::from(&found.local_path));
@@ -115,7 +116,8 @@ pub fn resolve_image_path(src_raw: &str, images: &[ReaderImageRef]) -> Option<Pa
 }
 
 fn normalize_image_key(raw: &str) -> String {
-    let decoded = percent_decode_image_ref(raw);
+    let reference = raw.split(|character| character == '#' || character == '?').next().unwrap_or(raw);
+    let decoded = percent_decode_image_ref(reference);
     let mut components = Vec::new();
     for component in decoded.trim().replace('\\', "/").split('/') {
         match component {
@@ -130,7 +132,7 @@ fn normalize_image_key(raw: &str) -> String {
 }
 
 fn percent_decode_image_ref(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
+    let mut out = Vec::with_capacity(raw.len());
     let bytes = raw.as_bytes();
     let mut index = 0usize;
     while index < bytes.len() {
@@ -139,15 +141,15 @@ fn percent_decode_image_ref(raw: &str) -> String {
                 (bytes[index + 1] as char).to_digit(16),
                 (bytes[index + 2] as char).to_digit(16),
             ) {
-                out.push((hi * 16 + lo) as u8 as char);
+                out.push((hi * 16 + lo) as u8);
                 index += 3;
                 continue;
             }
         }
-        out.push(bytes[index] as char);
+        out.push(bytes[index]);
         index += 1;
     }
-    out
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 pub fn link_color32(link: config::HighlightColor) -> Color32 {
@@ -1835,6 +1837,27 @@ Paragraph with *italics* and **bold**, `code`, ~~strike~~.
         assert!(image.missing);
         assert_eq!(image.alt.as_deref(), Some("Cover art"));
         assert!(resolve_image_path("../Images/missing%20cover.png", &[]).is_none());
+    }
+
+    #[test]
+    fn image_resolution_discards_fragments_queries_and_uses_normalized_provenance() {
+        let images = [ReaderImageRef {
+            raw_path: "OEBPS/Images/cover.png".to_string(),
+            local_path: "C:/cache/cover.png".to_string(),
+            aliases: vec!["images/cover.png".to_string()],
+            normalized_path: "oebps/images/cover.png".to_string(),
+            chapter_index: 1,
+            source_order: 2,
+            alt: Some("Cover".to_string()),
+        }];
+        assert_eq!(
+            resolve_image_path("../Images/cover.png?size=large#top", &images),
+            Some(PathBuf::from("C:/cache/cover.png"))
+        );
+        assert_eq!(
+            resolve_image_path("OEBPS/Images/cover.png#top", &images),
+            Some(PathBuf::from("C:/cache/cover.png"))
+        );
     }
 
     #[test]
