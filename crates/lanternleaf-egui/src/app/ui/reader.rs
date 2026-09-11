@@ -17,7 +17,7 @@ use crate::app::{
     text_only_mode_transition,
 };
 use crate::pretty::{
-    PrettyBlock, PrettyBlockKind, PrettyPageCacheKey, PrettySpan, PrettyStyle,
+    PrettyBlock, PrettyBlockKind, PrettyPageCacheKey, PrettySourceKind, PrettySpan, PrettyStyle,
     clamp_image_size, font_id_for, html_to_blocks, markdown_to_blocks, structured_to_blocks,
 };
 
