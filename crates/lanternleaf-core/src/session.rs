@@ -1224,10 +1224,8 @@ impl ReaderSession {
         };
         let tts_current_sentence_text = tts
             .current_sentence_idx
-            .and_then(|audio_idx| {
-                let audio_sentences = self.current_audio_sentences(normalizer);
-                audio_sentences.get(audio_idx).cloned()
-            })
+            .and_then(|audio_idx| self.current_plan.as_ref()?.audio_sentences.get(audio_idx))
+            .cloned()
             .filter(|value| !value.trim().is_empty());
         let source_is_pdf = self
             .source_path
@@ -1331,17 +1329,7 @@ impl ReaderSession {
         self.apply_selected_match_as_highlight(normalizer);
     }
 
-    fn current_sentences(&mut self, normalizer: &normalizer::TextNormalizer) -> Vec<String> {
-        if self.text_only_mode {
-            if self.config.text_only_show_original_text {
-                return self
-                    .raw_page_sentences
-                    .get(self.current_page)
-                    .cloned()
-                    .unwrap_or_default();
-            }
-            return self.ensure_current_plan(normalizer).audio_sentences;
-        }
+    fn current_sentences(&self, _normalizer: &normalizer::TextNormalizer) -> Vec<String> {
         self.raw_page_sentences
             .get(self.current_page)
             .cloned()
@@ -1492,14 +1480,7 @@ impl ReaderSession {
     }
 
     fn current_highlight_idx(&self) -> Option<usize> {
-        if self.text_only_mode {
-            if self.config.text_only_show_original_text {
-                return self.highlighted_display_idx;
-            }
-            self.highlighted_audio_idx
-        } else {
-            self.highlighted_display_idx
-        }
+        self.highlighted_display_idx
     }
 
     fn global_display_idx(&self) -> Option<usize> {
@@ -1531,8 +1512,8 @@ impl ReaderSession {
         normalizer: &normalizer::TextNormalizer,
         progress_pct: f64,
     ) -> ReaderTtsView {
-        let plan_ready = self.tts_state != TtsPlaybackState::Idle
-            || self.current_plan_page == Some(self.current_page);
+        let plan_ready =
+            self.current_plan_page == Some(self.current_page) && self.current_plan.is_some();
         let sentence_count = if plan_ready {
             self.current_audio_sentences(normalizer).len()
         } else {
@@ -1635,7 +1616,7 @@ impl ReaderSession {
         self.sentence_click(sentence_idx, normalizer);
     }
 
-    fn stats(&mut self, normalizer: &normalizer::TextNormalizer) -> ReaderStats {
+    fn stats(&mut self, _normalizer: &normalizer::TextNormalizer) -> ReaderStats {
         let page_word_count = self
             .page_word_counts
             .get(self.current_page)
@@ -1656,29 +1637,16 @@ impl ReaderSession {
         let sentences_up_to_page_end = sentences_before_page + page_sentence_count;
         let total_words = self.page_word_counts.iter().sum::<usize>().max(1);
 
+        let count = page_sentence_count;
+        let idx = self.highlighted_display_idx.unwrap_or(0);
+        let clamped_idx = idx.min(count.saturating_sub(1));
+        let fraction = if count == 0 {
+            0.0
+        } else {
+            (clamped_idx + 1) as f64 / count as f64
+        };
         let (progress_fraction, sentence_progress_count, sentence_progress_total) =
-            if self.text_only_mode {
-                let plan = self.ensure_current_plan(normalizer);
-                let count = plan.audio_sentences.len();
-                let idx = self.highlighted_audio_idx.unwrap_or(0);
-                let clamped_idx = idx.min(count.saturating_sub(1));
-                let fraction = if count == 0 {
-                    0.0
-                } else {
-                    (clamped_idx + 1) as f64 / count as f64
-                };
-                (fraction, clamped_idx + 1, count)
-            } else {
-                let count = page_sentence_count;
-                let idx = self.highlighted_display_idx.unwrap_or(0);
-                let clamped_idx = idx.min(count.saturating_sub(1));
-                let fraction = if count == 0 {
-                    0.0
-                } else {
-                    (clamped_idx + 1) as f64 / count as f64
-                };
-                (fraction, clamped_idx + 1, count)
-            };
+            (fraction, clamped_idx + 1, count);
 
         let tts_progress_pct = progress_fraction * 100.0;
         let words_up_to_current_position =
@@ -2205,25 +2173,26 @@ mod tests {
     }
 
     #[test]
-    fn text_only_sentence_click_uses_audio_index_mapping() {
+    fn text_only_sentence_click_targets_one_canonical_row_with_audio_mapping() {
         let normalizer = normalizer::TextNormalizer::default();
         let mut session = build_test_session(&[&[
             r#"In the word lists of Cheshire, Derbyshire, Lancashire and Yorkshire we find the following terms, all of which took root in the Delaware Valley: abide as in cannot abide it, all out for entirely, apple-pie order to mean very good order, bamboozle for deceive, black and white for writing, blather for empty talk, boggle for take fright, brat for child, budge for move, burying for funeral, by golly as an expletive, by gum for another expletive."#,
         ]]);
         session.tts_state = TtsPlaybackState::Paused;
         session.toggle_text_only(&normalizer);
-        let audio_count = session.current_sentences(&normalizer).len();
+        let canonical_count = session.current_sentences(&normalizer).len();
+        let audio_count = session.current_audio_sentences(&normalizer).len();
+        assert_eq!(canonical_count, 1);
         assert!(
             audio_count > 1,
             "expected long sentence to split into multiple audio chunks"
         );
 
-        let target_audio_idx = audio_count - 1;
-        session.sentence_click(target_audio_idx, &normalizer);
+        session.sentence_click(0, &normalizer);
 
-        assert_eq!(session.highlighted_audio_idx, Some(target_audio_idx));
+        assert_eq!(session.highlighted_audio_idx, Some(0));
         assert_eq!(session.highlighted_display_idx, Some(0));
-        assert_eq!(session.current_highlight_idx(), Some(target_audio_idx));
+        assert_eq!(session.current_highlight_idx(), Some(0));
         assert_eq!(session.tts_state, TtsPlaybackState::Paused);
     }
 
@@ -2400,7 +2369,7 @@ mod tests {
     }
 
     #[test]
-    fn text_only_original_text_changes_display_but_not_tts_audio_plan() {
+    fn text_only_rows_remain_canonical_while_audio_plan_normalizes_separately() {
         let normalizer = normalizer::TextNormalizer::default();
         let mut session = build_test_session(&[&[
             "This claim remains disputed1.",
@@ -2408,7 +2377,7 @@ mod tests {
         ]]);
 
         session.toggle_text_only(&normalizer);
-        let normalized_sentences = session.current_sentences(&normalizer);
+        let canonical_sentences = session.current_sentences(&normalizer);
         let audio_sentences = session.current_audio_sentences(&normalizer);
 
         session.apply_settings_patch(
@@ -2439,7 +2408,7 @@ mod tests {
         let original_display_sentences = session.current_sentences(&normalizer);
         let audio_sentences_after = session.current_audio_sentences(&normalizer);
 
-        assert_ne!(normalized_sentences, original_display_sentences);
+        assert_eq!(canonical_sentences, original_display_sentences);
         assert_eq!(audio_sentences, audio_sentences_after);
         assert_eq!(
             original_display_sentences,
@@ -2447,6 +2416,87 @@ mod tests {
                 "This claim remains disputed1.".to_string(),
                 "The next sentence still aligns.".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn text_only_projection_is_source_stable_without_a_tts_plan() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let straightforward = vec![
+            "A straightforward canonical sentence.".to_string(),
+            "The second sentence remains one visible row.".to_string(),
+        ];
+        let awkward = vec![
+            "[123]".to_string(),
+            format!(
+                "An archaic, metadata-heavy passage deliberately crosses the audio chunk limit
+                 while remaining one canonical display sentence for the reader. {}",
+                "The inherited marginal annotation remains source-born and stable. ".repeat(12)
+            )
+            .replace('\n', " "),
+        ];
+        let mut session = ReaderSession::from_pages_for_test(
+            PathBuf::from("/tmp/goal-0009-a3-source-shaped.epub"),
+            "goal-0009-a3-source-shaped.epub".to_string(),
+            vec![straightforward.join(" "), awkward.join(" ")],
+            vec![straightforward.clone(), awkward.clone()],
+        );
+        session.text_only_mode = true;
+        session.tts_state = TtsPlaybackState::Idle;
+        session.highlighted_display_idx = Some(0);
+        session.highlighted_canonical_idx = Some(0);
+
+        let first = session.snapshot(PanelState::default(), &normalizer);
+        assert!(session.current_plan.is_none());
+        assert_eq!(first.sentences, straightforward);
+        assert_eq!(first.sentences.len(), first.page_sentence_counts[0]);
+        assert_eq!(first.highlighted_sentence_idx, Some(0));
+
+        session.current_page = 1;
+        session.highlighted_display_idx = Some(0);
+        session.highlighted_canonical_idx = Some(straightforward.len());
+        let second = session.snapshot(PanelState::default(), &normalizer);
+        assert!(session.current_plan.is_none());
+        assert_eq!(second.sentences, awkward);
+        assert_eq!(second.sentences.len(), second.page_sentence_counts[1]);
+        assert_eq!(second.highlighted_sentence_idx, Some(0));
+
+        let audio_plan = normalizer.plan_page(&awkward);
+        assert!(
+            audio_plan.audio_sentences.len() != awkward.len(),
+            "fixture must exercise a different audio cardinality"
+        );
+        assert!(
+            audio_plan.audio_to_display.iter().any(|idx| *idx == 1)
+                || audio_plan.display_to_audio.iter().any(Option::is_none),
+            "fixture must exercise zero or multiple audio ownership"
+        );
+
+        session.current_plan = Some(audio_plan);
+        let replaced = session.snapshot(PanelState::default(), &normalizer);
+        assert_eq!(replaced.sentences, awkward);
+        assert_eq!(replaced.sentences.len(), awkward.len());
+
+        session.current_plan = None;
+        session.current_plan_page = None;
+        session.tts_state = TtsPlaybackState::Paused;
+        let paused_without_plan = session.snapshot(PanelState::default(), &normalizer);
+        assert!(session.current_plan.is_none());
+        assert_eq!(paused_without_plan.sentences, awkward);
+
+        session.tts_state = TtsPlaybackState::Idle;
+        session.tts_play(&normalizer);
+        assert_eq!(session.tts_state, TtsPlaybackState::Playing);
+        session.tts_pause();
+        let paused = session.snapshot(PanelState::default(), &normalizer);
+        assert_eq!(paused.sentences, awkward);
+        session.tts_play(&normalizer);
+        assert_eq!(session.tts_state, TtsPlaybackState::Playing);
+        session.toggle_text_only(&normalizer);
+        assert!(!session.text_only_mode);
+        assert_eq!(
+            session.current_highlight_idx(),
+            session.highlighted_display_idx
         );
     }
 
