@@ -16,14 +16,14 @@ Canonical reader/session semantics are backend-neutral; ordinary WinRT Windows v
 
 ## P2 — Non-PDF reader/TTS
 
-**PRETTY EPUB ACCEPTED; GOAL 0009 A3 AUTOMATED ACCEPTED, FINAL TEXT-ONLY DESKTOP SIGNOFF PENDING**
+**GOALS 0008 + 0009 COMPLETE**
 
 - TXT/Markdown/HTML/EPUB ingestion/parity remains covered;
-- native pretty rendering is bounded, responsive, and sentence-synchronized on the real large EPUB;
-- ordinary Windows TTS no longer shows the prior duplicate-line refill bug in desktop QA;
-- A3 decouples text-only visible rows from transient TTS audio-plan ownership;
-- text-only row/highlight semantics are now canonical/display-owned regardless of zero/one/many audio chunks or plan availability;
-- final evidence is the same two real EPUBs that previously disagreed.
+- native pretty rendering is bounded and responsive;
+- pretty and text-only spoken-sentence highlight/follow are accepted on real EPUBs;
+- ordinary Windows TTS no longer shows the prior duplicate-line refill bug;
+- app-level Zira preference and per-book voice overrides work;
+- TTS/audio normalization no longer owns text-only document presentation.
 
 ## P2.5 — First-class Caliberate reader integration
 
@@ -33,45 +33,50 @@ Caliberate catalog/materialization/native EPUB/Windows TTS and synchronized pret
 
 ## P2.6 — Goal 0009: TTS playback polish + layered voice configuration
 
-**A3 ACCEPTED — HUMAN SIGNOFF PENDING**
+**COMPLETE — AUTOMATED + REAL-DESKTOP ACCEPTED**
 
-A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558938955` is director-accepted.
+A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558938955` is final accepted evidence. Both `A General History and Collection of Voyages` and `Buffalo Bill` now have correct text-only rendering, highlight, and follow, while pretty synchronization remains correct.
 
-Final human check:
+## P2.7 — Goal 0012: pretty presentation controls + inline images
 
-1. `A General History and Collection of Voyages`: text-only contains text immediately and highlights/follows spoken canonical sentences;
-2. `Buffalo Bill`: previously working text-only behavior remains working;
-3. a short pretty-view playback sanity check remains correct.
+**READY / ACTIVE PRIORITY — SINGLE AUTHORIZED GOAL**
 
-If those pass, close Goal 0009.
+Goal 0012 must:
 
-## P2.7 — Goal 0010: Caliberate catalog covers + provider availability UX
+1. restore a discoverable native-egui Presentation settings surface separate from TTS controls;
+2. wire existing font family/weight/size, line spacing, margins, word spacing, letter spacing, highlight/pretty settings into actual native rendering rather than exposing no-op controls;
+3. persist presentation changes through existing app-default -> per-book override layering;
+4. repair embedded EPUB image provenance/reference resolution and render images inline at the correct source position;
+5. keep image file I/O and decode work lazy, bounded, cached, and **off the GUI/render thread**;
+6. add a real EPUB fixture with nested/relative image paths, PNG/JPEG assets, text around images, and canonical identity assertions;
+7. preserve Goal 0008/0009 TTS, pretty/text-only synchronization, and large-document responsiveness.
 
-**QUEUED — NEXT CANDIDATE AFTER GOAL 0009 CLOSES**
+No human QA until director review accepts Goal 0012 implementation.
+
+## P2.8 — Goal 0010: Caliberate catalog covers + provider availability UX
+
+**QUEUED — NOT ACTIVE**
 
 Corrected evidence: the earlier `42866` open failure occurred while Caliberate itself was not running. Do not treat that incident as evidence of a LanternLeaf materialization/format bug.
 
-Goal 0010 should:
+Goal 0010 remains about:
 
-- distinguish provider-unavailable/connection failure from book/content failure;
-- recover cleanly once Caliberate returns;
-- add a first-class Caliberate cover contract if the server lacks one rather than probing invented legacy routes;
-- load covers lazily for visible rows, off the GUI thread, with bounded concurrency/cache;
-- never download/materialize all ~100k books or full EPUBs just for thumbnails;
-- make catalog covers available before a book has been opened while preserving Recents/local cover fallback;
-- replace unexplained black rectangles with intentional loading/no-cover/provider-error states.
+- distinguishing provider unavailable from book/content failure;
+- first-class lazy Caliberate catalog covers;
+- bounded off-GUI-thread cover loading for visible rows;
+- covers before first book open/materialization;
+- preserving Recents/local cover fallback;
+- replacing unexplained black rectangles with intentional loading/no-cover/provider-error states.
 
-Materialization hardening/format fallback is **not** authorized merely because of the withdrawn offline-provider incident.
-
-## P2.8 — Goal 0011: Windows Natural/HD voice capability
+## P2.9 — Goal 0011: Windows Natural/HD voice capability
 
 **DEFERRED BY USER — DORMANT UNTIL EXPLICITLY RE-AUTHORIZED**
 
-Do not investigate, implement, or test Natural/Narrator/HD voices for now. Preserve the existing ordinary Windows voice backend and current Zira/per-book override behavior. The user will explicitly notify the project when this surface is ready to resume.
+Do not investigate, implement, or test Natural/Narrator/HD voices for now. Preserve the existing ordinary Windows voice backend and current Zira/per-book override behavior.
 
 ## P3 — Native PDF visual stability
 
-**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED UNTIL GOAL 0009 CLOSES**
+**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED DURING GOAL 0012**
 
 - page raster/render ownership;
 - texture/cache lifecycle;
