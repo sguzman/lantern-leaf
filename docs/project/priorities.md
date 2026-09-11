@@ -35,38 +35,32 @@ Caliberate catalog/materialization/native EPUB/Windows TTS and synchronized pret
 
 **COMPLETE — AUTOMATED + REAL-DESKTOP ACCEPTED**
 
-A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558938955` is final accepted evidence. Both `A General History and Collection of Voyages` and `Buffalo Bill` now have correct text-only rendering, highlight, and follow, while pretty synchronization remains correct.
+A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558938955` is final accepted evidence.
 
 ## P2.7 — Goal 0012: pretty presentation controls + inline images
 
-**READY / ACTIVE PRIORITY — SINGLE AUTHORIZED GOAL**
+**A2 REJECTED; A3 ASYNC WAKEUP CORRECTION IS THE SINGLE AUTHORIZED GOAL**
 
-Goal 0012 must:
+A1 already provides the desired native Presentation controls, app/book persistence/reset, safe EPUB image provenance/resolution, lazy bounded off-render-thread image decode, placeholders, aspect-ratio/media limits, and generated EPUB regressions. Its Windows CI is green.
 
-1. restore a discoverable native-egui Presentation settings surface separate from TTS controls;
-2. wire existing font family/weight/size, line spacing, margins, word spacing, letter spacing, highlight/pretty settings into actual native rendering rather than exposing no-op controls;
-3. persist presentation changes through existing app-default -> per-book override layering;
-4. repair embedded EPUB image provenance/reference resolution and render images inline at the correct source position;
-5. keep image file I/O and decode work lazy, bounded, cached, and **off the GUI/render thread**;
-6. add a real EPUB fixture with nested/relative image paths, PNG/JPEG assets, text around images, and canonical identity assertions;
-7. preserve Goal 0008/0009 TTS, pretty/text-only synchronization, and large-document responsiveness.
+The next worker attempt also passed Windows CI and added useful normalized image-reference/provenance and layered-persistence coverage, but it did not synchronize the current director state from `main`; it executed the stale original Goal 0012 contract instead of the authorized async-wakeup correction.
 
-No human QA until director review accepts Goal 0012 implementation.
+A3 must only:
+
+1. synchronize latest director `main` into the existing Goal 0012 worker branch before implementation, preserving A1 and useful prior additions;
+2. give pretty-build completion an explicit repaint wakeup;
+3. give successful and failed image-decode completion an explicit repaint wakeup;
+4. prove those notifications happen while TTS is inactive and independently of later receiver polling;
+5. preserve bounded/nonblocking queues and all heavy work off the render thread;
+6. preserve all A1 presentation/image behavior and Goal 0008/0009 regressions.
+
+No human QA until director accepts A3.
 
 ## P2.8 — Goal 0010: Caliberate catalog covers + provider availability UX
 
 **QUEUED — NOT ACTIVE**
 
-Corrected evidence: the earlier `42866` open failure occurred while Caliberate itself was not running. Do not treat that incident as evidence of a LanternLeaf materialization/format bug.
-
-Goal 0010 remains about:
-
-- distinguishing provider unavailable from book/content failure;
-- first-class lazy Caliberate catalog covers;
-- bounded off-GUI-thread cover loading for visible rows;
-- covers before first book open/materialization;
-- preserving Recents/local cover fallback;
-- replacing unexplained black rectangles with intentional loading/no-cover/provider-error states.
+Goal 0010 remains about provider-unavailable classification, first-class lazy catalog covers, bounded off-GUI-thread visible-row loading, covers before first open/materialization, Recents/local fallback, and intentional loading/no-cover/provider-error states.
 
 ## P2.9 — Goal 0011: Windows Natural/HD voice capability
 
