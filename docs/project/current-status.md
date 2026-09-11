@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-10 after Goal 0009 A3 canonical text-only correction director acceptance.
+Updated: 2026-09-10 after Goal 0009 A3 canonical text-only correction director acceptance and correction of the Caliberate-offline QA interpretation.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -53,11 +53,13 @@ A2.1 desktop QA exposed source-dependent text-only behavior: `A General History 
 
 A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` and Windows CI `34558938955` are accepted. Remaining evidence is one focused desktop pass on both real EPUBs plus a brief pretty-view sanity check.
 
-## Caliberate catalog reliability
+## Caliberate catalog covers / availability UX
 
 **QUEUED AS GOAL 0010**
 
-A separate provider failure remains: Caliberate book `42866` failed during materialization before reader open, and provider/stage/format diagnostics are not yet rich enough. Catalog covers can also appear black before open while Recents display a cover after materialization. Goal 0010 owns first-class lazy catalog covers plus actionable materialization diagnostics/recovery without bulk-fetching the ~100k catalog.
+A prior desktop attempt appeared to show Caliberate book `42866` failing during materialization, but the user later clarified that Caliberate was not running at the time. That incident is withdrawn as evidence of a LanternLeaf materialization/format defect.
+
+The remaining real catalog issue is cover availability: main catalog entries can appear as black placeholders before open, while Recents can display real covers after local materialization. Goal 0010 is narrowed to first-class lazy catalog covers plus clear provider-unavailable/cover-loading/no-cover states. It must not invent materialization hardening based on the withdrawn offline-provider incident.
 
 ## Windows Natural/HD voices
 
@@ -75,4 +77,4 @@ Gate 3 native PDF visual stability remains future work and is not authorized unt
 
 **MACRO-GOAL / MULTI-ATTEMPT PROTOCOL ACTIVE**
 
-Goal 0009 A3 is integrated and awaiting one human text-only signoff. Goal 0010 is queued. Goal 0011 is deferred by user. No PDF implementation is authorized yet.
+Goal 0009 A3 is integrated and awaiting one human text-only signoff. Goal 0010 is queued in narrowed cover/provider-availability form. Goal 0011 is deferred by user. No PDF implementation is authorized yet.
