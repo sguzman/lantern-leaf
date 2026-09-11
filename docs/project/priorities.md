@@ -45,17 +45,23 @@ Final human check:
 
 If those pass, close Goal 0009.
 
-## P2.7 — Goal 0010: Caliberate catalog reliability
+## P2.7 — Goal 0010: Caliberate catalog covers + provider availability UX
 
 **QUEUED — NEXT CANDIDATE AFTER GOAL 0009 CLOSES**
 
-- preserve full provider/stage/format/root-cause diagnostics when materialization fails;
-- deterministic fallback only among explicitly advertised supported formats;
-- recover cleanly from SourceError;
+Corrected evidence: the earlier `42866` open failure occurred while Caliberate itself was not running. Do not treat that incident as evidence of a LanternLeaf materialization/format bug.
+
+Goal 0010 should:
+
+- distinguish provider-unavailable/connection failure from book/content failure;
+- recover cleanly once Caliberate returns;
 - add a first-class Caliberate cover contract if the server lacks one rather than probing invented legacy routes;
 - load covers lazily for visible rows, off the GUI thread, with bounded concurrency/cache;
 - never download/materialize all ~100k books or full EPUBs just for thumbnails;
-- make catalog covers available before a book has been opened while preserving Recents/local cover fallback.
+- make catalog covers available before a book has been opened while preserving Recents/local cover fallback;
+- replace unexplained black rectangles with intentional loading/no-cover/provider-error states.
+
+Materialization hardening/format fallback is **not** authorized merely because of the withdrawn offline-provider incident.
 
 ## P2.8 — Goal 0011: Windows Natural/HD voice capability
 
