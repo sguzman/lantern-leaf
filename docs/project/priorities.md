@@ -39,21 +39,22 @@ A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558
 
 ## P2.7 — Goal 0012: pretty presentation controls + inline images
 
-**A1 SUBSTANTIVELY GOOD; A2 ASYNC WAKEUP CORRECTION IS THE SINGLE AUTHORIZED GOAL**
+**A2 REJECTED; A3 ASYNC WAKEUP CORRECTION IS THE SINGLE AUTHORIZED GOAL**
 
 A1 already provides the desired native Presentation controls, app/book persistence/reset, safe EPUB image provenance/resolution, lazy bounded off-render-thread image decode, placeholders, aspect-ratio/media limits, and generated EPUB regressions. Its Windows CI is green.
 
-Director review found one acceptance blocker: pretty-build and image-decode worker completion does not itself wake egui. Receiver-side `request_repaint()` happens only after another frame exists, so an idle reader can remain on stale placeholder/`Preparing pretty view…` content until unrelated UI/TTS activity.
+The next worker attempt also passed Windows CI and added useful normalized image-reference/provenance and layered-persistence coverage, but it did not synchronize the current director state from `main`; it executed the stale original Goal 0012 contract instead of the authorized async-wakeup correction.
 
-A2 must only:
+A3 must only:
 
-1. give pretty-build completion an explicit repaint wakeup;
-2. give successful and failed image-decode completion an explicit repaint wakeup;
-3. prove those notifications happen while TTS is inactive and independently of later receiver polling;
-4. preserve bounded/nonblocking queues and all heavy work off the render thread;
-5. preserve all A1 presentation/image behavior and Goal 0008/0009 regressions.
+1. synchronize latest director `main` into the existing Goal 0012 worker branch before implementation, preserving A1 and useful prior additions;
+2. give pretty-build completion an explicit repaint wakeup;
+3. give successful and failed image-decode completion an explicit repaint wakeup;
+4. prove those notifications happen while TTS is inactive and independently of later receiver polling;
+5. preserve bounded/nonblocking queues and all heavy work off the render thread;
+6. preserve all A1 presentation/image behavior and Goal 0008/0009 regressions.
 
-No human QA until director accepts A2.
+No human QA until director accepts A3.
 
 ## P2.8 — Goal 0010: Caliberate catalog covers + provider availability UX
 
