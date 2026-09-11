@@ -12,17 +12,18 @@ Reproducible Windows build/check/test, native egui launch, repo-native `deps.ps1
 
 **WORKING WINDOWS PATH COMPLETE**
 
-Canonical reader/session semantics are backend-neutral; ordinary WinRT Windows voice enumeration/synthesis/playback works; first-sample boundaries drive canonical playback identity; physical Windows speech and interactive voice changes are verified.
+Canonical reader/session semantics are backend-neutral; ordinary WinRT Windows voice enumeration/synthesis/playback works; first-sample boundaries drive canonical playback identity; physical Windows speech and interactive ordinary voice changes are verified.
 
 ## P2 — Non-PDF reader/TTS
 
-**PRETTY EPUB ACCEPTED; GOAL 0009 A3 TEXT-ONLY SOURCE OWNERSHIP OPEN**
+**PRETTY EPUB ACCEPTED; GOAL 0009 A3 AUTOMATED ACCEPTED, FINAL TEXT-ONLY DESKTOP SIGNOFF PENDING**
 
 - TXT/Markdown/HTML/EPUB ingestion/parity remains covered;
 - native pretty rendering is bounded, responsive, and sentence-synchronized on the real large EPUB;
 - ordinary Windows TTS no longer shows the prior duplicate-line refill bug in desktop QA;
-- source-dependent text-only failure remains: one real EPUB has no text/highlight while another works;
-- director code audit identifies text-only presentation incorrectly depending on transient `audio_sentences` / `highlighted_audio_idx`.
+- A3 decouples text-only visible rows from transient TTS audio-plan ownership;
+- text-only row/highlight semantics are now canonical/display-owned regardless of zero/one/many audio chunks or plan availability;
+- final evidence is the same two real EPUBs that previously disagreed.
 
 ## P2.5 — First-class Caliberate reader integration
 
@@ -32,23 +33,21 @@ Caliberate catalog/materialization/native EPUB/Windows TTS and synchronized pret
 
 ## P2.6 — Goal 0009: TTS playback polish + layered voice configuration
 
-**A3 REOPENED — CANONICAL TEXT-ONLY DOCUMENT PROJECTION**
+**A3 ACCEPTED — HUMAN SIGNOFF PENDING**
 
-A3 must:
+A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558938955` is director-accepted.
 
-1. derive visible text-only rows from canonical/display document state, never the TTS audio plan;
-2. preserve exactly one row per canonical/display sentence even when normalization produces zero/one/many audio items;
-3. use canonical spoken identity for selection/follow, never `highlighted_audio_idx`;
-4. remain complete while TTS is idle/stopped/paused, has no plan, has an evicted/stale plan, or backend validation fails;
-5. avoid constructing a TTS plan merely to render/snapshot text-only content;
-6. add source-shaped regressions that reproduce the difference between simple and awkward EPUB streams;
-7. preserve pretty sync, 300+ no-repeat behavior, Zira inheritance, per-book voice overrides, failed-Piper recovery, bounded diagnostics, Close book, Safe Quit, and stale-source isolation.
+Final human check:
 
-No human QA until A3 passes director review.
+1. `A General History and Collection of Voyages`: text-only contains text immediately and highlights/follows spoken canonical sentences;
+2. `Buffalo Bill`: previously working text-only behavior remains working;
+3. a short pretty-view playback sanity check remains correct.
+
+If those pass, close Goal 0009.
 
 ## P2.7 — Goal 0010: Caliberate catalog reliability
 
-**QUEUED — DO NOT START BEFORE GOAL 0009 CLOSES**
+**QUEUED — NEXT CANDIDATE AFTER GOAL 0009 CLOSES**
 
 - preserve full provider/stage/format/root-cause diagnostics when materialization fails;
 - deterministic fallback only among explicitly advertised supported formats;
@@ -60,19 +59,13 @@ No human QA until A3 passes director review.
 
 ## P2.8 — Goal 0011: Windows Natural/HD voice capability
 
-**QUEUED**
+**DEFERRED BY USER — DORMANT UNTIL EXPLICITLY RE-AUTHORIZED**
 
-- research/probe supported Windows APIs first;
-- distinguish ordinary WinRT `SpeechSynthesizer::AllVoices()` voices from user-installed Natural/Narrator/HD voices;
-- integrate Natural/HD voices only through a supported, maintainable application API if available;
-- otherwise expose the capability limitation clearly while preserving ordinary Windows TTS;
-- do not use undocumented Narrator model/key extraction or brittle reverse-engineered hacks as the default path;
-- preserve app-level portable voice preference and per-book override semantics;
-- do not change the user's default voice until requested.
+Do not investigate, implement, or test Natural/Narrator/HD voices for now. Preserve the existing ordinary Windows voice backend and current Zira/per-book override behavior. The user will explicitly notify the project when this surface is ready to resume.
 
 ## P3 — Native PDF visual stability
 
-**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED WHILE GOAL 0009 A3 IS OPEN**
+**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED UNTIL GOAL 0009 CLOSES**
 
 - page raster/render ownership;
 - texture/cache lifecycle;
