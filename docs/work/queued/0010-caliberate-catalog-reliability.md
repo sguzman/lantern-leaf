@@ -1,52 +1,54 @@
-# 0010 — Caliberate catalog reliability: materialization diagnostics and first-class covers
+# 0010 — Caliberate catalog covers and provider-availability UX
 
 ## Outcome
 
-Make the Caliberate-backed library trustworthy before a book is opened: catalog covers should be available through a first-class provider path, and failed book materialization should expose enough stage/format/provider evidence to diagnose and recover deterministically.
+Make the Caliberate-backed library trustworthy before a book is opened: catalog covers should be available through a first-class provider path, while ordinary provider-unavailable states should be reported clearly without being misdiagnosed as book materialization corruption.
 
-## Why now
+## Corrected evidence
 
-Real desktop evidence after Goal 0009 A2.1 showed two provider/catalog defects distinct from TTS:
+A previous desktop pass appeared to show Caliberate book `42866` failing during materialization. The user later clarified that **Caliberate was not running during that attempt**. That incident is therefore withdrawn as evidence of a LanternLeaf materialization/format defect.
 
-- Caliberate book `42866` failed before reader open with `calibre_open_failed: failed to materialize Caliberate book 42866`, but the top-level failure does not expose format/HTTP/stage detail;
-- Caliberate catalog entries render black cover placeholders, while the same books can acquire real covers after being opened and subsequently appear correctly in Recents.
+Do not preserve or reintroduce a fake requirement to harden materialization based on that incident.
 
-Current LanternLeaf behavior explains the cover asymmetry: the catalog starts without a local materialized EPUB, while Recents can extract the embedded cover from the now-local source. The Caliberate provider does not currently have a first-class catalog-cover fetch path in LanternLeaf.
+The remaining real catalog defect is independent and reproducible:
+
+- Caliberate catalog entries can render black cover placeholders before a book has ever been opened;
+- the same book can later display a real cover in Recents after the EPUB has been materialized locally and its embedded cover becomes available;
+- this proves main-catalog cover presentation and Recents/local-cover presentation are using different availability paths.
+
+The goal is to give the Caliberate catalog a first-class cover contract so books do not need to be opened/materialized before their covers can appear.
 
 ## Authorized passes
 
-### A — inspect the Caliberate API contract before implementation
+### A — inspect the actual Caliberate API contract
 
 Inspect the current `sguzman/caliberate` server/API rather than guessing legacy Calibre routes.
 
-If Caliberate has no first-class cover endpoint/URL contract, either:
+Determine whether Caliberate already exposes:
 
-- coordinate the smallest explicit Caliberate-side API addition, such as a book cover endpoint or cover URL field; or
-- terminalize blocked with that concrete cross-repository dependency if this Goal execution is not authorized to change Caliberate.
+- cover bytes;
+- a cover endpoint;
+- a stable cover URL/path field;
+- cover presence metadata.
+
+If no first-class cover contract exists, coordinate the smallest explicit Caliberate-side API addition if authorized, or terminalize blocked with the exact cross-repository dependency.
 
 Do not probe invented legacy thumbnail URLs.
 
-### B — actionable materialization diagnostics
+### B — provider availability state
 
-A failed catalog open must retain provider context including, where available:
+A Caliberate service that is not running/unreachable is not a per-book materialization defect.
 
-- Caliberate book ID and title;
-- selected requested format;
-- materialization stage;
-- endpoint/path class without leaking secrets;
-- HTTP/status or transport failure category;
-- validation failure category for downloaded bytes;
-- underlying error/source chain.
+Requirements:
 
-The UI should return from SourceLoading to a recoverable error state without corrupting the previous/new reader lifecycle.
+- detect/report provider-unavailable/connection-refused/timeout distinctly from a book-format/content failure;
+- keep the library shell recoverable;
+- retrying after Caliberate becomes available must work without restarting LanternLeaf where practical;
+- diagnostics should identify the provider and availability class without dumping secrets or giant traces into the UI.
 
-### C — deterministic format recovery
+This is bounded provider UX, not speculative materialization redesign.
 
-If catalog metadata and server format availability disagree, recovery may try another format only when it is explicitly advertised/allowed and supported by LanternLeaf.
-
-Do not silently guess arbitrary formats. Preserve provider ordering/policy and log the attempted sequence.
-
-### D — first-class lazy catalog covers
+### C — first-class lazy catalog covers
 
 For Caliberate books with cover availability:
 
@@ -58,22 +60,37 @@ For Caliberate books with cover availability:
 - never issue cover requests for all ~100k catalog books at startup;
 - preserve Recents/local embedded-cover fallback where appropriate.
 
-The main catalog and Recents may share cache artifacts once available, but should not rely on a book having been opened first.
+The main catalog and Recents may share cache artifacts once available, but the catalog must not depend on a book having been opened first.
+
+### D — black-placeholder semantics
+
+A missing/not-yet-loaded cover should have an intentional placeholder state rather than an unexplained black rectangle.
+
+Differentiate at least:
+
+- cover loading;
+- no cover advertised/available;
+- provider unavailable;
+- cover fetch/decode failure.
+
+Do not allow a transient provider failure to poison the negative-cover cache permanently.
 
 ## Acceptance gates
 
-1. A Caliberate materialization failure exposes provider/book/format/stage/root-cause diagnostics sufficient to distinguish transport, HTTP, unsupported/missing format, invalid payload, and local materialization failure classes.
-2. Format fallback, if any, is limited to explicitly advertised and LanternLeaf-supported formats.
-3. A project-owned failure fixture/regression proves SourceError is recoverable and does not poison later opens.
+1. The withdrawn `42866` incident is not treated as evidence of a materialization-format bug.
+2. Provider unavailable/connection failure is classified separately from book/content/materialization failure.
+3. A provider-unavailable state is recoverable once Caliberate returns, without corrupting reader/library state.
 4. Catalog cover loading uses an explicit Caliberate provider contract, not legacy route guessing or full-book download.
-5. Visible-row/lazy cover scheduling is bounded and off the UI thread; a 100k catalog does not create unbounded cover work.
+5. Visible-row/lazy cover scheduling is bounded and off the UI thread; a ~100k catalog does not create unbounded cover work.
 6. A catalog book can display a cover before it has ever been opened/materialized.
 7. Recents/local cover behavior remains working.
-8. Existing Goal 0008/0009 large EPUB/TTS behavior remains green.
-9. Windows CI and normal workspace validation pass.
+8. Placeholder/loading/no-cover/provider-error states are visually intentional and distinguishable enough for debugging/UX.
+9. Existing Goal 0008/0009 large EPUB/TTS behavior remains green.
+10. Windows CI and normal workspace validation pass.
 
 ## Non-goals
 
+- speculative format fallback/materialization hardening based on the withdrawn offline-provider incident;
 - text-only/TTS fixes from Goal 0009;
 - Windows Natural/HD voice support;
 - PDF implementation;
