@@ -8,6 +8,8 @@ use lanternleaf_app::state::AppState;
 use lanternleaf_core::session::{ReaderSettingsPatch, SessionCommand};
 use lanternleaf_core::text_utils;
 use tracing::trace;
+use std::sync::mpsc;
+use std::thread;
 
 use crate::app::ui::{bounded_diagnostic, format::format_duration_secs};
 use crate::app::{
@@ -15,9 +17,70 @@ use crate::app::{
     text_only_mode_transition,
 };
 use crate::pretty::{
-    PrettyBlock, PrettyBlockKind, PrettyPageCacheKey, PrettySourceKind, PrettySpan, PrettyStyle,
+    PrettyBlock, PrettyBlockKind, PrettyPageCacheKey, PrettySpan, PrettyStyle,
     clamp_image_size, font_id_for, html_to_blocks, markdown_to_blocks, structured_to_blocks,
 };
+
+pub(crate) struct PrettyBuildRequest {
+    pub(crate) key: PrettyPageCacheKey,
+    pub(crate) snapshot: ReaderSnapshot,
+}
+
+pub(crate) struct PrettyBuildResult {
+    pub(crate) key: PrettyPageCacheKey,
+    pub(crate) blocks: Vec<PrettyBlock>,
+    pub(crate) targets: Vec<Option<PrettySentenceTarget>>,
+}
+
+pub(crate) fn start_pretty_builder() -> (
+    mpsc::SyncSender<PrettyBuildRequest>,
+    mpsc::Receiver<PrettyBuildResult>,
+) {
+    let (request_tx, request_rx) = mpsc::sync_channel::<PrettyBuildRequest>(1);
+    let (result_tx, result_rx) = mpsc::channel::<PrettyBuildResult>();
+    thread::spawn(move || {
+        while let Ok(request) = request_rx.recv() {
+            let blocks = build_pretty_blocks_for_snapshot(&request.snapshot);
+            let targets = aligned_targets_for_snapshot(&request.snapshot, &blocks);
+            if result_tx
+                .send(PrettyBuildResult {
+                    key: request.key,
+                    blocks,
+                    targets,
+                })
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+    (request_tx, result_rx)
+}
+
+fn build_pretty_blocks_for_snapshot(snapshot: &ReaderSnapshot) -> Vec<PrettyBlock> {
+    let mut pretty_cfg = snapshot.settings.pretty;
+    pretty_cfg.word_spacing = snapshot.settings.word_spacing;
+    pretty_cfg.letter_spacing = snapshot.settings.letter_spacing;
+    match snapshot.pretty_kind {
+        PrettyKind::Markdown => snapshot
+            .reading_markdown_page
+            .as_deref()
+            .map(|markdown| markdown_to_blocks(markdown, &snapshot.images, pretty_cfg))
+            .unwrap_or_default(),
+        PrettyKind::Html => {
+            if let Some(structured) = snapshot.structured_document.as_deref() {
+                structured_to_blocks(structured, &snapshot.images, pretty_cfg)
+            } else {
+                snapshot
+                    .reading_html_page
+                    .as_deref()
+                    .map(|html| html_to_blocks(html, &snapshot.images, pretty_cfg))
+                    .unwrap_or_default()
+            }
+        }
+        PrettyKind::None | PrettyKind::Pdf => Vec::new(),
+    }
+}
 
 impl LanternLeafApp {
     pub(crate) fn render_reader_content(&mut self, ui: &mut Ui, state: &AppState) {
@@ -89,6 +152,9 @@ impl LanternLeafApp {
         effective_highlighted_sentence_idx: Option<usize>,
     ) {
         let render_started = std::time::Instant::now();
+        if self.poll_pretty_builds() {
+            ui.ctx().request_repaint();
+        }
         self.refresh_pretty_cache(snapshot);
         let highlight_idx = effective_highlighted_sentence_idx;
         let playback_canonical = self
@@ -134,6 +200,10 @@ impl LanternLeafApp {
         );
         ui.group(|ui| {
             ui.label("Pretty view");
+            if self.pretty_build_pending.is_some() && self.pretty_page_cache_blocks.is_empty() {
+                ui.label("Preparing pretty view…");
+                return;
+            }
             if !snapshot.settings.pretty.enabled {
                 ui.label("Pretty rendering is disabled in config.");
                 ui.add_space(6.0);
@@ -143,38 +213,33 @@ impl LanternLeafApp {
             ScrollArea::vertical()
                 .id_source("pretty_page")
                 .show_viewport(ui, |ui, viewport| {
-                    let max_width = 720.0;
+                    let horizontal_margin = snapshot.settings.margin_horizontal as f32;
+                    let vertical_margin = snapshot.settings.margin_vertical as f32;
+                    let max_width = (ui.available_width() - horizontal_margin * 2.0)
+                        .clamp(240.0, 720.0);
                     let available_width = ui.available_width();
                     let margin = ((available_width - max_width) / 2.0).max(0.0);
 
                     ui.horizontal(|ui| {
                         ui.add_space(margin);
                         ui.vertical(|ui| {
+                            ui.add_space(vertical_margin);
                             ui.set_max_width(max_width);
-                            let pretty_cfg = snapshot.settings.pretty;
+                            let mut pretty_cfg = snapshot.settings.pretty;
+                            // The top-level reader spacing fields remain the
+                            // canonical config/persistence owner; copy them
+                            // into the render policy for LayoutJob creation.
+                            pretty_cfg.word_spacing = snapshot.settings.word_spacing;
+                            pretty_cfg.letter_spacing = snapshot.settings.letter_spacing;
                             let base_px = (snapshot.settings.font_size as f32
                                 * pretty_cfg.base_font_scale)
                                 .clamp(8.0, 48.0);
-                            let regular_family = if self.fonts_configured {
-                                FontFamily::Name("LanternLeafProportionalRegular".into())
-                            } else {
-                                FontFamily::Proportional
-                            };
-                            let bold_family = if self.fonts_configured {
-                                FontFamily::Name("LanternLeafProportionalBold".into())
-                            } else {
-                                FontFamily::Proportional
-                            };
-                            let mono_regular = if self.fonts_configured {
-                                FontFamily::Name("LanternLeafMonospaceRegular".into())
-                            } else {
-                                FontFamily::Monospace
-                            };
-                            let mono_bold = if self.fonts_configured {
-                                FontFamily::Name("LanternLeafMonospaceBold".into())
-                            } else {
-                                FontFamily::Monospace
-                            };
+                            let (regular_family, bold_family, mono_regular, mono_bold) =
+                                presentation_font_families(
+                                    snapshot.settings.font_family,
+                                    snapshot.settings.font_weight,
+                                    self.fonts_configured,
+                                );
 
                             let total_blocks = self.pretty_page_cache_blocks.len();
                             let overscan = 8usize;
@@ -433,7 +498,29 @@ impl LanternLeafApp {
                                             ui.label("[image]");
                                             continue;
                                         };
-                                        if let Some(texture) = self.pretty_image_cache.texture_for(
+                                        if img.missing || img.local_path.as_os_str().is_empty() {
+                                            let label = img
+                                                .alt
+                                                .as_deref()
+                                                .filter(|text| !text.trim().is_empty())
+                                                .map(|alt| format!("Image unavailable: {alt}"))
+                                                .unwrap_or_else(|| {
+                                                    format!("Image unavailable: {}", img.src_raw)
+                                                });
+                                            response = Some(
+                                                Frame::none()
+                                                    .fill(ui.visuals().faint_bg_color)
+                                                    .stroke(Stroke::new(
+                                                        1.0_f32,
+                                                        ui.visuals().widgets.noninteractive.bg_stroke.color,
+                                                    ))
+                                                    .inner_margin(8.0)
+                                                    .show(ui, |ui| {
+                                                        ui.label(label);
+                                                    })
+                                                    .response,
+                                            );
+                                        } else if let Some(texture) = self.pretty_image_cache.texture_for(
                                             ui.ctx(),
                                             &img.local_path,
                                             (ui.available_width()
@@ -582,6 +669,7 @@ impl LanternLeafApp {
                                 }
                                 ui.add_space(spacing.max(0.0));
                             }
+                            ui.add_space(vertical_margin);
                             ui.add_space(
                                 total_height
                                     - prefix.get(render_end).copied().unwrap_or(total_height),
@@ -786,11 +874,38 @@ impl LanternLeafApp {
         if self.pretty_page_cache_key.as_ref() == Some(&key) {
             return;
         }
-        self.pretty_page_cache_blocks = self.build_pretty_blocks(snapshot);
-        self.pretty_sentence_targets =
-            aligned_targets_for_snapshot(snapshot, &self.pretty_page_cache_blocks);
+        if self.pretty_build_pending.as_ref() == Some(&key) {
+            return;
+        }
+        self.pretty_page_cache_blocks.clear();
+        self.pretty_sentence_targets.clear();
         self.pretty_block_heights.clear();
-        self.pretty_page_cache_key = Some(key);
+        if self
+            .pretty_build_tx
+            .try_send(PrettyBuildRequest {
+                key: key.clone(),
+                snapshot: snapshot.clone(),
+            })
+            .is_ok()
+        {
+            self.pretty_build_pending = Some(key);
+        }
+    }
+
+    fn poll_pretty_builds(&mut self) -> bool {
+        let mut completed = false;
+        while let Ok(result) = self.pretty_build_rx.try_recv() {
+            if self.pretty_build_pending.as_ref() != Some(&result.key) {
+                continue;
+            }
+            self.pretty_page_cache_blocks = result.blocks;
+            self.pretty_sentence_targets = result.targets;
+            self.pretty_block_heights.clear();
+            self.pretty_page_cache_key = Some(result.key.clone());
+            self.pretty_build_pending = None;
+            completed = true;
+        }
+        completed
     }
 
     fn pretty_block_heights_for(
@@ -809,66 +924,6 @@ impl LanternLeafApp {
                     .unwrap_or_else(|| estimated_block_height(block, base_px, pretty_cfg))
             })
             .collect()
-    }
-
-    fn build_pretty_blocks(&self, snapshot: &ReaderSnapshot) -> Vec<PrettyBlock> {
-        let pretty_cfg = snapshot.settings.pretty;
-        match snapshot.pretty_kind {
-            PrettyKind::Markdown => {
-                if let Some(markdown) = snapshot.reading_markdown_page.as_deref() {
-                    let blocks = markdown_to_blocks(markdown, &snapshot.images, pretty_cfg);
-                    trace_pretty_block_counts(&blocks);
-                    return blocks;
-                }
-            }
-            PrettyKind::Html => {
-                if let Some(structured) = snapshot.structured_document.as_deref() {
-                    let blocks = structured_to_blocks(structured, &snapshot.images, pretty_cfg);
-                    trace_pretty_block_counts(&blocks);
-                    return blocks;
-                }
-                if let Some(html) = snapshot.reading_html_page.as_deref() {
-                    let blocks = html_to_blocks(html, &snapshot.images, pretty_cfg);
-                    trace_pretty_block_counts(&blocks);
-                    return blocks;
-                }
-            }
-            _ => {}
-        }
-
-        let text = snapshot.page_text.trim();
-        if text.is_empty() {
-            return vec![PrettyBlock {
-                kind: PrettyBlockKind::Paragraph,
-                spans: vec![PrettySpan {
-                    text: "No pretty content available for this page.".to_string(),
-                    style: PrettyStyle::default(),
-                }],
-                code: None,
-                image: None,
-                table: None,
-                anchor_idx: 0,
-                source_kind: PrettySourceKind::Markdown,
-                source_block_id: None,
-                source_subblock_index: 0,
-                source_sentence_ranges: Vec::new(),
-            }];
-        }
-        vec![PrettyBlock {
-            kind: PrettyBlockKind::Paragraph,
-            spans: vec![PrettySpan {
-                text: text.to_string(),
-                style: PrettyStyle::default(),
-            }],
-            code: None,
-            image: None,
-            table: None,
-            anchor_idx: 0,
-            source_kind: PrettySourceKind::Markdown,
-            source_block_id: None,
-            source_subblock_index: 0,
-            source_sentence_ranges: Vec::new(),
-        }]
     }
 
     fn render_quick_actions_dock(&mut self, ui: &mut Ui, snapshot: &ReaderSnapshot) {
@@ -1541,6 +1596,54 @@ fn heading_size(
     (base_px * scale.max(0.5)).max(base_px)
 }
 
+fn presentation_font_families(
+    family: lanternleaf_core::config::FontFamily,
+    weight: lanternleaf_core::config::FontWeight,
+    configured: bool,
+) -> (FontFamily, FontFamily, FontFamily, FontFamily) {
+    if !configured {
+        let regular = if matches!(family, lanternleaf_core::config::FontFamily::Monospace) {
+            FontFamily::Monospace
+        } else {
+            FontFamily::Proportional
+        };
+        return (
+            regular.clone(),
+            regular,
+            FontFamily::Monospace,
+            FontFamily::Monospace,
+        );
+    }
+    let slug = match family {
+        lanternleaf_core::config::FontFamily::Sans => "Sans",
+        lanternleaf_core::config::FontFamily::Serif => "Serif",
+        lanternleaf_core::config::FontFamily::Monospace => "Monospace",
+        lanternleaf_core::config::FontFamily::Lexend => "Lexend",
+        lanternleaf_core::config::FontFamily::FiraCode => "FiraCode",
+        lanternleaf_core::config::FontFamily::AtkinsonHyperlegible => "AtkinsonHyperlegible",
+        lanternleaf_core::config::FontFamily::AtkinsonHyperlegibleNext => {
+            "AtkinsonHyperlegibleNext"
+        }
+        lanternleaf_core::config::FontFamily::LexicaUltralegible => "LexicaUltralegible",
+        lanternleaf_core::config::FontFamily::Courier => "Courier",
+        lanternleaf_core::config::FontFamily::FrankGothic => "FrankGothic",
+        lanternleaf_core::config::FontFamily::Hermit => "Hermit",
+        lanternleaf_core::config::FontFamily::Hasklug => "Hasklug",
+        lanternleaf_core::config::FontFamily::NotoSans => "NotoSans",
+    };
+    let regular_weight = match weight {
+        lanternleaf_core::config::FontWeight::Light => "Light",
+        lanternleaf_core::config::FontWeight::Normal => "Regular",
+        lanternleaf_core::config::FontWeight::Bold => "Bold",
+    };
+    (
+        FontFamily::Name(format!("LanternLeafFamily{slug}{regular_weight}").into()),
+        FontFamily::Name(format!("LanternLeafFamily{slug}Bold").into()),
+        FontFamily::Name(format!("LanternLeafFamily{slug}{regular_weight}").into()),
+        FontFamily::Name(format!("LanternLeafFamily{slug}Bold").into()),
+    )
+}
+
 fn spans_to_job(
     ui: &Ui,
     spans: &[PrettySpan],
@@ -1620,7 +1723,7 @@ fn spans_to_job_with_base(
             format.valign = Align::BOTTOM;
         }
         format.line_height = Some(base_px * line_spacing_scale);
-        job.append(&span.text, 0.0, format);
+        append_spaced_text(&mut job, &span.text, format, pretty_cfg);
     }
     job
 }
@@ -1766,7 +1869,26 @@ fn append_span_to_job(
         format.valign = Align::BOTTOM;
     }
     format.line_height = Some(base_px * line_spacing_scale);
-    job.append(&span.text, 0.0, format);
+    append_spaced_text(job, &span.text, format, pretty_cfg);
+}
+
+fn append_spaced_text(
+    job: &mut LayoutJob,
+    text: &str,
+    format: TextFormat,
+    pretty_cfg: lanternleaf_core::config::PrettyUiConfig,
+) {
+    for (start, character) in text.char_indices() {
+        let end = start + character.len_utf8();
+        let mut character_format = format.clone();
+        character_format.extra_letter_spacing = pretty_cfg.letter_spacing as f32
+            + if character.is_whitespace() {
+                pretty_cfg.word_spacing as f32
+            } else {
+                0.0
+            };
+        job.append(&text[start..end], 0.0, character_format);
+    }
 }
 
 #[cfg(test)]
@@ -1940,21 +2062,4 @@ mod tests {
             2..5
         );
     }
-}
-
-fn trace_pretty_block_counts(blocks: &[PrettyBlock]) {
-    let mut markdown = 0usize;
-    let mut html = 0usize;
-    for b in blocks {
-        match b.source_kind {
-            PrettySourceKind::Markdown => markdown += 1,
-            PrettySourceKind::Html => html += 1,
-        }
-    }
-    tracing::debug!(
-        total = blocks.len(),
-        markdown_blocks = markdown,
-        html_blocks = html,
-        "Pretty blocks built"
-    );
 }

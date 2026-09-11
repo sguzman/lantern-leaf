@@ -218,6 +218,8 @@ pub(super) fn load_book_reader_overrides(source_path: &Path) -> Option<BookReade
     Some(BookReaderOverrides {
         schema_version: BookReaderOverrides::SCHEMA_VERSION,
         theme: Some(legacy.theme),
+        day_highlight: Some(legacy.day_highlight),
+        night_highlight: Some(legacy.night_highlight),
         font_family: Some(legacy.font_family),
         font_weight: Some(legacy.font_weight),
         font_size: Some(legacy.font_size),

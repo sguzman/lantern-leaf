@@ -122,6 +122,10 @@ pub struct ReaderSettingsPatch {
     pub tts_backend: Option<config::TtsBackend>,
     #[ts(optional)]
     pub windows_voice_id: Option<String>,
+    #[ts(optional)]
+    pub pretty: Option<config::PrettyUiConfig>,
+    #[ts(optional)]
+    pub reset_presentation: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -194,6 +198,16 @@ pub struct ReaderSnapshot {
 pub struct ReaderImageRef {
     pub raw_path: String,
     pub local_path: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    #[serde(default)]
+    pub normalized_path: String,
+    #[serde(default)]
+    pub chapter_index: usize,
+    #[serde(default)]
+    pub source_order: usize,
+    #[serde(default)]
+    pub alt: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -275,6 +289,7 @@ pub struct ReaderSession {
     pdf_ocr_pipeline: Option<crate::epub_loader::PdfOcrPipelineSummary>,
     images: Vec<SessionImage>,
     pub config: config::AppConfig,
+    base_config: config::AppConfig,
     pub book_overrides: config::BookReaderOverrides,
     pages: Vec<String>,
     markdown_pages: Vec<String>,
@@ -351,6 +366,7 @@ impl ReaderSession {
             pdf_ocr_pipeline: None,
             images: Vec::new(),
             config: config::AppConfig::default(),
+            base_config: config::AppConfig::default(),
             book_overrides: config::BookReaderOverrides::default(),
             pages,
             markdown_pages: Vec::new(),
@@ -409,6 +425,11 @@ impl ReaderSession {
 struct SessionImage {
     raw_path: String,
     path: String,
+    aliases: Vec<String>,
+    normalized_path: String,
+    chapter_index: usize,
+    source_order: usize,
+    alt: Option<String>,
 }
 
 struct MappingTelemetry {
@@ -1503,6 +1524,11 @@ impl ReaderSession {
             .map(|image| ReaderImageRef {
                 raw_path: image.raw_path.clone(),
                 local_path: image.path.clone(),
+                aliases: image.aliases.clone(),
+                normalized_path: image.normalized_path.clone(),
+                chapter_index: image.chapter_index,
+                source_order: image.source_order,
+                alt: image.alt.clone(),
             })
             .collect()
     }
@@ -2068,6 +2094,7 @@ mod tests {
             pdf_ocr_pipeline: None,
             images: Vec::new(),
             config: config::AppConfig::default(),
+            base_config: config::AppConfig::default(),
             book_overrides: config::BookReaderOverrides::default(),
             pages,
             markdown_pages: Vec::new(),
@@ -2229,6 +2256,52 @@ mod tests {
         assert!((session.config.pause_after_sentence - 0.06).abs() < f32::EPSILON);
         assert!((session.config.tts_speed - 4.0).abs() < f32::EPSILON);
         assert!((session.config.tts_volume - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn presentation_patch_layers_and_reset_preserve_tts_settings() {
+        let normalizer = normalizer::TextNormalizer::load_default();
+        let mut session = build_test_session(&[&["One sentence.", "Two sentence."]]);
+        let base_margin_horizontal = session.config.margin_horizontal;
+        let mut pretty = session.config.pretty;
+        pretty.base_font_scale = 1.4;
+        session.apply_settings_patch(
+            ReaderSettingsPatch {
+                font_family: Some(config::FontFamily::Serif),
+                font_weight: Some(config::FontWeight::Bold),
+                margin_horizontal: Some(44),
+                pretty: Some(pretty),
+                ..Default::default()
+            },
+            &normalizer,
+        );
+        assert_eq!(session.config.font_family, config::FontFamily::Serif);
+        assert_eq!(session.config.font_weight, config::FontWeight::Bold);
+        assert_eq!(session.config.margin_horizontal, 44);
+        assert_eq!(session.config.pretty.base_font_scale, 1.4);
+        assert!(session.book_overrides.pretty.is_some());
+
+        session.apply_settings_patch(
+            ReaderSettingsPatch {
+                tts_backend: Some(config::TtsBackend::Windows),
+                ..Default::default()
+            },
+            &normalizer,
+        );
+        session.apply_settings_patch(
+            ReaderSettingsPatch {
+                reset_presentation: Some(true),
+                ..Default::default()
+            },
+            &normalizer,
+        );
+        assert_eq!(session.config.font_family, config::FontFamily::Sans);
+        assert_eq!(session.config.font_weight, config::FontWeight::Normal);
+        assert_eq!(session.config.margin_horizontal, base_margin_horizontal);
+        assert_eq!(session.config.pretty, config::PrettyUiConfig::default());
+        assert_eq!(session.config.tts_backend, config::TtsBackend::Windows);
+        assert!(session.book_overrides.pretty.is_none());
+        assert!(session.book_overrides.font_family.is_none());
     }
 
     #[test]

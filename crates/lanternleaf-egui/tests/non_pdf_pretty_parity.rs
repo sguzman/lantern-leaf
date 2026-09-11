@@ -13,6 +13,11 @@ fn images() -> Vec<ReaderImageRef> {
     vec![ReaderImageRef {
         raw_path: "fixture.png".to_string(),
         local_path: "fixture.png".to_string(),
+        aliases: vec!["fixture.png".to_string()],
+        normalized_path: "fixture.png".to_string(),
+        chapter_index: 0,
+        source_order: 0,
+        alt: None,
     }]
 }
 

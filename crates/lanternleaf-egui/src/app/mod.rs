@@ -438,6 +438,9 @@ struct LanternLeafApp {
     pretty_page_cache_key: Option<PrettyPageCacheKey>,
     pretty_page_cache_blocks: Vec<PrettyBlock>,
     pretty_sentence_targets: Vec<Option<PrettySentenceTarget>>,
+    pretty_build_tx: mpsc::SyncSender<ui::reader::PrettyBuildRequest>,
+    pretty_build_rx: mpsc::Receiver<ui::reader::PrettyBuildResult>,
+    pretty_build_pending: Option<PrettyPageCacheKey>,
     pretty_block_heights: Vec<f32>,
     thumbnail_cache: ThumbnailCache,
     pretty_image_cache: PrettyImageCache,
@@ -655,9 +658,10 @@ fn load_thumbnail(path: &Path) -> Result<ThumbReady, String> {
 }
 
 struct PrettyImageCache {
-    tx: mpsc::Sender<ImageRequest>,
+    tx: mpsc::SyncSender<ImageRequest>,
     rx: mpsc::Receiver<ImageReady>,
     pending: HashSet<PathBuf>,
+    failed_until: HashMap<PathBuf, Instant>,
     textures: HashMap<PathBuf, TextureHandle>,
     last_used: HashMap<PathBuf, u64>,
     usage_tick: u64,
@@ -665,13 +669,14 @@ struct PrettyImageCache {
 
 impl PrettyImageCache {
     fn new() -> Self {
-        let (tx, worker_rx) = mpsc::channel();
+        let (tx, worker_rx) = mpsc::sync_channel(32);
         let (worker_tx, rx) = mpsc::channel();
         thread::spawn(move || pretty_image_worker(worker_rx, worker_tx));
         Self {
             tx,
             rx,
             pending: HashSet::new(),
+            failed_until: HashMap::new(),
             textures: HashMap::new(),
             last_used: HashMap::new(),
             usage_tick: 0,
@@ -688,6 +693,14 @@ impl PrettyImageCache {
     ) -> Option<TextureHandle> {
         self.poll_ready(ctx, max_entries);
         let path = path.to_path_buf();
+        if self
+            .failed_until
+            .get(&path)
+            .is_some_and(|until| *until > Instant::now())
+        {
+            return None;
+        }
+        self.failed_until.remove(&path);
         if let Some(texture) = self.textures.get(&path).cloned() {
             trace!(path = %path.display(), "Pretty image cache hit");
             self.touch(&path);
@@ -696,18 +709,30 @@ impl PrettyImageCache {
         if !self.pending.contains(&path) {
             trace!(path = %path.display(), "Pretty image cache miss; enqueue decode");
             self.pending.insert(path.clone());
-            let _ = self.tx.send(ImageRequest {
-                path,
+            if self.tx.try_send(ImageRequest {
+                path: path.clone(),
                 max_width_px,
                 max_height_px,
-            });
+            }).is_err() {
+                // A full queue must never make the egui frame wait. The
+                // visible block will retry when it is next in/near view.
+                self.pending.remove(&path);
+            }
         }
         None
     }
 
     fn poll_ready(&mut self, ctx: &Context, max_entries: usize) {
+        let mut completed = false;
         while let Ok(ready) = self.rx.try_recv() {
             self.pending.remove(&ready.path);
+            if let Some(error) = ready.error {
+                self.failed_until
+                    .insert(ready.path.clone(), Instant::now() + Duration::from_secs(5));
+                warn!(path = %ready.path.display(), error, "Pretty image unavailable");
+                completed = true;
+                continue;
+            }
             let image = ColorImage::from_rgba_unmultiplied(ready.size, &ready.pixels);
             let texture = ctx.load_texture(
                 format!("pretty_image:{}", ready.path.display()),
@@ -716,6 +741,10 @@ impl PrettyImageCache {
             );
             self.textures.insert(ready.path.clone(), texture);
             self.touch(&ready.path);
+            completed = true;
+        }
+        if completed {
+            ctx.request_repaint();
         }
         self.evict_if_needed(max_entries.max(1));
     }
@@ -759,6 +788,7 @@ struct ImageReady {
     path: PathBuf,
     size: [usize; 2],
     pixels: Vec<u8>,
+    error: Option<String>,
 }
 
 fn pretty_image_worker(rx: mpsc::Receiver<ImageRequest>, tx: mpsc::Sender<ImageReady>) {
@@ -776,11 +806,12 @@ fn pretty_image_worker(rx: mpsc::Receiver<ImageRequest>, tx: mpsc::Sender<ImageR
                 let _ = tx.send(ready);
             }
             Err(err) => {
-                warn!(
-                    path = %req.path.display(),
-                    error = %err,
-                    "Failed to decode pretty image"
-                );
+                let _ = tx.send(ImageReady {
+                    path: req.path,
+                    size: [0, 0],
+                    pixels: Vec::new(),
+                    error: Some(err),
+                });
             }
         }
     }
@@ -804,6 +835,7 @@ fn decode_pretty_image(
         path: path.to_path_buf(),
         size: [width as usize, height as usize],
         pixels: rgba.into_raw(),
+        error: None,
     })
 }
 
@@ -848,6 +880,7 @@ impl LanternLeafApp {
         let effect_session = Arc::clone(&effect_context.session);
         let effect_dispatcher = EffectDispatcher::new(effect_context, Some(cc.egui_ctx.clone()));
         persistence.start_sync_thread(effect_dispatcher.event_tx());
+        let (pretty_build_tx, pretty_build_rx) = ui::reader::start_pretty_builder();
 
         let mut app = Self {
             runtime,
@@ -897,6 +930,9 @@ impl LanternLeafApp {
             pretty_page_cache_key: None,
             pretty_page_cache_blocks: Vec::new(),
             pretty_sentence_targets: Vec::new(),
+            pretty_build_tx,
+            pretty_build_rx,
+            pretty_build_pending: None,
             pretty_block_heights: Vec::new(),
             thumbnail_cache: ThumbnailCache::new(),
             pretty_image_cache: PrettyImageCache::new(),
@@ -962,6 +998,7 @@ impl LanternLeafApp {
         let effect_session = Arc::clone(&effect_context.session);
         let effect_dispatcher = EffectDispatcher::new(effect_context, Some(cc.egui_ctx.clone()));
         persistence.start_sync_thread(effect_dispatcher.event_tx());
+        let (pretty_build_tx, pretty_build_rx) = ui::reader::start_pretty_builder();
 
         let mut app = Self {
             runtime,
@@ -1010,6 +1047,9 @@ impl LanternLeafApp {
             pretty_page_cache_key: None,
             pretty_page_cache_blocks: Vec::new(),
             pretty_sentence_targets: Vec::new(),
+            pretty_build_tx,
+            pretty_build_rx,
+            pretty_build_pending: None,
             pretty_block_heights: Vec::new(),
             thumbnail_cache: ThumbnailCache::new(),
             pretty_image_cache: PrettyImageCache::new(),
@@ -1677,6 +1717,248 @@ impl LanternLeafApp {
                         );
                     }
                 });
+                CollapsingHeader::new("Presentation")
+                    .id_source("presentation-settings")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.small("Visual settings apply to this book and do not restart TTS.");
+                        ui.label(RichText::new("Typography").strong());
+                        ui.horizontal(|ui| {
+                            ui.label("Family");
+                            let mut family = settings.font_family;
+                            egui::ComboBox::from_id_source("presentation-font-family")
+                                .selected_text(family.to_string())
+                                .show_ui(ui, |ui| {
+                                    for candidate in [
+                                        config::FontFamily::Sans,
+                                        config::FontFamily::Serif,
+                                        config::FontFamily::Monospace,
+                                        config::FontFamily::Lexend,
+                                        config::FontFamily::AtkinsonHyperlegible,
+                                        config::FontFamily::AtkinsonHyperlegibleNext,
+                                        config::FontFamily::LexicaUltralegible,
+                                        config::FontFamily::NotoSans,
+                                        config::FontFamily::Courier,
+                                        config::FontFamily::FiraCode,
+                                    ] {
+                                        ui.selectable_value(
+                                            &mut family,
+                                            candidate,
+                                            candidate.to_string(),
+                                        );
+                                    }
+                                });
+                            if family != settings.font_family {
+                                self.apply_reader_settings_patch(
+                                    ReaderSettingsPatch {
+                                        font_family: Some(family),
+                                        ..Default::default()
+                                    },
+                                    "presentation_font_family",
+                                );
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Weight");
+                            let mut weight = settings.font_weight;
+                            egui::ComboBox::from_id_source("presentation-font-weight")
+                                .selected_text(weight.to_string())
+                                .show_ui(ui, |ui| {
+                                    for candidate in [
+                                        config::FontWeight::Light,
+                                        config::FontWeight::Normal,
+                                        config::FontWeight::Bold,
+                                    ] {
+                                        ui.selectable_value(
+                                            &mut weight,
+                                            candidate,
+                                            candidate.to_string(),
+                                        );
+                                    }
+                                });
+                            if weight != settings.font_weight {
+                                self.apply_reader_settings_patch(
+                                    ReaderSettingsPatch {
+                                        font_weight: Some(weight),
+                                        ..Default::default()
+                                    },
+                                    "presentation_font_weight",
+                                );
+                            }
+                        });
+                        let mut font_size = settings.font_size;
+                        if ui
+                            .add(Slider::new(&mut font_size, 8..=48).text("Font size"))
+                            .changed()
+                        {
+                            self.apply_reader_settings_patch(
+                                ReaderSettingsPatch {
+                                    font_size: Some(font_size),
+                                    ..Default::default()
+                                },
+                                "presentation_font_size",
+                            );
+                        }
+                        let mut horizontal_margin = settings.margin_horizontal;
+                        if ui
+                            .add(
+                                Slider::new(&mut horizontal_margin, 0..=120)
+                                    .text("Horizontal margin"),
+                            )
+                            .changed()
+                        {
+                            self.apply_reader_settings_patch(
+                                ReaderSettingsPatch {
+                                    margin_horizontal: Some(horizontal_margin),
+                                    ..Default::default()
+                                },
+                                "presentation_margin_horizontal",
+                            );
+                        }
+                        let mut vertical_margin = settings.margin_vertical;
+                        if ui
+                            .add(
+                                Slider::new(&mut vertical_margin, 0..=120)
+                                    .text("Vertical margin"),
+                            )
+                            .changed()
+                        {
+                            self.apply_reader_settings_patch(
+                                ReaderSettingsPatch {
+                                    margin_vertical: Some(vertical_margin),
+                                    ..Default::default()
+                                },
+                                "presentation_margin_vertical",
+                            );
+                        }
+                        let mut word_spacing = settings.word_spacing;
+                        if ui
+                            .add(Slider::new(&mut word_spacing, 0..=24).text("Word spacing"))
+                            .changed()
+                        {
+                            self.apply_reader_settings_patch(
+                                ReaderSettingsPatch {
+                                    word_spacing: Some(word_spacing),
+                                    ..Default::default()
+                                },
+                                "presentation_word_spacing",
+                            );
+                        }
+                        let mut letter_spacing = settings.letter_spacing;
+                        if ui
+                            .add(Slider::new(&mut letter_spacing, 0..=24).text("Letter spacing"))
+                            .changed()
+                        {
+                            self.apply_reader_settings_patch(
+                                ReaderSettingsPatch {
+                                    letter_spacing: Some(letter_spacing),
+                                    ..Default::default()
+                                },
+                                "presentation_letter_spacing",
+                            );
+                        }
+
+                        ui.separator();
+                        ui.label(RichText::new("Pretty formatting and media").strong());
+                        let mut pretty = settings.pretty;
+                        let mut pretty_changed = false;
+                        pretty_changed |= ui
+                            .add(
+                                Slider::new(&mut pretty.base_font_scale, 0.75..=2.0)
+                                    .text("Base font scale"),
+                            )
+                            .changed();
+                        pretty_changed |= ui
+                            .add(
+                                Slider::new(&mut pretty.paragraph_spacing, 0.0..=48.0)
+                                    .text("Paragraph spacing"),
+                            )
+                            .changed();
+                        pretty_changed |= ui
+                            .add(
+                                Slider::new(&mut pretty.block_spacing, 0.0..=64.0)
+                                    .text("Block spacing"),
+                            )
+                            .changed();
+                        pretty_changed |= ui
+                            .add(
+                                Slider::new(&mut pretty.heading_scale_h1, 1.0..=3.0)
+                                    .text("Heading 1 scale"),
+                            )
+                            .changed();
+                        pretty_changed |= ui
+                            .add(
+                                Slider::new(&mut pretty.heading_scale_h2, 1.0..=2.5)
+                                    .text("Heading 2 scale"),
+                            )
+                            .changed();
+                        pretty_changed |= ui
+                            .add(
+                                Slider::new(&mut pretty.heading_scale_h3, 1.0..=2.0)
+                                    .text("Heading 3 scale"),
+                            )
+                            .changed();
+                        pretty_changed |= ui
+                            .add(
+                                Slider::new(&mut pretty.image_max_width_pct, 25.0..=100.0)
+                                    .text("Media max width"),
+                            )
+                            .changed();
+                        pretty_changed |= ui
+                            .add(
+                                Slider::new(&mut pretty.image_max_height_px, 128.0..=2048.0)
+                                    .text("Media max height"),
+                            )
+                            .changed();
+                        if pretty_changed {
+                            self.apply_reader_settings_patch(
+                                ReaderSettingsPatch {
+                                    pretty: Some(pretty),
+                                    ..Default::default()
+                                },
+                                "presentation_pretty",
+                            );
+                        }
+                        ui.separator();
+                        ui.label(RichText::new("Highlight appearance").strong());
+                        let mut day_highlight = highlight_color32(settings.day_highlight);
+                        if ui
+                            .color_edit_button_srgba(&mut day_highlight)
+                            .changed()
+                        {
+                            self.apply_reader_settings_patch(
+                                ReaderSettingsPatch {
+                                    day_highlight: Some(highlight_from_color32(day_highlight)),
+                                    ..Default::default()
+                                },
+                                "presentation_day_highlight",
+                            );
+                        }
+                        ui.label("Day highlight");
+                        let mut night_highlight = highlight_color32(settings.night_highlight);
+                        if ui
+                            .color_edit_button_srgba(&mut night_highlight)
+                            .changed()
+                        {
+                            self.apply_reader_settings_patch(
+                                ReaderSettingsPatch {
+                                    night_highlight: Some(highlight_from_color32(night_highlight)),
+                                    ..Default::default()
+                                },
+                                "presentation_night_highlight",
+                            );
+                        }
+                        ui.label("Night highlight");
+                        if ui.button("Use app presentation defaults").clicked() {
+                            self.apply_reader_settings_patch(
+                                ReaderSettingsPatch {
+                                    reset_presentation: Some(true),
+                                    ..Default::default()
+                                },
+                                "presentation_reset",
+                            );
+                        }
+                    });
                 ui.add_space(4.0);
                 let mut line_spacing = settings.line_spacing;
                 if ui
@@ -2490,13 +2772,37 @@ impl LanternLeafApp {
     }
 }
 
+fn highlight_color32(color: config::HighlightColor) -> Color32 {
+    Color32::from_rgba_unmultiplied(
+        (color.r.clamp(0.0, 1.0) * 255.0) as u8,
+        (color.g.clamp(0.0, 1.0) * 255.0) as u8,
+        (color.b.clamp(0.0, 1.0) * 255.0) as u8,
+        (color.a.clamp(0.0, 1.0) * 255.0) as u8,
+    )
+}
+
+fn highlight_from_color32(color: Color32) -> config::HighlightColor {
+    let [r, g, b, a] = color.to_array();
+    config::HighlightColor {
+        r: f32::from(r) / 255.0,
+        g: f32::from(g) / 255.0,
+        b: f32::from(b) / 255.0,
+        a: f32::from(a) / 255.0,
+    }
+}
+
 fn setup_egui_fonts(ctx: &Context, cfg: &config::AppConfig) -> bool {
     let requested = cfg.font_family.to_string();
     let mut db = fontdb::Database::new();
     db.load_system_fonts();
 
-    let prop_regular = pick_face(&db, &requested, false);
-    let prop_bold = pick_face(&db, &requested, true).or(prop_regular);
+    let prop_regular = font_family_candidates(cfg.font_family)
+        .iter()
+        .find_map(|name| pick_face(&db, name, false));
+    let prop_bold = font_family_candidates(cfg.font_family)
+        .iter()
+        .find_map(|name| pick_face(&db, name, true))
+        .or(prop_regular);
     let mono_requested = match cfg.font_family {
         config::FontFamily::FiraCode => "Fira Code".to_string(),
         config::FontFamily::Courier => "Courier".to_string(),
@@ -2508,6 +2814,58 @@ fn setup_egui_fonts(ctx: &Context, cfg: &config::AppConfig) -> bool {
 
     let mut fonts = FontDefinitions::default();
     let mut inserted_any = false;
+
+    // Presentation settings are live per-book settings. Register the small
+    // supported family set up front so switching family/weight never performs
+    // font discovery or file work from an egui frame.
+    for family in [
+        config::FontFamily::Sans,
+        config::FontFamily::Serif,
+        config::FontFamily::Monospace,
+        config::FontFamily::Lexend,
+        config::FontFamily::FiraCode,
+        config::FontFamily::AtkinsonHyperlegible,
+        config::FontFamily::AtkinsonHyperlegibleNext,
+        config::FontFamily::LexicaUltralegible,
+        config::FontFamily::Courier,
+        config::FontFamily::FrankGothic,
+        config::FontFamily::Hermit,
+        config::FontFamily::Hasklug,
+        config::FontFamily::NotoSans,
+    ] {
+        let slug = font_family_slug(family);
+        let requested_names = font_family_candidates(family);
+        let regular_id = requested_names
+            .iter()
+            .find_map(|name| pick_face(&db, name, false))
+            .or(prop_regular);
+        let bold_id = requested_names
+            .iter()
+            .find_map(|name| pick_face(&db, name, true))
+            .or(prop_bold)
+            .or(regular_id);
+        let light_id = requested_names
+            .iter()
+            .find_map(|name| pick_face_weight(&db, name, fontdb::Weight::LIGHT))
+            .or(regular_id);
+        for (weight, id) in [
+            ("Light", light_id),
+            ("Regular", regular_id),
+            ("Bold", bold_id),
+        ] {
+            let Some(id) = id else { continue };
+            let Some(bytes) = face_bytes(&db, id) else { continue };
+            let data_name = format!("ll-family-{slug}-{weight}");
+            let alias = format!("LanternLeafFamily{slug}{weight}");
+            fonts
+                .font_data
+                .insert(data_name.clone(), FontData::from_owned(bytes));
+            fonts
+                .families
+                .insert(FontFamily::Name(alias.into()), vec![data_name]);
+            inserted_any = true;
+        }
+    }
 
     if let Some(id) = prop_regular {
         if let Some(bytes) = face_bytes(&db, id) {
@@ -2622,6 +2980,59 @@ fn pick_face(db: &fontdb::Database, family: &str, bold: bool) -> Option<fontdb::
         }
     }
     best.map(|(id, _)| id)
+}
+
+fn pick_face_weight(
+    db: &fontdb::Database,
+    family: &str,
+    desired_weight: fontdb::Weight,
+) -> Option<fontdb::ID> {
+    use fontdb::Style;
+    db.faces()
+        .filter(|face| {
+            face.families
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case(family))
+                && face.style == Style::Normal
+        })
+        .min_by_key(|face| (face.weight.0 as i32 - desired_weight.0 as i32).abs())
+        .map(|face| face.id)
+}
+
+fn font_family_candidates(family: config::FontFamily) -> &'static [&'static str] {
+    match family {
+        config::FontFamily::Sans => &["Segoe UI", "Arial", "DejaVu Sans"],
+        config::FontFamily::Serif => &["Georgia", "Times New Roman", "DejaVu Serif"],
+        config::FontFamily::Monospace => &["Consolas", "Courier New", "DejaVu Sans Mono"],
+        config::FontFamily::Lexend => &["Lexend"],
+        config::FontFamily::FiraCode => &["Fira Code"],
+        config::FontFamily::AtkinsonHyperlegible => &["Atkinson Hyperlegible"],
+        config::FontFamily::AtkinsonHyperlegibleNext => &["Atkinson Hyperlegible Next"],
+        config::FontFamily::LexicaUltralegible => &["Lexica Ultralegible"],
+        config::FontFamily::Courier => &["Courier New", "Courier"],
+        config::FontFamily::FrankGothic => &["Frank Gothic"],
+        config::FontFamily::Hermit => &["Hermit"],
+        config::FontFamily::Hasklug => &["Hasklug"],
+        config::FontFamily::NotoSans => &["Noto Sans"],
+    }
+}
+
+fn font_family_slug(family: config::FontFamily) -> &'static str {
+    match family {
+        config::FontFamily::Sans => "Sans",
+        config::FontFamily::Serif => "Serif",
+        config::FontFamily::Monospace => "Monospace",
+        config::FontFamily::Lexend => "Lexend",
+        config::FontFamily::FiraCode => "FiraCode",
+        config::FontFamily::AtkinsonHyperlegible => "AtkinsonHyperlegible",
+        config::FontFamily::AtkinsonHyperlegibleNext => "AtkinsonHyperlegibleNext",
+        config::FontFamily::LexicaUltralegible => "LexicaUltralegible",
+        config::FontFamily::Courier => "Courier",
+        config::FontFamily::FrankGothic => "FrankGothic",
+        config::FontFamily::Hermit => "Hermit",
+        config::FontFamily::Hasklug => "Hasklug",
+        config::FontFamily::NotoSans => "NotoSans",
+    }
 }
 
 fn face_bytes(db: &fontdb::Database, id: fontdb::ID) -> Option<Vec<u8>> {

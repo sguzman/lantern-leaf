@@ -1,5 +1,5 @@
 pub(crate) mod format;
-mod reader;
+pub(crate) mod reader;
 mod starter;
 
 use eframe::egui::{self, CentralPanel, Color32, Context, RichText, SidePanel, TopBottomPanel};

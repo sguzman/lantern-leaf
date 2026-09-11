@@ -102,9 +102,15 @@ impl ReaderSession {
                     SessionImage {
                         raw_path: image.source_ref,
                         path: path.to_string_lossy().to_string(),
+                        aliases: image.aliases,
+                        normalized_path: image.normalized_path,
+                        chapter_index: image.chapter_index,
+                        source_order: image.source_order,
+                        alt: image.alt,
                     }
                 })
                 .collect(),
+            base_config: config.clone(),
             config,
             book_overrides: config::BookReaderOverrides::default(),
             pages: Vec::new(),
@@ -176,6 +182,7 @@ pub fn load_session_for_source_with_cancel(
         bookmark,
         cancel,
     )?;
+    session.base_config = base_config.clone();
     session.book_overrides = book_overrides;
     Ok(session)
 }

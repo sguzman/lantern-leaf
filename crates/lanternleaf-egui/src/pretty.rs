@@ -83,6 +83,7 @@ pub struct PrettyImage {
     pub src_raw: String,
     pub local_path: PathBuf,
     pub alt: Option<String>,
+    pub missing: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,22 +101,53 @@ enum FlowItem {
 }
 
 pub fn resolve_image_path(src_raw: &str, images: &[ReaderImageRef]) -> Option<PathBuf> {
-    if let Some(found) = images
-        .iter()
-        .find(|img| img.raw_path.as_str() == src_raw)
-        .or_else(|| images.iter().find(|img| img.local_path.as_str() == src_raw))
-    {
+    let requested = normalize_image_key(src_raw);
+    if let Some(found) = images.iter().find(|img| {
+        img.raw_path == src_raw
+            || img.local_path == src_raw
+            || normalize_image_key(&img.raw_path) == requested
+            || normalize_image_key(&img.local_path) == requested
+            || img.aliases.iter().any(|alias| normalize_image_key(alias) == requested)
+    }) {
         return Some(PathBuf::from(&found.local_path));
     }
-
-    let candidate = PathBuf::from(src_raw);
-    if candidate.is_absolute() && candidate.exists() {
-        return Some(candidate);
-    }
-    if candidate.exists() {
-        return Some(candidate);
-    }
     None
+}
+
+fn normalize_image_key(raw: &str) -> String {
+    let decoded = percent_decode_image_ref(raw);
+    let mut components = Vec::new();
+    for component in decoded.trim().replace('\\', "/").split('/') {
+        match component {
+            "" | "." => {}
+            ".." => {
+                components.pop();
+            }
+            value => components.push(value.to_ascii_lowercase()),
+        }
+    }
+    components.join("/")
+}
+
+fn percent_decode_image_ref(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let bytes = raw.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (
+                (bytes[index + 1] as char).to_digit(16),
+                (bytes[index + 2] as char).to_digit(16),
+            ) {
+                out.push((hi * 16 + lo) as u8 as char);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index] as char);
+        index += 1;
+    }
+    out
 }
 
 pub fn link_color32(link: config::HighlightColor) -> Color32 {
@@ -426,11 +458,27 @@ pub fn markdown_to_blocks(
                                 src_raw: src,
                                 local_path,
                                 alt,
+                                missing: false,
                             }),
                             None,
                         );
                     } else {
-                        warn!(src, "Markdown image could not be resolved");
+                        warn!(src, "Markdown image could not be resolved; showing placeholder");
+                        images_count += 1;
+                        finish_block_markdown(
+                            &mut blocks,
+                            &mut block_index,
+                            PrettyBlockKind::Image,
+                            &mut empty_spans,
+                            &mut current_code,
+                            Some(PrettyImage {
+                                src_raw: src,
+                                local_path: PathBuf::new(),
+                                alt,
+                                missing: true,
+                            }),
+                            None,
+                        );
                     }
                 }
                 cmark::TagEnd::CodeBlock => {
@@ -909,8 +957,8 @@ fn walk_scraper_children(
                 }
                 "img" => {
                     if let Some(src) = element.attr("src") {
+                        let alt = element.attr("alt").map(|s| s.to_string());
                         if let Some(local_path) = resolve_image_path(src, images) {
-                            let alt = element.attr("alt").map(|s| s.to_string());
                             *image_count = image_count.saturating_add(1);
                             out.push(PrettyBlock {
                                 kind: PrettyBlockKind::Image,
@@ -920,6 +968,28 @@ fn walk_scraper_children(
                                     src_raw: src.to_string(),
                                     local_path,
                                     alt,
+                                    missing: false,
+                                }),
+                                table: None,
+                                anchor_idx: anchor_idx_for_block(*block_index),
+                                source_kind: PrettySourceKind::Html,
+                                source_block_id: None,
+                                source_subblock_index: 0,
+                                source_sentence_ranges: Vec::new(),
+                            });
+                            *block_index = block_index.saturating_add(1);
+                        } else {
+                            warn!(src, "HTML image could not be resolved; showing placeholder");
+                            *image_count = image_count.saturating_add(1);
+                            out.push(PrettyBlock {
+                                kind: PrettyBlockKind::Image,
+                                spans: Vec::new(),
+                                code: None,
+                                image: Some(PrettyImage {
+                                    src_raw: src.to_string(),
+                                    local_path: PathBuf::new(),
+                                    alt,
+                                    missing: true,
                                 }),
                                 table: None,
                                 anchor_idx: anchor_idx_for_block(*block_index),
@@ -1226,9 +1296,17 @@ fn collect_scraper_flow_items_inner(
                         src_raw: src.to_string(),
                         local_path,
                         alt,
+                        missing: false,
                     }));
                 } else {
-                    warn!(src, "HTML image could not be resolved");
+                    warn!(src, "HTML image could not be resolved; showing placeholder");
+                    *image_count = image_count.saturating_add(1);
+                    out.push(FlowItem::Image(PrettyImage {
+                        src_raw: src.to_string(),
+                        local_path: PathBuf::new(),
+                        alt: el.attr("alt").map(|s| s.to_string()),
+                        missing: true,
+                    }));
                 }
                 return;
             }
@@ -1491,6 +1569,15 @@ mod tests {
     use lanternleaf_core::epub_loader::{StructuredBlock, StructuredDocument, StructuredSentence};
 
     #[test]
+    fn image_size_clamp_preserves_aspect_ratio_and_limits() {
+        let size = clamp_image_size(800.0, [1600, 800], 50.0, 300.0);
+        assert_eq!(size, [400.0, 200.0]);
+
+        let tall = clamp_image_size(800.0, [400, 1600], 100.0, 300.0);
+        assert_eq!(tall, [75.0, 300.0]);
+    }
+
+    #[test]
     fn structured_projection_keeps_source_ids_when_visual_blocks_diverge() {
         let document = StructuredDocument {
             blocks: vec![
@@ -1508,7 +1595,7 @@ mod tests {
                     kind: "hr".to_string(),
                     plain_text: String::new(),
                     sentence_ids: Vec::new(),
-                    rich_html: "<hr>".to_string(),
+                    rich_html: "<hr><hr>".to_string(),
                 },
                 StructuredBlock {
                     block_id: 2,
@@ -1627,6 +1714,11 @@ mod tests {
         let images = [ReaderImageRef {
             raw_path: "inline.png".to_string(),
             local_path: "inline.png".to_string(),
+            aliases: vec!["inline.png".to_string()],
+            normalized_path: "inline.png".to_string(),
+            chapter_index: 0,
+            source_order: 0,
+            alt: None,
         }];
         let blocks = structured_to_blocks(&document, &images, config::PrettyUiConfig::default());
         let segments = blocks
@@ -1709,6 +1801,11 @@ Paragraph with *italics* and **bold**, `code`, ~~strike~~.
         let images = vec![ReaderImageRef {
             raw_path: "img.png".to_string(),
             local_path: "/tmp/img.png".to_string(),
+            aliases: vec!["img.png".to_string()],
+            normalized_path: "img.png".to_string(),
+            chapter_index: 0,
+            source_order: 0,
+            alt: Some("alt".to_string()),
         }];
         let blocks = markdown_to_blocks(md, &images, config::PrettyUiConfig::default());
         assert!(
@@ -1724,6 +1821,23 @@ Paragraph with *italics* and **bold**, `code`, ~~strike~~.
     }
 
     #[test]
+    fn unresolved_images_become_bounded_placeholders_without_cwd_fallback() {
+        let blocks = html_to_blocks(
+            r#"<p>Before</p><img src="../Images/missing%20cover.png" alt="Cover art"/><p>After</p>"#,
+            &[],
+            config::PrettyUiConfig::default(),
+        );
+        let image = blocks
+            .iter()
+            .find(|block| matches!(block.kind, PrettyBlockKind::Image))
+            .and_then(|block| block.image.as_ref())
+            .expect("missing image should remain visible as a placeholder");
+        assert!(image.missing);
+        assert_eq!(image.alt.as_deref(), Some("Cover art"));
+        assert!(resolve_image_path("../Images/missing%20cover.png", &[]).is_none());
+    }
+
+    #[test]
     fn html_parses_lists_tables_images_and_css_styles() {
         let html = r#"
 <h2>Header</h2>
@@ -1736,6 +1850,11 @@ Paragraph with *italics* and **bold**, `code`, ~~strike~~.
         let images = vec![ReaderImageRef {
             raw_path: "img.png".to_string(),
             local_path: "/tmp/img.png".to_string(),
+            aliases: vec!["img.png".to_string()],
+            normalized_path: "img.png".to_string(),
+            chapter_index: 0,
+            source_order: 0,
+            alt: Some("pic".to_string()),
         }];
         let blocks = html_to_blocks(html, &images, config::PrettyUiConfig::default());
         assert!(

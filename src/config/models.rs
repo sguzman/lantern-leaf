@@ -195,6 +195,8 @@ impl Default for AppConfig {
 pub struct BookReaderOverrides {
     pub schema_version: u32,
     pub theme: Option<ThemeMode>,
+    pub day_highlight: Option<HighlightColor>,
+    pub night_highlight: Option<HighlightColor>,
     pub font_family: Option<FontFamily>,
     pub font_weight: Option<FontWeight>,
     pub font_size: Option<u32>,
@@ -231,6 +233,8 @@ impl BookReaderOverrides {
         Self {
             schema_version: 0,
             theme: None,
+            day_highlight: None,
+            night_highlight: None,
             font_family: None,
             font_weight: None,
             font_size: None,
@@ -255,6 +259,12 @@ impl BookReaderOverrides {
     pub fn apply_to(&self, config: &mut AppConfig) {
         if let Some(value) = self.theme {
             config.theme = value;
+        }
+        if let Some(value) = self.day_highlight {
+            config.day_highlight = value;
+        }
+        if let Some(value) = self.night_highlight {
+            config.night_highlight = value;
         }
         if let Some(value) = self.font_family {
             config.font_family = value;
@@ -311,6 +321,23 @@ impl BookReaderOverrides {
             config.pretty = value;
         }
     }
+
+    /// Remove only reader-presentation overrides. TTS/backend/voice choices
+    /// deliberately remain book-local and are not affected by this action.
+    pub fn clear_presentation(&mut self) {
+        self.theme = None;
+        self.day_highlight = None;
+        self.night_highlight = None;
+        self.font_family = None;
+        self.font_weight = None;
+        self.font_size = None;
+        self.line_spacing = None;
+        self.word_spacing = None;
+        self.letter_spacing = None;
+        self.margin_horizontal = None;
+        self.margin_vertical = None;
+        self.pretty = None;
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, serde::Serialize, PartialEq, Eq, TS)]
@@ -334,6 +361,10 @@ pub struct PrettyUiConfig {
     pub enabled: bool,
     #[serde(default = "crate::config::defaults::default_pretty_base_font_scale")]
     pub base_font_scale: f32,
+    #[serde(default)]
+    pub word_spacing: u32,
+    #[serde(default)]
+    pub letter_spacing: u32,
     #[serde(default = "crate::config::defaults::default_pretty_heading_scale_h1")]
     pub heading_scale_h1: f32,
     #[serde(default = "crate::config::defaults::default_pretty_heading_scale_h2")]
@@ -385,6 +416,8 @@ impl Default for PrettyUiConfig {
         Self {
             enabled: crate::config::defaults::default_pretty_enabled(),
             base_font_scale: crate::config::defaults::default_pretty_base_font_scale(),
+            word_spacing: 0,
+            letter_spacing: 0,
             heading_scale_h1: crate::config::defaults::default_pretty_heading_scale_h1(),
             heading_scale_h2: crate::config::defaults::default_pretty_heading_scale_h2(),
             heading_scale_h3: crate::config::defaults::default_pretty_heading_scale_h3(),

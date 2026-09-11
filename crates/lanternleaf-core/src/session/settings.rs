@@ -34,8 +34,29 @@ impl ReaderSession {
         normalizer: &normalizer::TextNormalizer,
     ) {
         self.book_overrides.schema_version = config::BookReaderOverrides::SCHEMA_VERSION;
+        if patch.reset_presentation == Some(true) {
+            self.book_overrides.clear_presentation();
+            self.config.theme = self.base_config.theme;
+            self.config.day_highlight = self.base_config.day_highlight;
+            self.config.night_highlight = self.base_config.night_highlight;
+            self.config.font_family = self.base_config.font_family;
+            self.config.font_weight = self.base_config.font_weight;
+            self.config.font_size = self.base_config.font_size;
+            self.config.line_spacing = self.base_config.line_spacing;
+            self.config.word_spacing = self.base_config.word_spacing;
+            self.config.letter_spacing = self.base_config.letter_spacing;
+            self.config.margin_horizontal = self.base_config.margin_horizontal;
+            self.config.margin_vertical = self.base_config.margin_vertical;
+            self.config.pretty = self.base_config.pretty;
+        }
         if let Some(value) = patch.theme {
             self.book_overrides.theme = Some(value);
+        }
+        if let Some(value) = patch.day_highlight {
+            self.book_overrides.day_highlight = Some(value);
+        }
+        if let Some(value) = patch.night_highlight {
+            self.book_overrides.night_highlight = Some(value);
         }
         if let Some(value) = patch.font_family {
             self.book_overrides.font_family = Some(value);
@@ -88,6 +109,9 @@ impl ReaderSession {
         if let Some(value) = patch.windows_voice_id.as_ref() {
             self.book_overrides.windows_voice_id =
                 (!value.trim().is_empty()).then(|| value.clone());
+        }
+        if let Some(value) = patch.pretty {
+            self.book_overrides.pretty = Some(value);
         }
         let preserve = self.global_display_idx();
         let mut repaginate = false;
@@ -179,6 +203,9 @@ impl ReaderSession {
             self.config.windows_voice_id = patch
                 .windows_voice_id
                 .and_then(|value| (!value.trim().is_empty()).then_some(value));
+        }
+        if let Some(pretty) = patch.pretty {
+            self.config.pretty = pretty;
         }
 
         if repaginate {

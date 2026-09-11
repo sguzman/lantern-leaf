@@ -21,6 +21,10 @@ static RE_HTML_IMG_SRC: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(?is)<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["'][^>]*>"#)
         .expect("valid html image src regex")
 });
+static RE_HTML_IMG_ALT: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"(?is)\balt\s*=\s*["']([^"']*)["']"#)
+        .expect("valid html image alt regex")
+});
 static RE_HTML_SVG_IMAGE_HREF: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(?is)<image\b[^>]*?\b(?:xlink:href|href)\s*=\s*["']([^"']+)["'][^>]*>"#)
         .expect("valid svg image href regex")
@@ -41,6 +45,11 @@ pub struct BookImage {
     pub source_ref: String,
     pub label: String,
     pub char_offset: usize,
+    pub aliases: Vec<String>,
+    pub normalized_path: String,
+    pub chapter_index: usize,
+    pub source_order: usize,
+    pub alt: Option<String>,
 }
 
 /// Source-born provenance produced while traversing a structured document.
@@ -632,6 +641,11 @@ fn collect_browser_tab_assets(path: &Path) -> Result<Vec<BookImage>> {
                 .unwrap_or("asset")
                 .to_string(),
             char_offset: ((idx + 1) * text_len) / (total + 1),
+            aliases: vec![asset.raw_path.to_ascii_lowercase()],
+            normalized_path: normalize_epub_path_key(&asset.raw_path),
+            chapter_index: 0,
+            source_order: idx,
+            alt: None,
         })
         .collect())
 }
@@ -674,11 +688,17 @@ fn collect_markdown_images(path: &Path) -> Result<Vec<BookImage>> {
                 .unwrap_or("image")
                 .to_string()
         };
+        let alt = (!label.is_empty()).then(|| label.clone());
         images.push(BookImage {
             path: canonical,
             source_ref: raw_target.to_string(),
             label,
             char_offset: captures.get(0).map(|m| m.start()).unwrap_or(0),
+            aliases: vec![normalize_epub_path_key(raw_target)],
+            normalized_path: normalize_epub_path_key(raw_target),
+            chapter_index: 0,
+            source_order: images.len(),
+            alt,
         });
     }
 
@@ -776,7 +796,8 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
             Err(_) => chapter.len(),
         };
 
-        let mut chapter_images = Vec::new();
+        let mut chapter_images: Vec<(ExtractedImage, String, Option<String>)> = Vec::new();
+        let chapter_path = doc.get_current_path();
         for captures in RE_HTML_IMG_SRC.captures_iter(&chapter) {
             let Some(raw_src) = captures.get(1).map(|m| m.as_str()) else {
                 continue;
@@ -793,7 +814,10 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
                 continue;
             }
 
-            let normalized_src = normalize_epub_path_key(src);
+            let normalized_src = chapter_path
+                .as_deref()
+                .map(|chapter| resolve_epub_reference_key(chapter, src))
+                .unwrap_or_else(|| normalize_epub_path_key(src));
             let resolved = path_lookup.get(&normalized_src).cloned().or_else(|| {
                 Path::new(src)
                     .file_name()
@@ -803,7 +827,12 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
             });
 
             if let Some(image) = resolved {
-                chapter_images.push(image);
+                let alt = captures
+                    .get(0)
+                    .and_then(|tag| RE_HTML_IMG_ALT.captures(tag.as_str()))
+                    .and_then(|capture| capture.get(1).map(|value| value.as_str().to_string()))
+                    .filter(|value| !value.trim().is_empty());
+                chapter_images.push((image, src.to_string(), alt));
             }
         }
         for captures in RE_HTML_SVG_IMAGE_HREF.captures_iter(&chapter) {
@@ -821,7 +850,10 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
             if src.is_empty() {
                 continue;
             }
-            let normalized_src = normalize_epub_path_key(src);
+            let normalized_src = chapter_path
+                .as_deref()
+                .map(|chapter| resolve_epub_reference_key(chapter, src))
+                .unwrap_or_else(|| normalize_epub_path_key(src));
             let resolved = path_lookup.get(&normalized_src).cloned().or_else(|| {
                 Path::new(src)
                     .file_name()
@@ -830,11 +862,11 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
                     .and_then(|base| basename_lookup.get(&base).cloned())
             });
             if let Some(image) = resolved {
-                chapter_images.push(image);
+                chapter_images.push((image, src.to_string(), None));
             }
         }
 
-        for (idx, image) in chapter_images.iter().enumerate() {
+        for (idx, (image, raw_src, alt)) in chapter_images.iter().enumerate() {
             let pos_in_chapter = if chapter_len == 0 {
                 0
             } else {
@@ -850,6 +882,18 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
                 source_ref: image.source_ref.clone(),
                 label: image.label.clone(),
                 char_offset,
+                aliases: {
+                    let mut aliases = vec![normalize_epub_path_key(&image.source_ref)];
+                    aliases.push(normalize_epub_path_key(raw_src));
+                    if let Some(chapter_path) = chapter_path.as_deref() {
+                        aliases.push(resolve_epub_reference_key(chapter_path, raw_src));
+                    }
+                    aliases
+                },
+                normalized_path: normalize_epub_path_key(&image.source_ref),
+                chapter_index: chapter_idx,
+                source_order: images.len(),
+                alt: alt.clone(),
             });
         }
 
@@ -864,14 +908,41 @@ fn collect_epub_images(path: &Path) -> Result<Vec<BookImage>> {
 }
 
 fn normalize_epub_path_key(raw: &str) -> String {
-    let trimmed = raw.trim().trim_matches('/');
-    let mut out = String::with_capacity(trimmed.len());
-    for ch in trimmed.chars() {
-        if ch == '\\' {
-            out.push('/');
-        } else {
-            out.push(ch.to_ascii_lowercase());
+    let decoded = percent_decode_path(raw);
+    let mut components = Vec::new();
+    for component in decoded.trim().replace('\\', "/").split('/') {
+        match component {
+            "" | "." => {}
+            ".." => {
+                components.pop();
+            }
+            value => components.push(value.to_ascii_lowercase()),
         }
+    }
+    components.join("/")
+}
+
+fn resolve_epub_reference_key(chapter_path: &Path, raw_reference: &str) -> String {
+    let base = chapter_path.parent().unwrap_or_else(|| Path::new(""));
+    normalize_epub_path_key(&base.join(raw_reference).to_string_lossy())
+}
+
+fn percent_decode_path(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out = String::with_capacity(raw.len());
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hi = (bytes[index + 1] as char).to_digit(16);
+            let lo = (bytes[index + 2] as char).to_digit(16);
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                out.push((hi * 16 + lo) as u8 as char);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index] as char);
+        index += 1;
     }
     out
 }
@@ -954,6 +1025,7 @@ fn epub_resource_output_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::ImageEncoder;
     use crate::browser_tabs::{
         BrowserTab, BrowserTabSnapshot, SnapshotTruncation, SnapshotTruncationEntry,
     };
@@ -968,6 +1040,133 @@ mod tests {
         std::env::temp_dir().join(format!(
             "lanternleaf_epub_loader_{name}_{nanos}.{extension}"
         ))
+    }
+
+    fn write_stored_zip(path: &Path, entries: &[(&str, &[u8])]) {
+        let mut bytes = Vec::new();
+        let mut central = Vec::new();
+        for (name, data) in entries {
+            let name_bytes = name.as_bytes();
+            let offset = bytes.len() as u32;
+            let crc = crc32(data);
+            bytes.extend_from_slice(&0x04034b50u32.to_le_bytes());
+            bytes.extend_from_slice(&20u16.to_le_bytes());
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+            bytes.extend_from_slice(&crc.to_le_bytes());
+            bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+            bytes.extend_from_slice(name_bytes);
+            bytes.extend_from_slice(data);
+
+            central.extend_from_slice(&0x02014b50u32.to_le_bytes());
+            central.extend_from_slice(&20u16.to_le_bytes());
+            central.extend_from_slice(&20u16.to_le_bytes());
+            central.extend_from_slice(&0u16.to_le_bytes());
+            central.extend_from_slice(&0u16.to_le_bytes());
+            central.extend_from_slice(&0u16.to_le_bytes());
+            central.extend_from_slice(&0u16.to_le_bytes());
+            central.extend_from_slice(&crc.to_le_bytes());
+            central.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            central.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            central.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+            central.extend_from_slice(&0u16.to_le_bytes());
+            central.extend_from_slice(&0u16.to_le_bytes());
+            central.extend_from_slice(&0u16.to_le_bytes());
+            central.extend_from_slice(&0u16.to_le_bytes());
+            central.extend_from_slice(&0u32.to_le_bytes());
+            central.extend_from_slice(&offset.to_le_bytes());
+            central.extend_from_slice(name_bytes);
+        }
+        let central_offset = bytes.len() as u32;
+        bytes.extend_from_slice(&central);
+        bytes.extend_from_slice(&0x06054b50u32.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        bytes.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        bytes.extend_from_slice(&(central.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&central_offset.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        fs::write(path, bytes).expect("write EPUB fixture");
+    }
+
+    fn crc32(data: &[u8]) -> u32 {
+        let mut crc = 0xffff_ffffu32;
+        for byte in data {
+            crc ^= u32::from(*byte);
+            for _ in 0..8 {
+                crc = if crc & 1 != 0 {
+                    (crc >> 1) ^ 0xedb8_8320
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+        !crc
+    }
+
+    #[test]
+    fn epub_image_fixture_preserves_relative_encoded_provenance_and_order() {
+        let path = unique_temp_file("image_provenance", "epub");
+        let opf = br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Image fixture</dc:title><dc:language>en</dc:language></metadata><manifest><item id="c1" href="Text/chapter1.xhtml" media-type="application/xhtml+xml"/><item id="c2" href="Text/nested/chapter2.xhtml" media-type="application/xhtml+xml"/><item id="png" href="Images/foo bar.png" media-type="image/png"/><item id="jpg" href="Images/nested/photo.jpg" media-type="image/jpeg"/></manifest><spine><itemref idref="c1"/><itemref idref="c2"/></spine></package>"#;
+        let container = br#"<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#;
+        let chapter1 = br#"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Before PNG.</p><img src="../Images/foo%20bar.png" alt="PNG art"/><p>Between.</p><img src="../Images/nested/photo.jpg" alt="JPEG art"/></body></html>"#;
+        let chapter2 = br#"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Second chapter.</p><img src="../../Images/foo%20bar.png" alt="PNG again"/></body></html>"#;
+        let png = [
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49,
+            0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06,
+            0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44,
+            0x41, 0x54, 0x78, 0x9c, 0x63, 0x60, 0x60, 0x60, 0xf8, 0xcf, 0xc0, 0x00, 0x00,
+            0x04, 0x00, 0x01, 0xff, 0x89, 0x99, 0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49,
+            0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+        ];
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut jpeg)
+            .write_image(&[0xff, 0x00, 0x00], 1, 1, image::ColorType::Rgb8.into())
+            .expect("encode valid JPEG fixture");
+        write_stored_zip(
+            &path,
+            &[
+                ("mimetype", b"application/epub+zip"),
+                ("META-INF/container.xml", container),
+                ("OEBPS/content.opf", opf),
+                ("OEBPS/Text/chapter1.xhtml", chapter1),
+                ("OEBPS/Text/nested/chapter2.xhtml", chapter2),
+                ("OEBPS/Images/foo bar.png", &png),
+                ("OEBPS/Images/nested/photo.jpg", jpeg.as_slice()),
+            ],
+        );
+
+        let images = collect_images(&path).expect("EPUB image fixture should load");
+        assert_eq!(images.len(), 3, "each inline occurrence keeps its source position");
+        assert_eq!(images[0].chapter_index, 0);
+        assert_eq!(images[0].source_order, 0);
+        assert_eq!(images[0].alt.as_deref(), Some("PNG art"));
+        assert_eq!(images[1].chapter_index, 0);
+        assert_eq!(images[1].source_order, 1);
+        assert_eq!(images[1].alt.as_deref(), Some("JPEG art"));
+        assert_eq!(images[2].chapter_index, 1);
+        assert_eq!(images[2].source_order, 2);
+        assert_eq!(images[2].normalized_path, "oebps/images/foo bar.png");
+        assert_eq!(images[2].alt.as_deref(), Some("PNG again"));
+        assert_eq!(images[0].normalized_path, "oebps/images/foo bar.png");
+        assert_eq!(images[1].normalized_path, "oebps/images/nested/photo.jpg");
+        assert!(images[0].aliases.iter().any(|key| key == "oebps/images/foo bar.png"));
+        assert!(images[0].path.exists());
+        assert!(images[1].path.exists());
+        assert_eq!(image::image_dimensions(&images[0].path).unwrap(), (1, 1));
+        assert_eq!(image::image_dimensions(&images[1].path).unwrap(), (1, 1));
+        let extraction_root = hash_dir(&path).join("images");
+        assert!(images
+            .iter()
+            .all(|image| image.path.starts_with(&extraction_root)));
+        assert_ne!(images[0].path, images[1].path);
+        let _ = fs::remove_file(path);
     }
 
     #[test]
