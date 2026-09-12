@@ -1897,6 +1897,122 @@ fn append_spaced_text(
 mod tests {
     use super::*;
     use crate::pretty::PrettySourceKind;
+    use eframe::egui::{FontId, TextStyle};
+
+    fn controlled_registry(aliases: &[&str]) -> FontRegistry {
+        FontRegistry {
+            aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(),
+        }
+    }
+
+    fn controlled_context(registry: &FontRegistry) -> eframe::egui::Context {
+        let ctx = eframe::egui::Context::default();
+        let mut definitions = eframe::egui::FontDefinitions::default();
+        let proportional_data = definitions
+            .families
+            .get(&FontFamily::Proportional)
+            .and_then(|fonts| fonts.first())
+            .cloned()
+            .expect("egui proportional defaults should be prepared");
+        let monospace_data = definitions
+            .families
+            .get(&FontFamily::Monospace)
+            .and_then(|fonts| fonts.first())
+            .cloned()
+            .expect("egui monospace defaults should be prepared");
+
+        for alias in &registry.aliases {
+            let data = if alias.contains("Monospace") {
+                monospace_data.clone()
+            } else {
+                proportional_data.clone()
+            };
+            definitions
+                .families
+                .insert(FontFamily::Name(alias.clone().into()), vec![data]);
+        }
+
+        ctx.set_fonts(definitions);
+        ctx.style_mut(|style| {
+            style.text_styles.insert(
+                TextStyle::Body,
+                FontId::new(16.0, registry.proportional_regular()),
+            );
+            style.text_styles.insert(
+                TextStyle::Heading,
+                FontId::new(22.0, registry.proportional_bold()),
+            );
+            style.text_styles.insert(
+                TextStyle::Monospace,
+                FontId::new(16.0, registry.monospace_regular()),
+            );
+        });
+        ctx
+    }
+
+    fn force_controlled_layout(
+        ctx: &eframe::egui::Context,
+        registry: &FontRegistry,
+        configured_family: lanternleaf_core::config::FontFamily,
+        configured_weight: lanternleaf_core::config::FontWeight,
+    ) {
+        let _ = ctx.run(Default::default(), |ctx| {
+            for text_style in [TextStyle::Body, TextStyle::Heading, TextStyle::Monospace] {
+                let font_id = text_style.resolve(&ctx.style());
+                ctx.fonts(|fonts| {
+                    let _ = fonts.layout(
+                        "controlled style".to_owned(),
+                        font_id,
+                        Color32::WHITE,
+                        240.0,
+                    );
+                });
+            }
+
+            eframe::egui::CentralPanel::default().show(ctx, |ui| {
+                let (regular, bold, mono_regular, mono_bold) = presentation_font_families(
+                    configured_family,
+                    configured_weight,
+                    registry,
+                );
+                let job = spans_to_job(
+                    ui,
+                    &[
+                        PrettySpan {
+                            text: "body ".to_owned(),
+                            style: PrettyStyle::default(),
+                        },
+                        PrettySpan {
+                            text: "bold ".to_owned(),
+                            style: PrettyStyle {
+                                bold: true,
+                                ..Default::default()
+                            },
+                        },
+                        PrettySpan {
+                            text: "code".to_owned(),
+                            style: PrettyStyle {
+                                code: true,
+                                bold: true,
+                                ..Default::default()
+                            },
+                        },
+                    ],
+                    18.0,
+                    None,
+                    regular,
+                    bold,
+                    mono_regular,
+                    mono_bold,
+                    lanternleaf_core::config::PrettyUiConfig::default(),
+                    1.0,
+                );
+                ui.fonts(|fonts| {
+                    let _ = fonts.layout_job(job);
+                });
+            });
+        });
+    }
 
     #[test]
     fn missing_optional_font_falls_back_to_bound_builtin_families() {
@@ -1923,6 +2039,60 @@ mod tests {
         assert_eq!(bold, regular);
         assert_eq!(mono_regular, FontFamily::Monospace);
         assert_eq!(mono_bold, FontFamily::Monospace);
+    }
+
+    #[test]
+    fn controlled_font_matrix_forces_real_egui_layout_without_mutating_intent() {
+        let cases = [
+            (
+                "missing Lexend with unrelated alias",
+                controlled_registry(&["UnrelatedAlias"]),
+                lanternleaf_core::config::FontFamily::Lexend,
+                lanternleaf_core::config::FontWeight::Bold,
+            ),
+            (
+                "missing bold and monospace",
+                controlled_registry(&["LanternLeafFamilySerifRegular"]),
+                lanternleaf_core::config::FontFamily::Serif,
+                lanternleaf_core::config::FontWeight::Bold,
+            ),
+            (
+                "available registered family alias",
+                controlled_registry(&[
+                    "LanternLeafFamilyLexendRegular",
+                    "LanternLeafFamilyLexendBold",
+                    "LanternLeafMonospaceRegular",
+                    "LanternLeafMonospaceBold",
+                ]),
+                lanternleaf_core::config::FontFamily::Lexend,
+                lanternleaf_core::config::FontWeight::Normal,
+            ),
+        ];
+
+        for (case, registry, configured_family, configured_weight) in cases {
+            let configured_before = (configured_family, configured_weight);
+            let (regular, bold, mono_regular, mono_bold) = presentation_font_families(
+                configured_family,
+                configured_weight,
+                &registry,
+            );
+            for family in [&regular, &bold, &mono_regular, &mono_bold] {
+                if let FontFamily::Name(name) = family {
+                    assert!(
+                        registry.aliases.iter().any(|alias| alias == name.as_ref()),
+                        "{case}: returned named family must be registered: {name}"
+                    );
+                }
+            }
+
+            let ctx = controlled_context(&registry);
+            force_controlled_layout(&ctx, &registry, configured_family, configured_weight);
+            assert_eq!(
+                (configured_family, configured_weight),
+                configured_before,
+                "{case}: fallback must not rewrite configured presentation intent"
+            );
+        }
     }
 
     #[test]
