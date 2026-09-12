@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-12 after Goal 0012 A5 director acceptance for focused real-desktop QA.
+Updated: 2026-09-12 after Goal 0012 A5 physical presentation QA and A6 reopening.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -45,25 +45,40 @@ Stable audible TTS, no unsolicited duplicate ordinary lines, correct pretty/text
 
 ## Goal 0012 — pretty presentation controls and inline images
 
-**A5 DIRECTOR-ACCEPTED — FOCUSED REAL-DESKTOP QA PENDING**
+**A5 STARTUP/FONT SAFETY ACCEPTED; PHYSICAL PRESENTATION SIGNOFF REJECTED; A6 READY / SINGLE AUTHORIZED GOAL**
 
-Goal 0012 currently includes:
+Verified on the physical Windows machine after A5:
 
-- a separate native-egui Presentation settings surface;
-- live font family/weight/size, line spacing, margins, word/letter spacing, highlight colors, heading/base/paragraph/block/media controls;
-- app-default -> per-book presentation persistence and presentation-only reset;
-- safe EPUB image provenance/reference resolution including normalized, relative, nested, encoded, query/fragment-bearing references;
-- generated multi-spine PNG/JPEG EPUB production-chain coverage;
-- lazy bounded image decode and pretty-build workers with heavy work off the render thread;
-- bounded texture state, transient negative cache, visible placeholders, aspect-ratio/media sizing;
-- explicit worker-completion repaint wakeups for pretty-build success and image-decode success/failure;
-- exact registered-font alias tracking with deterministic built-in fallback for unavailable optional fonts;
-- global and pretty font selection that never intentionally references an unregistered LanternLeaf named family;
-- deterministic controlled egui/epaint layout regressions covering missing Lexend, partial/unrelated aliases, missing bold/monospace, unavailable per-book family, available registered aliases, named-family binding invariants, and unchanged configured font intent.
+- LanternLeaf now starts on the same machine/config that previously crashed on an unbound font alias;
+- inline/cover EPUB imagery visibly renders in pretty view;
+- the expanded Presentation settings surface is present;
+- font size, base font scale, paragraph spacing, block spacing, H1 scale, and H2 scale visibly work;
+- TTS spoken identity remains synchronized and pretty follow/scroll still advances with speech.
 
-The A3 physical Windows attempt exposed the startup font panic and was rejected before functional reader QA. A4 production fix `c92256fb429aea1d13707a811b0147e4337bbd05` repaired the unsafe alias-selection design. A5 implementation `46d70b34d2a560373e831471f24b58d17b1fe8bc` added the required real-layout proof. Worker terminal `e2938b2cf543df237beb79f83e5159e4e598b4cd`; Windows CI `34718069167` passed native workspace and hosted renderer jobs.
+The usable presentation pass exposed concrete layout defects:
 
-One focused Windows desktop pass is now authorized. First confirm LanternLeaf starts on the same machine/config that previously panicked. If startup succeeds, verify live presentation controls/persistence/reset, inline images while TTS is idle, and one short Goal 0009 TTS synchronization sanity check. Goal 0012 is not finally closed until that human pass succeeds.
+- pretty view has a large implicit centered gutter because horizontal margin is conflated with a hidden 720-px max text width;
+- horizontal margin can appear inert at wide viewport sizes;
+- vertical margin is implemented as scroll-document padding rather than viewport inset;
+- word/letter spacing did not visibly change text in physical QA despite value plumbing;
+- the expanded left settings/presentation panel is not vertically scrollable and lower controls become unreachable;
+- optional fonts safely fall back but the UI gives no availability/effective-fallback indication;
+- long blockquotes use a visually dominant left rule;
+- pretty tables/TOCs can collapse to near-character-width columns;
+- spoken highlight now appears briefly then disappears while canonical TTS identity and follow/scroll remain correct;
+- presentation geometry changes can leave measured pretty-block heights/prefix sums stale, which is a likely cause of the one-frame highlight symptom.
+
+A6 is authorized to correct only these reader-presentation geometry/usability defects while preserving A3 async wakeups, A4/A5 font safety, images, persistence, and Goal 0008/0009 TTS semantics.
+
+See `docs/work/reviews/0012-a5-real-desktop-rejection.md` and the single ready Goal 0012 A6 contract.
+
+No human QA is authorized until A6 is terminal, CI-green, and director-accepted.
+
+## Starter shell containment
+
+**QUEUED AS GOAL 0013 — NOT ACTIVE**
+
+The same physical session showed Recents and Browser Tabs/adjacent starter groups visually overlapping. This is tracked separately as responsive starter-shell containment rather than mixed into Goal 0012's reader/TTS correction.
 
 ## Caliberate catalog covers / availability UX
 
@@ -83,10 +98,12 @@ Preserve the existing ordinary Windows voice backend. Goal 0011 remains a dorman
 
 **CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY FUTURE**
 
-Gate 3 native PDF visual stability remains future work and is not authorized while Goal 0012 awaits desktop signoff.
+Gate 3 native PDF visual stability remains future work and is not authorized during Goal 0012 A6.
 
 ## Workflow status
 
-**HUMAN QA GATE ACTIVE**
+**MACRO-GOAL / MULTI-ATTEMPT PROTOCOL ACTIVE**
 
-Goal 0012 is worker-terminal and director-accepted for one focused desktop pass. No new Codex macro-goal is authorized until that pass is reviewed. Goal 0010 remains queued; Goal 0011 remains deferred; PDF work remains future.
+Goal 0012 A6 is the single authorized goal in `docs/work/ready/`. Continue `codex/0012-pretty-presentation-controls-and-inline-images`, synchronize current `main` before implementation, re-arm the watcher, preserve A1–A5, and append Attempt A6 to `docs/work/reports/0012.md`.
+
+Goal 0010 and Goal 0013 remain queued; Goal 0011 remains deferred; PDF work remains future.
