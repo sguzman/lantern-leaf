@@ -39,22 +39,22 @@ A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558
 
 ## P2.7 — Goal 0012: pretty presentation controls + inline images
 
-**A2 REJECTED; A3 ASYNC WAKEUP CORRECTION IS THE SINGLE AUTHORIZED GOAL**
+**A3 DIRECTOR-ACCEPTED — REAL-DESKTOP SIGNOFF IS THE ACTIVE GATE**
 
-A1 already provides the desired native Presentation controls, app/book persistence/reset, safe EPUB image provenance/resolution, lazy bounded off-render-thread image decode, placeholders, aspect-ratio/media limits, and generated EPUB regressions. Its Windows CI is green.
+Automated/director-accepted implementation now provides:
 
-The next worker attempt also passed Windows CI and added useful normalized image-reference/provenance and layered-persistence coverage, but it did not synchronize the current director state from `main`; it executed the stale original Goal 0012 contract instead of the authorized async-wakeup correction.
+1. discoverable native Presentation controls separate from TTS;
+2. live font, spacing, margin, highlight, heading/base/paragraph/block/media rendering controls;
+3. existing app-default -> per-book persistence and presentation-only reset;
+4. safe EPUB image provenance/reference resolution with production-chain fixtures;
+5. lazy bounded off-render-thread pretty preparation and image decoding;
+6. worker-completion repaint wakeups for pretty-build success and image decode success/failure while TTS is idle;
+7. deterministic tests proving wakeup does not depend on later receiver polling and queue-full submission remains nonblocking;
+8. preserved Goal 0008/0009 TTS/canonical synchronization regressions.
 
-A3 must only:
+Accepted automated evidence: A3 implementation `dccc5b999aa7732d1f71a248d8595cf5bde4a40d`, terminal `ae411ffaadebebb23f137b40728dfb4dbc944048`, Windows CI `34655821185`.
 
-1. synchronize latest director `main` into the existing Goal 0012 worker branch before implementation, preserving A1 and useful prior additions;
-2. give pretty-build completion an explicit repaint wakeup;
-3. give successful and failed image-decode completion an explicit repaint wakeup;
-4. prove those notifications happen while TTS is inactive and independently of later receiver polling;
-5. preserve bounded/nonblocking queues and all heavy work off the render thread;
-6. preserve all A1 presentation/image behavior and Goal 0008/0009 regressions.
-
-No human QA until director accepts A3.
+One focused Windows desktop pass is required before Goal 0012 is finally closed. Do not start a new Codex macro-goal before that pass is reviewed.
 
 ## P2.8 — Goal 0010: Caliberate catalog covers + provider availability UX
 
@@ -70,7 +70,7 @@ Do not investigate, implement, or test Natural/Narrator/HD voices for now. Prese
 
 ## P3 — Native PDF visual stability
 
-**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED DURING GOAL 0012**
+**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED WHILE GOAL 0012 AWAITS SIGNOFF**
 
 - page raster/render ownership;
 - texture/cache lifecycle;
