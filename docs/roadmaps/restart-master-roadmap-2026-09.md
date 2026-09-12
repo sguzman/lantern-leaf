@@ -6,7 +6,7 @@ This is the active restart roadmap for the Windows/native-egui line. Completion 
 
 **STATUS: COMPLETE**
 
-Goals 0001–0005 established reproducible Windows CI, deterministic cache/test behavior, native-egui launch, and repaired bounded core contracts.
+Goals 0001–0005 established reproducible Windows CI, deterministic cache/test behavior, native-egui launch, repository-owned Windows QA, macro-goal notifications, and repaired bounded core contracts.
 
 ## Gate 1 — Backend-neutral TTS + Windows TTS
 
@@ -16,7 +16,7 @@ Accepted flow:
 
 `canonical sentence -> backend synthesis -> prepared audio -> Rodio first-sample boundary -> canonical ReaderSession -> native UI`
 
-Windows speaker playback, Play/Pause, and installed Windows voice switching are verified on the real Windows machine.
+Windows speaker playback, Play/Pause, ordinary installed voice switching, and first-sample-driven canonical cursor ownership are verified on the real Windows machine.
 
 ## Workflow UX — macro-goal notifications
 
@@ -26,13 +26,11 @@ Repository goal identity is durable; Codex Goal sessions are disposable attempts
 
 ## Gate 2 — Non-PDF reader/TTS
 
-**STATUS: CORE/PRETTY PATH ACCEPTED; GOAL 0009 A2 CORRECTION OPEN**
+**STATUS: COMPLETE FOR CURRENT TXT / MARKDOWN / HTML / EPUB READER PATH**
 
 Goal 0006 established automated parity for TXT, Markdown, HTML, and EPUB. Goal 0008 strengthened native EPUB identity and proved fast responsive pretty rendering, audible Windows speech, accurate spoken-sentence highlight, and viewport follow on the real machine.
 
-Goal 0009 A1 additionally passed real-desktop sustained playback without the prior duplicate ordinary line reads, preserved pretty synchronization, established Zira inheritance, and proved explicit per-book Mark voice persistence. A1 did not close the gate because actual pretty -> text-only transition regressed: both visual highlight and auto-scroll disappear.
-
-A2 also owns bounded TTS diagnostic layout, a persistent Close book/Back to library path, actual ordered Safe Quit behavior, and explicit same-session Windows recovery after failed Piper.
+Goal 0009 closed sustained playback correctness, pretty/text-only synchronization, layered Windows voice configuration, Piper failure recovery, Close book, and Safe Quit behavior with automated plus real-desktop acceptance.
 
 Human workflow remains `git pull -> .\qa.ps1`; no ordinary manual QA uses downloaded CI artifacts.
 
@@ -48,31 +46,51 @@ Large-catalog behavior, materialization, native EPUB ingestion, responsive rende
 
 ## Gate 2.6 — TTS playback polish + layered voice configuration
 
-**STATUS: A1 PARTIAL REAL-DESKTOP PASS; A2 READY**
+**STATUS: COMPLETE — GOAL 0009 CLOSED**
 
-Verified A1 wins:
+Accepted behavior includes sustained ordinary Windows playback without prior duplicate-line refill, synchronized pretty/text-only highlighting and follow, Zira app-default inheritance, per-book voice overrides, transactional Piper rejection/recovery, bounded diagnostics, Close book, and ordered Safe Quit.
 
-- sustained ordinary Windows playback no longer exhibited the unsolicited duplicate-line behavior;
-- pretty highlight/follow remain synchronized and responsive;
-- new/unoverridden Windows book uses Zira;
-- explicit per-book voice choice persists across reopen/restart;
-- unavailable Piper produces actionable failure without crashing.
+## Gate 2.7 — Pretty presentation controls + inline images
 
-A2 must close:
+**STATUS: COMPLETE — GOAL 0012 CLOSED**
 
-- production text-only highlight + auto-follow across the actual mode switch and subsequent boundaries;
-- side-panel width containment for long diagnostics/paths;
-- reliable persistent Close book/Back to library lifecycle;
-- Safe Quit that actually closes only after ordered persistence;
-- failed-Piper -> Windows same-session playback recovery proof.
+Goal 0012 now has automated, director, Windows CI, and real-desktop acceptance for the native pretty-reader presentation surface.
 
-Full Piper voice/model management remains outside this gate.
+Accepted behavior includes literal horizontal/vertical margins, geometry invalidation, scrollable settings, functional word/letter spacing, readable tables/TOCs, restrained blockquotes, explicit font fallback state, inline EPUB imagery, bounded off-render-thread pretty/image work, and durable spoken-sentence highlight/follow across geometry changes.
+
+A final human pass confirmed the visual corrections and TTS highlight behavior. One separate residual observation remains queued as Goal 0014: changing media max-width/max-height controls can disturb viewport anchoring and prevented physical confirmation of the visible media-size effect. That does not reopen Goal 0012.
+
+## Near-term shell / library cleanup
+
+### Goal 0013 — starter shell responsive panel containment
+
+**STATUS: READY — NEXT AUTHORIZED MACRO-GOAL**
+
+Repair the still-visible Recents / Calibre / Browser Tabs overlap using explicit responsive containment, wrapped/stacked child rows, and a stable one-column fallback when two readable columns do not fit.
+
+### Goal 0010 — Caliberate catalog covers + provider availability UX
+
+**STATUS: QUEUED**
+
+Add first-class lazy catalog covers, bounded visible-row loading, intentional loading/no-cover/error states, and correct provider-unavailable classification. Do not resurrect the withdrawn fake materialization defect from the test where Caliberate itself was not running.
+
+### Goal 0014 — media-sizing anchor stability
+
+**STATUS: QUEUED**
+
+Make live max-width/max-height media changes preserve viewport/media anchoring and visibly affect media when the selected limit is actually binding, while preserving Goal 0012 geometry/TTS behavior.
+
+### Goal 0011 — Windows Natural/HD voices
+
+**STATUS: DEFERRED BY USER**
+
+Do not investigate or test until explicitly re-authorized. Preserve the ordinary working Windows voice backend.
 
 ## Gate 3 — Native PDF visual stability
 
-**STATUS: NEXT, NOT YET AUTHORIZED**
+**STATUS: FUTURE CORE PRODUCT GATE; NOT CURRENTLY AUTHORIZED**
 
-After Gate 2.6 closes:
+After the current near-term native shell/library cleanup sequence:
 
 - page raster/rendering;
 - texture/cache lifecycle;
