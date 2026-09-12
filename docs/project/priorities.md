@@ -39,26 +39,23 @@ A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558
 
 ## P2.7 — Goal 0012: pretty presentation controls + inline images
 
-**A4 FONT REGISTRY / MISSING-FONT FALLBACK IS THE SINGLE AUTHORIZED GOAL**
+**A4 REJECTED; A5 REAL-EGUI FONT-LAYOUT PROOF IS THE SINGLE AUTHORIZED GOAL**
 
-A1–A3 already provide the desired Presentation UI, layered persistence/reset, EPUB image provenance and production fixtures, lazy bounded off-render-thread image decode, bounded texture/cache behavior, and explicit idle worker-completion repaint wakeups.
+A1–A3 provide the desired Presentation UI, layered persistence/reset, EPUB inline images, bounded off-render-thread work, and async completion wakeups.
 
-A3 automated evidence (`dccc5b9`, terminal `ae411ff`, Windows CI `34655821185`) was accepted for desktop QA, but the first physical Windows run crashed immediately after startup font discovery:
+A4 implementation `c92256fb429aea1d13707a811b0147e4337bbd05` adds the correct production direction: exact `FontRegistry` alias tracking and deterministic proportional/monospace fallback instead of assuming every named family exists. Windows workflow `34714389917` is green.
 
-`FontFamily::Name("LanternLeafProportionalRegular") is not bound to any fonts`
+A5 must only:
 
-The correction is narrow. A4 must:
+1. synchronize the actual latest director `main` into the existing Goal 0012 branch while preserving `c92256f`;
+2. retain exact-alias production fallback semantics;
+3. add controlled empty/partial/complete font-definition tests independent of host font inventory;
+4. install those definitions/styles into an egui `Context` and force body/heading/monospace plus representative pretty `LayoutJob` layout so the exact prior epaint panic class is exercised;
+5. cover missing Lexend, unrelated aliases, missing bold, missing monospace, unavailable per-book family, available real alias, bound-name invariants, and unchanged configured font intent;
+6. keep font discovery/file I/O out of ordinary render frames;
+7. preserve all Goal 0012 presentation/image/wakeup and Goal 0008/0009 TTS/canonical regressions.
 
-1. replace the coarse `inserted_any` / `fonts_configured` assumption with exact production-owned alias availability/registry semantics;
-2. ensure global egui TextStyles never reference an unbound LanternLeaf named family;
-3. ensure pretty/per-book font selection never manufactures an unbound family alias;
-4. provide deterministic fallback to a bound family or egui built-in family when requested regular/bold/monospace/optional fonts are absent;
-5. preserve configured app/book family intent instead of silently rewriting config because a font is unavailable on one machine;
-6. add controlled-font-availability tests, independent of CI font inventory, that force egui layout and catch the exact panic class;
-7. keep runtime render frames free of font discovery/file I/O;
-8. preserve all existing Goal 0012 presentation/image/async-wakeup behavior and Goal 0008/0009 TTS/canonical sync regressions.
-
-No human QA until A4 is director-accepted.
+No human QA until A5 is director-accepted.
 
 ## P2.8 — Goal 0010: Caliberate catalog covers + provider availability UX
 
@@ -74,7 +71,7 @@ Do not investigate, implement, or test Natural/Narrator/HD voices for now. Prese
 
 ## P3 — Native PDF visual stability
 
-**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED DURING GOAL 0012 A4**
+**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED DURING GOAL 0012 A5**
 
 - page raster/render ownership;
 - texture/cache lifecycle;
