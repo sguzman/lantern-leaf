@@ -14,7 +14,7 @@ use std::thread;
 use crate::app::ui::{bounded_diagnostic, format::format_duration_secs};
 use crate::app::{
     AnchorFallback, LanternLeafApp, PrettySentenceSegment, PrettySentenceTarget,
-    RepaintNotifier,
+    FontRegistry, RepaintNotifier,
     text_only_mode_transition,
 };
 use crate::pretty::{
@@ -240,7 +240,7 @@ impl LanternLeafApp {
                                 presentation_font_families(
                                     snapshot.settings.font_family,
                                     snapshot.settings.font_weight,
-                                    self.fonts_configured,
+                                    &self.font_registry,
                                 );
 
                             let total_blocks = self.pretty_page_cache_blocks.len();
@@ -1601,21 +1601,8 @@ fn heading_size(
 fn presentation_font_families(
     family: lanternleaf_core::config::FontFamily,
     weight: lanternleaf_core::config::FontWeight,
-    configured: bool,
+    registry: &FontRegistry,
 ) -> (FontFamily, FontFamily, FontFamily, FontFamily) {
-    if !configured {
-        let regular = if matches!(family, lanternleaf_core::config::FontFamily::Monospace) {
-            FontFamily::Monospace
-        } else {
-            FontFamily::Proportional
-        };
-        return (
-            regular.clone(),
-            regular,
-            FontFamily::Monospace,
-            FontFamily::Monospace,
-        );
-    }
     let slug = match family {
         lanternleaf_core::config::FontFamily::Sans => "Sans",
         lanternleaf_core::config::FontFamily::Serif => "Serif",
@@ -1638,11 +1625,24 @@ fn presentation_font_families(
         lanternleaf_core::config::FontWeight::Normal => "Regular",
         lanternleaf_core::config::FontWeight::Bold => "Bold",
     };
+    let fallback_regular = if matches!(family, lanternleaf_core::config::FontFamily::Monospace) {
+        FontFamily::Monospace
+    } else {
+        FontFamily::Proportional
+    };
+    let regular_alias = format!("LanternLeafFamily{slug}{regular_weight}");
+    let bold_alias = format!("LanternLeafFamily{slug}Bold");
+    let regular = registry
+        .named(&regular_alias)
+        .unwrap_or_else(|| fallback_regular.clone());
+    let bold = registry
+        .named(&bold_alias)
+        .unwrap_or_else(|| regular.clone());
     (
-        FontFamily::Name(format!("LanternLeafFamily{slug}{regular_weight}").into()),
-        FontFamily::Name(format!("LanternLeafFamily{slug}Bold").into()),
-        FontFamily::Name(format!("LanternLeafFamily{slug}{regular_weight}").into()),
-        FontFamily::Name(format!("LanternLeafFamily{slug}Bold").into()),
+        regular,
+        bold,
+        registry.monospace_regular(),
+        registry.monospace_bold(),
     )
 }
 
@@ -1897,6 +1897,33 @@ fn append_spaced_text(
 mod tests {
     use super::*;
     use crate::pretty::PrettySourceKind;
+
+    #[test]
+    fn missing_optional_font_falls_back_to_bound_builtin_families() {
+        let registry = FontRegistry::default();
+        let (regular, bold, mono_regular, mono_bold) = presentation_font_families(
+            lanternleaf_core::config::FontFamily::Lexend,
+            lanternleaf_core::config::FontWeight::Bold,
+            &registry,
+        );
+        assert_eq!(regular, FontFamily::Proportional);
+        assert_eq!(bold, FontFamily::Proportional);
+        assert_eq!(mono_regular, FontFamily::Monospace);
+        assert_eq!(mono_bold, FontFamily::Monospace);
+
+        let configured = FontRegistry {
+            aliases: vec!["LanternLeafFamilySerifRegular".to_string()],
+        };
+        let (regular, bold, mono_regular, mono_bold) = presentation_font_families(
+            lanternleaf_core::config::FontFamily::Serif,
+            lanternleaf_core::config::FontWeight::Normal,
+            &configured,
+        );
+        assert!(matches!(regular, FontFamily::Name(_)));
+        assert_eq!(bold, regular);
+        assert_eq!(mono_regular, FontFamily::Monospace);
+        assert_eq!(mono_bold, FontFamily::Monospace);
+    }
 
     #[test]
     fn highlight_matching_finds_sentence() {

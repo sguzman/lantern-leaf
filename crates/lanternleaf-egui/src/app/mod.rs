@@ -404,7 +404,7 @@ struct LanternLeafApp {
     runtime: AppRuntime,
     #[cfg(not(target_arch = "wasm32"))]
     _tracing_guard: tracing_appender::non_blocking::WorkerGuard,
-    fonts_configured: bool,
+    font_registry: FontRegistry,
     status_log: Vec<StatusLogEntry>,
     show_safe_quit_modal: bool,
     show_reader_confirm_modal: bool,
@@ -867,7 +867,7 @@ impl LanternLeafApp {
         app_config: config::AppConfig,
         normalizer: normalizer::TextNormalizer,
     ) -> Self {
-        let fonts_configured = setup_egui_fonts(&cc.egui_ctx, &app_config);
+        let font_registry = setup_egui_fonts(&cc.egui_ctx, &app_config);
         let pdf_renderer = match NativePdfRenderer::new() {
             Ok(renderer) => Some(renderer),
             Err(err) => {
@@ -905,7 +905,7 @@ impl LanternLeafApp {
         let mut app = Self {
             runtime,
             _tracing_guard: tracing_guard,
-            fonts_configured,
+            font_registry,
             status_log: Vec::new(),
             show_safe_quit_modal: false,
             show_reader_confirm_modal: false,
@@ -992,7 +992,7 @@ impl LanternLeafApp {
         app_config: config::AppConfig,
         normalizer: normalizer::TextNormalizer,
     ) -> Self {
-        let fonts_configured = setup_egui_fonts(&cc.egui_ctx, &app_config);
+        let font_registry = setup_egui_fonts(&cc.egui_ctx, &app_config);
 
         let url = app_config
             .remote_url
@@ -1024,7 +1024,7 @@ impl LanternLeafApp {
 
         let mut app = Self {
             runtime,
-            fonts_configured,
+            font_registry,
             status_log: Vec::new(),
             show_safe_quit_modal: false,
             show_reader_confirm_modal: false,
@@ -2813,7 +2813,41 @@ fn highlight_from_color32(color: Color32) -> config::HighlightColor {
     }
 }
 
-fn setup_egui_fonts(ctx: &Context, cfg: &config::AppConfig) -> bool {
+#[derive(Clone, Debug, Default)]
+struct FontRegistry {
+    aliases: Vec<String>,
+}
+
+impl FontRegistry {
+    fn named(&self, alias: &str) -> Option<FontFamily> {
+        self.aliases
+            .iter()
+            .any(|registered| registered == alias)
+            .then(|| FontFamily::Name(alias.to_string().into()))
+    }
+
+    fn proportional_regular(&self) -> FontFamily {
+        self.named("LanternLeafProportionalRegular")
+            .unwrap_or(FontFamily::Proportional)
+    }
+
+    fn proportional_bold(&self) -> FontFamily {
+        self.named("LanternLeafProportionalBold")
+            .unwrap_or_else(|| self.proportional_regular())
+    }
+
+    fn monospace_regular(&self) -> FontFamily {
+        self.named("LanternLeafMonospaceRegular")
+            .unwrap_or(FontFamily::Monospace)
+    }
+
+    fn monospace_bold(&self) -> FontFamily {
+        self.named("LanternLeafMonospaceBold")
+            .unwrap_or_else(|| self.monospace_regular())
+    }
+}
+
+fn setup_egui_fonts(ctx: &Context, cfg: &config::AppConfig) -> FontRegistry {
     let requested = cfg.font_family.to_string();
     let mut db = fontdb::Database::new();
     db.load_system_fonts();
@@ -2835,6 +2869,7 @@ fn setup_egui_fonts(ctx: &Context, cfg: &config::AppConfig) -> bool {
     let mono_bold = pick_face(&db, &mono_requested, true).or(mono_regular);
 
     let mut fonts = FontDefinitions::default();
+    let mut registry = FontRegistry::default();
     let mut inserted_any = false;
 
     // Presentation settings are live per-book settings. Register the small
@@ -2884,7 +2919,8 @@ fn setup_egui_fonts(ctx: &Context, cfg: &config::AppConfig) -> bool {
                 .insert(data_name.clone(), FontData::from_owned(bytes));
             fonts
                 .families
-                .insert(FontFamily::Name(alias.into()), vec![data_name]);
+                .insert(FontFamily::Name(alias.clone().into()), vec![data_name]);
+            registry.aliases.push(alias);
             inserted_any = true;
         }
     }
@@ -2898,6 +2934,9 @@ fn setup_egui_fonts(ctx: &Context, cfg: &config::AppConfig) -> bool {
                 FontFamily::Name("LanternLeafProportionalRegular".into()),
                 vec!["ll-prop-regular".to_string()],
             );
+            registry
+                .aliases
+                .push("LanternLeafProportionalRegular".to_string());
             inserted_any = true;
         }
     }
@@ -2910,6 +2949,9 @@ fn setup_egui_fonts(ctx: &Context, cfg: &config::AppConfig) -> bool {
                 FontFamily::Name("LanternLeafProportionalBold".into()),
                 vec!["ll-prop-bold".to_string()],
             );
+            registry
+                .aliases
+                .push("LanternLeafProportionalBold".to_string());
             inserted_any = true;
         }
     }
@@ -2922,6 +2964,9 @@ fn setup_egui_fonts(ctx: &Context, cfg: &config::AppConfig) -> bool {
                 FontFamily::Name("LanternLeafMonospaceRegular".into()),
                 vec!["ll-mono-regular".to_string()],
             );
+            registry
+                .aliases
+                .push("LanternLeafMonospaceRegular".to_string());
             inserted_any = true;
         }
     }
@@ -2934,6 +2979,9 @@ fn setup_egui_fonts(ctx: &Context, cfg: &config::AppConfig) -> bool {
                 FontFamily::Name("LanternLeafMonospaceBold".into()),
                 vec!["ll-mono-bold".to_string()],
             );
+            registry
+                .aliases
+                .push("LanternLeafMonospaceBold".to_string());
             inserted_any = true;
         }
     }
@@ -2951,31 +2999,31 @@ fn setup_egui_fonts(ctx: &Context, cfg: &config::AppConfig) -> bool {
                 TextStyle::Body,
                 eframe::egui::FontId::new(
                     base,
-                    FontFamily::Name("LanternLeafProportionalRegular".into()),
+                    registry.proportional_regular(),
                 ),
             );
             style.text_styles.insert(
                 TextStyle::Heading,
                 eframe::egui::FontId::new(
                     (base * 1.25).max(10.0),
-                    FontFamily::Name("LanternLeafProportionalBold".into()),
+                    registry.proportional_bold(),
                 ),
             );
             style.text_styles.insert(
                 TextStyle::Monospace,
                 eframe::egui::FontId::new(
                     (base * 0.95).max(9.0),
-                    FontFamily::Name("LanternLeafMonospaceRegular".into()),
+                    registry.monospace_regular(),
                 ),
             );
         });
-        true
+        registry
     } else {
         tracing::warn!(
             requested_family = %requested,
             "Unable to resolve system font family; using egui defaults"
         );
-        false
+        registry
     }
 }
 
