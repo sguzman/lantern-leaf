@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-12 after Goal 0012 A7 director acceptance for focused real-desktop signoff.
+Updated: 2026-09-12 after Goal 0012 final real-desktop acceptance and Goal 0013 promotion.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -45,11 +45,11 @@ Stable audible TTS, no unsolicited duplicate ordinary lines, correct pretty/text
 
 ## Goal 0012 — pretty presentation controls and inline images
 
-**A7 DIRECTOR-ACCEPTED — FOCUSED REAL-DESKTOP SIGNOFF PENDING**
+**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-Physical Windows QA after A5 already verified startup on the formerly crashing configuration, inline/cover EPUB imagery, the Presentation surface, multiple working visual controls, and synchronized canonical TTS identity/follow.
+Goal 0012 is finally closed.
 
-A6 implementation `6dcf9815ef87303caa3a3421bb8cc9e832f6b8ea` added the substantive presentation correction set:
+Accepted presentation/image behavior includes:
 
 - literal horizontal margins with no hidden 720-px text-column cap;
 - vertical margin as viewport/frame inset rather than scroll-document padding;
@@ -57,27 +57,33 @@ A6 implementation `6dcf9815ef87303caa3a3421bb8cc9e832f6b8ea` added the substanti
 - vertically scrollable settings/presentation body;
 - real-egui word/letter-spacing behavior;
 - readable table/TOC widths with horizontal overflow;
+- restrained measured blockquote styling;
 - visible optional-font availability/effective fallback state;
-- media sizing evidence while preserving inline image behavior.
+- inline EPUB/cover imagery with bounded off-render-thread preparation/decode;
+- stateful geometry-change -> follow -> consume -> ordinary render-window behavior that preserves active spoken highlighting without permanent target forcing;
+- canonical Goal 0008/0009 TTS ownership and synchronization.
 
-A7 implementation `6fd324869ce6cca0c858c3ee32fabe627efba47b` closes the remaining director blockers:
+A6 implementation `6dcf9815ef87303caa3a3421bb8cc9e832f6b8ea` and A7 implementation `6fd324869ce6cca0c858c3ee32fabe627efba47b` are the accepted production corrections. Windows baseline run `34723376577` passed native workspace and hosted renderer jobs.
 
-- blockquote rule geometry is derived from the final measured quote frame rectangle rather than pre-layout `ui.max_rect()`;
-- a real egui long-quote regression proves the rule remains within the quote and does not bleed into neighboring paragraphs;
-- a stateful geometry-A -> geometry-B -> follow -> consume -> subsequent ordinary render-window regression runs across 64 canonical boundaries and proves the active target remains naturally renderable after the one-shot follow lifecycle is consumed;
-- canonical playback/highlight ownership remains unchanged and no permanent target forcing was introduced.
+Final physical Windows QA confirmed the previously failing visual controls now work, inline images remain present, and spoken-sentence highlighting remains continuously visible after follow/scroll. See `docs/work/reviews/0012-real-desktop-acceptance.md`.
 
-Windows baseline run `34723376577` passed both native workspace and hosted renderer jobs, including workspace tests, Windows TTS, repository QA preparation, watcher policy, and hosted renderer capability gates.
+One non-blocking residual observation is intentionally separate: live media max-width/max-height changes caused an unexpected scroll jump and the visible image-size effect could not be physically verified in that pass. Automated sizing evidence remains accepted; the interactive anchoring/observability issue is queued as Goal 0014 rather than reopening Goal 0012.
 
-One focused physical Windows pass is now authorized. Goal 0012 is not finally closed until that pass verifies literal margins, panel scrolling, word/letter spacing, readable TOCs/tables, restrained blockquotes, understandable font fallback, idle inline images, and continuously visible spoken-sentence pretty highlighting.
+## Goal 0013 — starter shell responsive panel containment
 
-See `docs/work/reviews/0012-a7-director-acceptance.md`.
+**READY — NEXT AUTHORIZED CODEX MACRO-GOAL**
 
-## Starter shell containment
+Physical QA still shows some Recents / Calibre / Browser Tabs starter-shell bleed at ordinary desktop width, though substantially less severe than the original failure. Goal 0013 owns responsive column containment, wrapped/stacked child layout, and a conservative one-column fallback when two readable columns do not fit.
 
-**QUEUED AS GOAL 0013 — NOT ACTIVE**
+This remains separate from reader presentation/TTS semantics.
 
-Physical QA showed Recents and Browser Tabs/adjacent starter groups visually overlapping. This remains a separate responsive starter-shell containment goal and is not part of Goal 0012 signoff.
+## Goal 0014 — reader media-sizing anchor stability
+
+**QUEUED — NOT ACTIVE**
+
+During final Goal 0012 physical signoff, changing media max-width/max-height controls could throw the reader viewport to an unrelated location while the visible image appeared unchanged. Goal 0014 will distinguish genuinely non-binding media limits from stale/wired incorrectly media geometry and preserve a stable viewport/media anchor across live media-size changes.
+
+Do not reopen Goal 0012 for this residual.
 
 ## Caliberate catalog covers / availability UX
 
@@ -97,12 +103,10 @@ Preserve the existing ordinary Windows voice backend. Goal 0011 remains a dorman
 
 **CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY FUTURE**
 
-Gate 3 native PDF visual stability remains future work and is not authorized while Goal 0012 awaits physical signoff.
+Gate 3 native PDF visual stability remains future work and is not currently authorized while the starter shell / near-term non-PDF cleanup sequence proceeds.
 
 ## Workflow status
 
-**HUMAN QA GATE ACTIVE**
+**GOAL 0013 READY**
 
-Goal 0012 A7 is worker-terminal, CI-green, integrated, and director-accepted for one focused desktop pass. No new Codex macro-goal is authorized until that pass is reviewed.
-
-Goal 0010 and Goal 0013 remain queued; Goal 0011 remains deferred; PDF work remains future.
+Goal 0012 is closed. Goal 0013 is the single authorized next macro-goal. Goal 0010 and Goal 0014 remain queued; Goal 0011 remains deferred; PDF work remains future.
