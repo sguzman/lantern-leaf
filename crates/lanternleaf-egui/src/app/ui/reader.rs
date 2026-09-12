@@ -7,20 +7,22 @@ use lanternleaf_app::pipeline::ReaderCommand;
 use lanternleaf_app::state::AppState;
 use lanternleaf_core::session::{ReaderSettingsPatch, SessionCommand};
 use lanternleaf_core::text_utils;
-use tracing::trace;
 use std::sync::mpsc;
 use std::thread;
+use tracing::trace;
 
 use crate::app::ui::{bounded_diagnostic, format::format_duration_secs};
 use crate::app::{
-    AnchorFallback, LanternLeafApp, PrettySentenceSegment, PrettySentenceTarget,
-    FontRegistry, RepaintNotifier,
-    text_only_mode_transition,
+    AnchorFallback, FontRegistry, LanternLeafApp, PrettySentenceSegment, PrettySentenceTarget,
+    RepaintNotifier, text_only_mode_transition,
 };
 use crate::pretty::{
-    PrettyBlock, PrettyBlockKind, PrettyPageCacheKey, PrettySpan, PrettyStyle,
-    clamp_image_size, font_id_for, html_to_blocks, markdown_to_blocks, structured_to_blocks,
+    PrettyBlock, PrettyBlockKind, PrettyPageCacheKey, PrettySpan, PrettyStyle, clamp_image_size,
+    font_id_for, html_to_blocks, markdown_to_blocks, structured_to_blocks,
 };
+
+const BLOCKQUOTE_RULE_WIDTH: f32 = 1.0;
+const BLOCKQUOTE_INDENT: f32 = 14.0;
 
 pub(crate) struct PrettyBuildRequest {
     pub(crate) key: PrettyPageCacheKey,
@@ -33,7 +35,9 @@ pub(crate) struct PrettyBuildResult {
     pub(crate) targets: Vec<Option<PrettySentenceTarget>>,
 }
 
-pub(crate) fn start_pretty_builder(notify_repaint: RepaintNotifier) -> (
+pub(crate) fn start_pretty_builder(
+    notify_repaint: RepaintNotifier,
+) -> (
     mpsc::SyncSender<PrettyBuildRequest>,
     mpsc::Receiver<PrettyBuildResult>,
 ) {
@@ -212,21 +216,24 @@ impl LanternLeafApp {
                 ui.label(snapshot.page_text.trim());
                 return;
             }
-            ScrollArea::vertical()
-                .id_source("pretty_page")
-                .show_viewport(ui, |ui, viewport| {
-                    let horizontal_margin = snapshot.settings.margin_horizontal as f32;
-                    let vertical_margin = snapshot.settings.margin_vertical as f32;
-                    let max_width = (ui.available_width() - horizontal_margin * 2.0)
-                        .clamp(240.0, 720.0);
-                    let available_width = ui.available_width();
-                    let margin = ((available_width - max_width) / 2.0).max(0.0);
-
-                    ui.horizontal(|ui| {
-                        ui.add_space(margin);
-                        ui.vertical(|ui| {
-                            ui.add_space(vertical_margin);
-                            ui.set_max_width(max_width);
+            let horizontal_margin = snapshot.settings.margin_horizontal as f32;
+            let vertical_margin = snapshot.settings.margin_vertical as f32;
+            let (content_width, effective_horizontal_margin) =
+                pretty_content_geometry(ui.available_width(), horizontal_margin);
+            Frame::none()
+                .inner_margin(eframe::egui::Margin {
+                    left: effective_horizontal_margin,
+                    right: effective_horizontal_margin,
+                    top: vertical_margin,
+                    bottom: vertical_margin,
+                })
+                .show(ui, |ui| {
+                    ScrollArea::vertical()
+                        .id_source("pretty_page")
+                        .show_viewport(ui, |ui, viewport| {
+                    ui.set_width(content_width);
+                    ui.vertical(|ui| {
+                            ui.set_width(content_width);
                             let mut pretty_cfg = snapshot.settings.pretty;
                             // The top-level reader spacing fields remain the
                             // canonical config/persistence owner; copy them
@@ -243,6 +250,14 @@ impl LanternLeafApp {
                                     &self.font_registry,
                                 );
 
+                            let geometry_key = pretty_geometry_key(snapshot, content_width);
+                            if pretty_geometry_changed(
+                                self.pretty_geometry_key.as_deref(),
+                                &geometry_key,
+                            ) {
+                                self.pretty_block_heights.clear();
+                                self.pretty_geometry_key = Some(geometry_key);
+                            }
                             let total_blocks = self.pretty_page_cache_blocks.len();
                             let overscan = 8usize;
                             let estimates = self.pretty_block_heights_for(base_px, pretty_cfg);
@@ -388,22 +403,28 @@ impl LanternLeafApp {
                                             )
                                         };
                                         if matches!(block.kind, PrettyBlockKind::BlockQuote) {
-                                            let border_color = ui.visuals().widgets.active.bg_fill;
+                                            let border_color = ui
+                                                .visuals()
+                                                .weak_text_color()
+                                                .linear_multiply(0.55);
                                             let bg_fill =
-                                                ui.visuals().widgets.noninteractive.bg_fill;
+                                                ui.visuals().faint_bg_color.linear_multiply(0.35);
                                             Frame::none()
                                                 .fill(bg_fill)
                                                 .inner_margin(eframe::egui::Margin {
-                                                    left: 16.0,
+                                                    left: BLOCKQUOTE_INDENT,
                                                     right: 8.0,
-                                                    top: 8.0,
-                                                    bottom: 8.0,
+                                                    top: 6.0,
+                                                    bottom: 6.0,
                                                 })
                                                 .show(ui, |ui| {
                                                     let rect = ui.max_rect();
                                                     ui.painter().line_segment(
                                                         [rect.left_top(), rect.left_bottom()],
-                                                        Stroke::new(3.0, border_color),
+                                                        Stroke::new(
+                                                            BLOCKQUOTE_RULE_WIDTH,
+                                                            border_color,
+                                                        ),
                                                     );
                                                     response =
                                                         Some(ui.add(Label::new(job).wrap(true)));
@@ -556,6 +577,13 @@ impl LanternLeafApp {
                                             ui.label("[table]");
                                             continue;
                                         };
+                                        let column_widths = table_column_widths(
+                                            rows,
+                                            ui.available_width(),
+                                            base_px,
+                                            pretty_cfg.table_cell_padding,
+                                        );
+                                        let table_width = column_widths.iter().sum::<f32>();
                                         let stripe = ui.visuals().faint_bg_color.linear_multiply(
                                             pretty_cfg.table_stripe_alpha.clamp(0.0, 1.0),
                                         );
@@ -568,23 +596,28 @@ impl LanternLeafApp {
                                             .linear_multiply(
                                                 pretty_cfg.table_border_alpha.clamp(0.0, 1.0),
                                             );
-                                        Frame::none()
-                                            .stroke(Stroke::new(1.0, border))
-                                            .inner_margin(eframe::egui::Margin::symmetric(
-                                                pretty_cfg.table_cell_padding,
-                                                pretty_cfg.table_cell_padding,
-                                            ))
+                                        ScrollArea::horizontal()
+                                            .id_source(format!("pretty_table_scroll_{}", block_i))
+                                            .auto_shrink([false, true])
                                             .show(ui, |ui| {
-                                                Grid::new(format!("pretty_table_{}", block_i))
-                                                    .spacing([
+                                                ui.set_min_width(table_width);
+                                                Frame::none()
+                                                    .stroke(Stroke::new(1.0_f32, border))
+                                                    .inner_margin(eframe::egui::Margin::symmetric(
                                                         pretty_cfg.table_cell_padding,
                                                         pretty_cfg.table_cell_padding,
-                                                    ])
-                                                    .striped(true)
+                                                    ))
                                                     .show(ui, |ui| {
+                                                        Grid::new(format!("pretty_table_{}", block_i))
+                                                            .spacing([
+                                                                pretty_cfg.table_cell_padding,
+                                                                pretty_cfg.table_cell_padding,
+                                                            ])
+                                                            .striped(true)
+                                                            .show(ui, |ui| {
                                                         for (row_i, row) in rows.iter().enumerate()
                                                         {
-                                                            for cell in row {
+                                                            for (column_i, cell) in row.iter().enumerate() {
                                                                 let mut spans = cell.spans.clone();
                                                                 if cell.header {
                                                                     for span in &mut spans {
@@ -609,6 +642,12 @@ impl LanternLeafApp {
                                                                     Frame::none()
                                                                 };
                                                                 cell_frame.show(ui, |ui| {
+                                                                    ui.set_width(
+                                                                        column_widths
+                                                                            .get(column_i)
+                                                                            .copied()
+                                                                            .unwrap_or(120.0),
+                                                                    );
                                                                     ui.add(
                                                                         Label::new(job).wrap(true),
                                                                     );
@@ -616,6 +655,7 @@ impl LanternLeafApp {
                                                             }
                                                             ui.end_row();
                                                         }
+                                                            });
                                                     });
                                             });
                                     }
@@ -671,14 +711,13 @@ impl LanternLeafApp {
                                 }
                                 ui.add_space(spacing.max(0.0));
                             }
-                            ui.add_space(vertical_margin);
                             ui.add_space(
                                 total_height
                                     - prefix.get(render_end).copied().unwrap_or(total_height),
                             );
                             self.pretty_block_heights = measured_heights;
-                        });
                     });
+                        });
                 });
         });
         trace!(
@@ -1323,6 +1362,47 @@ fn pretty_render_window(
     visible_start.saturating_sub(overscan)..(visible_end + overscan).min(total_blocks)
 }
 
+fn pretty_content_geometry(available_width: f32, requested_margin: f32) -> (f32, f32) {
+    let minimum_width = 160.0;
+    let max_inset = ((available_width - minimum_width) / 2.0).max(0.0);
+    let inset = requested_margin.max(0.0).min(max_inset);
+    ((available_width - inset * 2.0).max(minimum_width), inset)
+}
+
+fn table_column_widths(
+    rows: &[Vec<crate::pretty::PrettyCell>],
+    available_width: f32,
+    base_px: f32,
+    cell_padding: f32,
+) -> Vec<f32> {
+    let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
+    if column_count == 0 {
+        return Vec::new();
+    }
+    let minimum = (base_px * 6.0 + cell_padding * 2.0).max(96.0);
+    let mut widths = vec![minimum; column_count];
+    for row in rows {
+        for (column, cell) in row.iter().enumerate() {
+            let characters = cell
+                .spans
+                .iter()
+                .map(|span| span.text.chars().count())
+                .sum::<usize>() as f32;
+            widths[column] = widths[column]
+                .max(characters * base_px * 0.52 + cell_padding * 2.0 + 12.0)
+                .min(420.0);
+        }
+    }
+    let total = widths.iter().sum::<f32>();
+    if total < available_width {
+        let extra = (available_width - total) / column_count as f32;
+        for width in &mut widths {
+            *width += extra;
+        }
+    }
+    widths
+}
+
 fn estimated_block_height(
     block: &PrettyBlock,
     base_px: f32,
@@ -1646,6 +1726,31 @@ fn presentation_font_families(
     )
 }
 
+fn pretty_geometry_key(snapshot: &ReaderSnapshot, content_width: f32) -> String {
+    let mut pretty_cfg = snapshot.settings.pretty;
+    pretty_cfg.word_spacing = snapshot.settings.word_spacing;
+    pretty_cfg.letter_spacing = snapshot.settings.letter_spacing;
+    format!(
+        "{:?}",
+        (
+            content_width.to_bits(),
+            snapshot.settings.margin_horizontal,
+            snapshot.settings.margin_vertical,
+            snapshot.settings.font_size,
+            snapshot.settings.line_spacing,
+            snapshot.settings.word_spacing,
+            snapshot.settings.letter_spacing,
+            snapshot.settings.font_family,
+            snapshot.settings.font_weight,
+            pretty_cfg,
+        )
+    )
+}
+
+fn pretty_geometry_changed(previous: Option<&str>, current: &str) -> bool {
+    previous != Some(current)
+}
+
 fn spans_to_job(
     ui: &Ui,
     spans: &[PrettySpan],
@@ -1880,16 +1985,30 @@ fn append_spaced_text(
     format: TextFormat,
     pretty_cfg: lanternleaf_core::config::PrettyUiConfig,
 ) {
-    for (start, character) in text.char_indices() {
-        let end = start + character.len_utf8();
-        let mut character_format = format.clone();
-        character_format.extra_letter_spacing = pretty_cfg.letter_spacing as f32
-            + if character.is_whitespace() {
-                pretty_cfg.word_spacing as f32
-            } else {
-                0.0
-            };
-        job.append(&text[start..end], 0.0, character_format);
+    let letter_spacing = pretty_cfg.letter_spacing as f32;
+    let word_spacing = pretty_cfg.word_spacing as f32;
+    let mut leading_word_spacing = 0.0;
+    let mut has_content = false;
+    for segment in text.split_inclusive(|character: char| character.is_whitespace()) {
+        let split_at = segment
+            .find(|character: char| character.is_whitespace())
+            .unwrap_or(segment.len());
+        let (content, whitespace) = segment.split_at(split_at);
+        if !content.is_empty() {
+            let mut content_format = format.clone();
+            content_format.extra_letter_spacing = letter_spacing;
+            job.append(content, leading_word_spacing, content_format);
+            has_content = true;
+            leading_word_spacing = 0.0;
+        }
+        if !whitespace.is_empty() {
+            let mut whitespace_format = format.clone();
+            whitespace_format.extra_letter_spacing = letter_spacing;
+            job.append(whitespace, 0.0, whitespace_format);
+            if has_content && !whitespace.contains('\n') {
+                leading_word_spacing = word_spacing;
+            }
+        }
     }
 }
 
@@ -1902,6 +2021,8 @@ mod tests {
     fn controlled_registry(aliases: &[&str]) -> FontRegistry {
         FontRegistry {
             aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(),
+            available_families: Vec::new(),
+            available_faces: Vec::new(),
         }
     }
 
@@ -1970,11 +2091,8 @@ mod tests {
             }
 
             eframe::egui::CentralPanel::default().show(ctx, |ui| {
-                let (regular, bold, mono_regular, mono_bold) = presentation_font_families(
-                    configured_family,
-                    configured_weight,
-                    registry,
-                );
+                let (regular, bold, mono_regular, mono_bold) =
+                    presentation_font_families(configured_family, configured_weight, registry);
                 let job = spans_to_job(
                     ui,
                     &[
@@ -2029,6 +2147,8 @@ mod tests {
 
         let configured = FontRegistry {
             aliases: vec!["LanternLeafFamilySerifRegular".to_string()],
+            available_families: Vec::new(),
+            available_faces: Vec::new(),
         };
         let (regular, bold, mono_regular, mono_bold) = presentation_font_families(
             lanternleaf_core::config::FontFamily::Serif,
@@ -2071,11 +2191,8 @@ mod tests {
 
         for (case, registry, configured_family, configured_weight) in cases {
             let configured_before = (configured_family, configured_weight);
-            let (regular, bold, mono_regular, mono_bold) = presentation_font_families(
-                configured_family,
-                configured_weight,
-                &registry,
-            );
+            let (regular, bold, mono_regular, mono_bold) =
+                presentation_font_families(configured_family, configured_weight, &registry);
             for family in [&regular, &bold, &mono_regular, &mono_bold] {
                 if let FontFamily::Name(name) = family {
                     assert!(
@@ -2092,6 +2209,155 @@ mod tests {
                 configured_before,
                 "{case}: fallback must not rewrite configured presentation intent"
             );
+        }
+    }
+
+    fn layout_width_for(
+        ctx: &eframe::egui::Context,
+        spans: &[PrettySpan],
+        pretty_cfg: lanternleaf_core::config::PrettyUiConfig,
+    ) -> f32 {
+        let mut width = 0.0;
+        let _ = ctx.run(Default::default(), |ctx| {
+            eframe::egui::CentralPanel::default().show(ctx, |ui| {
+                let (regular, bold, mono_regular, mono_bold) = presentation_font_families(
+                    lanternleaf_core::config::FontFamily::Sans,
+                    lanternleaf_core::config::FontWeight::Normal,
+                    &FontRegistry::default(),
+                );
+                let job = spans_to_job(
+                    ui,
+                    spans,
+                    18.0,
+                    None,
+                    regular,
+                    bold,
+                    mono_regular,
+                    mono_bold,
+                    pretty_cfg,
+                    1.0,
+                );
+                width = ui.fonts(|fonts| fonts.layout_job(job).size().x);
+            });
+        });
+        width
+    }
+
+    #[test]
+    fn pretty_margin_geometry_is_literal_and_monotonic() {
+        let zero = pretty_content_geometry(1000.0, 0.0);
+        let medium = pretty_content_geometry(1000.0, 48.0);
+        let high = pretty_content_geometry(1000.0, 120.0);
+        assert_eq!(zero, (1000.0, 0.0));
+        assert!(medium.0 < zero.0 && medium.1 > zero.1);
+        assert!(high.0 < medium.0 && high.1 > medium.1);
+        assert!(high.0 >= 160.0);
+    }
+
+    #[test]
+    fn presentation_geometry_change_invalidates_measured_height_authority() {
+        assert!(pretty_geometry_changed(Some("geometry-a"), "geometry-b"));
+        assert!(!pretty_geometry_changed(Some("geometry-a"), "geometry-a"));
+        assert!(pretty_geometry_changed(None, "geometry-a"));
+    }
+
+    #[test]
+    fn production_pretty_layout_proves_word_and_letter_spacing_change_width() {
+        let registry = controlled_registry(&[]);
+        let ctx = controlled_context(&registry);
+        let spans = [
+            PrettySpan {
+                text: "alpha beta ".to_owned(),
+                style: PrettyStyle::default(),
+            },
+            PrettySpan {
+                text: "bold".to_owned(),
+                style: PrettyStyle {
+                    bold: true,
+                    ..Default::default()
+                },
+            },
+            PrettySpan {
+                text: " code".to_owned(),
+                style: PrettyStyle {
+                    code: true,
+                    italics: true,
+                    ..Default::default()
+                },
+            },
+        ];
+        let zero = lanternleaf_core::config::PrettyUiConfig::default();
+        let mut letter = zero;
+        letter.letter_spacing = 3;
+        let mut word = zero;
+        word.word_spacing = 12;
+        let zero_width = layout_width_for(&ctx, &spans, zero);
+        let letter_width = layout_width_for(&ctx, &spans, letter);
+        let word_width = layout_width_for(&ctx, &spans, word);
+        assert!(letter_width > zero_width + 1.0);
+        assert!(word_width > zero_width + 1.0);
+    }
+
+    #[test]
+    fn toc_table_policy_keeps_columns_readable_and_allows_overflow() {
+        let rows = vec![
+            vec![
+                crate::pretty::PrettyCell {
+                    spans: vec![PrettySpan {
+                        text: "CHAPTER".to_owned(),
+                        style: PrettyStyle::default(),
+                    }],
+                    header: true,
+                },
+                crate::pretty::PrettyCell {
+                    spans: vec![PrettySpan {
+                        text: "PAGE".to_owned(),
+                        style: PrettyStyle::default(),
+                    }],
+                    header: true,
+                },
+            ],
+            vec![
+                crate::pretty::PrettyCell {
+                    spans: vec![PrettySpan {
+                        text: "Chapter the First — A Long Descriptive Title".to_owned(),
+                        style: PrettyStyle::default(),
+                    }],
+                    header: false,
+                },
+                crate::pretty::PrettyCell {
+                    spans: vec![PrettySpan {
+                        text: "XIV".to_owned(),
+                        style: PrettyStyle::default(),
+                    }],
+                    header: false,
+                },
+            ],
+        ];
+        let widths = table_column_widths(&rows, 240.0, 16.0, 8.0);
+        assert_eq!(widths.len(), 2);
+        assert!(widths[0] >= 120.0);
+        assert!(widths[1] >= 96.0);
+        assert!(widths.iter().sum::<f32>() > 240.0);
+    }
+
+    #[test]
+    fn changed_geometry_keeps_pretty_follow_window_bounded_for_64_boundaries() {
+        let heights = vec![44.0; 128];
+        let prefix = prefix_sums(&heights);
+        for canonical_idx in 0..64 {
+            let viewport_start = prefix[canonical_idx];
+            let viewport_end = viewport_start + 220.0;
+            let window = pretty_render_window(
+                heights.len(),
+                viewport_start,
+                viewport_end,
+                &prefix,
+                8,
+                None,
+            );
+            assert!(window.contains(&canonical_idx));
+            assert!(window.len() <= 24);
         }
     }
 

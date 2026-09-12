@@ -449,6 +449,7 @@ struct LanternLeafApp {
     pretty_build_rx: mpsc::Receiver<ui::reader::PrettyBuildResult>,
     pretty_build_pending: Option<PrettyPageCacheKey>,
     pretty_block_heights: Vec<f32>,
+    pretty_geometry_key: Option<String>,
     thumbnail_cache: ThumbnailCache,
     pretty_image_cache: PrettyImageCache,
     sentence_scroll_offset: Option<Vec2>,
@@ -716,11 +717,15 @@ impl PrettyImageCache {
         if !self.pending.contains(&path) {
             trace!(path = %path.display(), "Pretty image cache miss; enqueue decode");
             self.pending.insert(path.clone());
-            if self.tx.try_send(ImageRequest {
-                path: path.clone(),
-                max_width_px,
-                max_height_px,
-            }).is_err() {
+            if self
+                .tx
+                .try_send(ImageRequest {
+                    path: path.clone(),
+                    max_width_px,
+                    max_height_px,
+                })
+                .is_err()
+            {
                 // A full queue must never make the egui frame wait. The
                 // visible block will retry when it is next in/near view.
                 self.pending.remove(&path);
@@ -899,8 +904,7 @@ impl LanternLeafApp {
         let effect_dispatcher = EffectDispatcher::new(effect_context, Some(cc.egui_ctx.clone()));
         persistence.start_sync_thread(effect_dispatcher.event_tx());
         let repaint = repaint_notifier(&cc.egui_ctx);
-        let (pretty_build_tx, pretty_build_rx) =
-            ui::reader::start_pretty_builder(repaint.clone());
+        let (pretty_build_tx, pretty_build_rx) = ui::reader::start_pretty_builder(repaint.clone());
 
         let mut app = Self {
             runtime,
@@ -954,6 +958,7 @@ impl LanternLeafApp {
             pretty_build_rx,
             pretty_build_pending: None,
             pretty_block_heights: Vec::new(),
+            pretty_geometry_key: None,
             thumbnail_cache: ThumbnailCache::new(),
             pretty_image_cache: PrettyImageCache::new(repaint),
             sentence_scroll_offset: None,
@@ -1019,8 +1024,7 @@ impl LanternLeafApp {
         let effect_dispatcher = EffectDispatcher::new(effect_context, Some(cc.egui_ctx.clone()));
         persistence.start_sync_thread(effect_dispatcher.event_tx());
         let repaint = repaint_notifier(&cc.egui_ctx);
-        let (pretty_build_tx, pretty_build_rx) =
-            ui::reader::start_pretty_builder(repaint.clone());
+        let (pretty_build_tx, pretty_build_rx) = ui::reader::start_pretty_builder(repaint.clone());
 
         let mut app = Self {
             runtime,
@@ -1073,6 +1077,7 @@ impl LanternLeafApp {
             pretty_build_rx,
             pretty_build_pending: None,
             pretty_block_heights: Vec::new(),
+            pretty_geometry_key: None,
             thumbnail_cache: ThumbnailCache::new(),
             pretty_image_cache: PrettyImageCache::new(repaint),
             sentence_scroll_offset: None,
@@ -1779,6 +1784,12 @@ impl LanternLeafApp {
                                     "presentation_font_family",
                                 );
                             }
+                            let availability = if self.font_registry.family_available(family) {
+                                "available"
+                            } else {
+                                "unavailable; fallback will be used"
+                            };
+                            ui.small(format!("{}: {}", family, availability));
                         });
                         ui.horizontal(|ui| {
                             ui.label("Weight");
@@ -1807,6 +1818,11 @@ impl LanternLeafApp {
                                     "presentation_font_weight",
                                 );
                             }
+                            ui.small(format!(
+                                "Effective font: {}",
+                                self.font_registry
+                                    .effective_family_label(settings.font_family, weight)
+                            ));
                         });
                         let mut font_size = settings.font_size;
                         if ui
@@ -2816,6 +2832,8 @@ fn highlight_from_color32(color: Color32) -> config::HighlightColor {
 #[derive(Clone, Debug, Default)]
 struct FontRegistry {
     aliases: Vec<String>,
+    available_families: Vec<config::FontFamily>,
+    available_faces: Vec<(config::FontFamily, config::FontWeight)>,
 }
 
 impl FontRegistry {
@@ -2844,6 +2862,34 @@ impl FontRegistry {
     fn monospace_bold(&self) -> FontFamily {
         self.named("LanternLeafMonospaceBold")
             .unwrap_or_else(|| self.monospace_regular())
+    }
+
+    fn family_available(&self, family: config::FontFamily) -> bool {
+        self.available_families.contains(&family)
+    }
+
+    fn effective_family_label(
+        &self,
+        family: config::FontFamily,
+        weight: config::FontWeight,
+    ) -> String {
+        let weight_name = match weight {
+            config::FontWeight::Light => "Light",
+            config::FontWeight::Normal => "Regular",
+            config::FontWeight::Bold => "Bold",
+        };
+        let alias = format!(
+            "LanternLeafFamily{}{}",
+            font_family_slug(family),
+            weight_name
+        );
+        if self.named(&alias).is_some() && self.available_faces.contains(&(family, weight)) {
+            format!("{} {}", family, weight_name)
+        } else if matches!(family, config::FontFamily::Monospace) {
+            "egui monospace fallback".to_owned()
+        } else {
+            "egui proportional fallback".to_owned()
+        }
     }
 }
 
@@ -2892,6 +2938,31 @@ fn setup_egui_fonts(ctx: &Context, cfg: &config::AppConfig) -> FontRegistry {
     ] {
         let slug = font_family_slug(family);
         let requested_names = font_family_candidates(family);
+        if requested_names
+            .iter()
+            .any(|name| pick_face(&db, name, false).is_some())
+        {
+            registry.available_families.push(family);
+        }
+        for (weight, bold) in [
+            (config::FontWeight::Normal, false),
+            (config::FontWeight::Bold, true),
+        ] {
+            if requested_names
+                .iter()
+                .any(|name| pick_face(&db, name, bold).is_some())
+            {
+                registry.available_faces.push((family, weight));
+            }
+        }
+        if requested_names
+            .iter()
+            .any(|name| pick_face_weight(&db, name, fontdb::Weight::LIGHT).is_some())
+        {
+            registry
+                .available_faces
+                .push((family, config::FontWeight::Light));
+        }
         let regular_id = requested_names
             .iter()
             .find_map(|name| pick_face(&db, name, false))
@@ -2911,7 +2982,9 @@ fn setup_egui_fonts(ctx: &Context, cfg: &config::AppConfig) -> FontRegistry {
             ("Bold", bold_id),
         ] {
             let Some(id) = id else { continue };
-            let Some(bytes) = face_bytes(&db, id) else { continue };
+            let Some(bytes) = face_bytes(&db, id) else {
+                continue;
+            };
             let data_name = format!("ll-family-{slug}-{weight}");
             let alias = format!("LanternLeafFamily{slug}{weight}");
             fonts
@@ -2997,24 +3070,15 @@ fn setup_egui_fonts(ctx: &Context, cfg: &config::AppConfig) -> FontRegistry {
             let base = (cfg.font_size.max(8) as f32 * cfg.chrome_font_scale).clamp(10.0, 22.0);
             style.text_styles.insert(
                 TextStyle::Body,
-                eframe::egui::FontId::new(
-                    base,
-                    registry.proportional_regular(),
-                ),
+                eframe::egui::FontId::new(base, registry.proportional_regular()),
             );
             style.text_styles.insert(
                 TextStyle::Heading,
-                eframe::egui::FontId::new(
-                    (base * 1.25).max(10.0),
-                    registry.proportional_bold(),
-                ),
+                eframe::egui::FontId::new((base * 1.25).max(10.0), registry.proportional_bold()),
             );
             style.text_styles.insert(
                 TextStyle::Monospace,
-                eframe::egui::FontId::new(
-                    (base * 0.95).max(9.0),
-                    registry.monospace_regular(),
-                ),
+                eframe::egui::FontId::new((base * 0.95).max(9.0), registry.monospace_regular()),
             );
         });
         registry
@@ -3192,6 +3256,8 @@ fn tts_repaint_due(active_or_in_flight: bool) -> bool {
 
 #[cfg(test)]
 mod tts_repaint_policy_tests {
+    use super::*;
+
     #[test]
     fn active_playing_and_command_race_schedule_repaint() {
         assert!(super::tts_repaint_due(true));
@@ -3200,6 +3266,31 @@ mod tts_repaint_policy_tests {
     #[test]
     fn idle_without_pending_command_is_event_driven() {
         assert!(!super::tts_repaint_due(false));
+    }
+
+    #[test]
+    fn font_registry_reports_requested_availability_and_effective_fallback() {
+        let registry = FontRegistry {
+            aliases: vec!["LanternLeafFamilySerifRegular".to_owned()],
+            available_families: vec![config::FontFamily::Serif],
+            available_faces: vec![(config::FontFamily::Serif, config::FontWeight::Normal)],
+        };
+        assert!(registry.family_available(config::FontFamily::Serif));
+        assert!(!registry.family_available(config::FontFamily::Lexend));
+        assert_eq!(
+            registry.effective_family_label(
+                config::FontFamily::Serif,
+                config::FontWeight::Normal
+            ),
+            "Serif Regular"
+        );
+        assert_eq!(
+            registry.effective_family_label(
+                config::FontFamily::Lexend,
+                config::FontWeight::Normal
+            ),
+            "egui proportional fallback"
+        );
     }
 }
 
@@ -3385,15 +3476,16 @@ mod tests {
 
     #[test]
     fn pretty_image_worker_notifies_idle_completion_for_success_and_failure() {
-        let root = std::env::temp_dir().join(format!(
-            "lanternleaf-pretty-wakeup-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("lanternleaf-pretty-wakeup-{}", std::process::id()));
         let good_path = root.with_extension("png");
         let bad_path = root.with_extension("bad");
         fs::write(
             &good_path,
-            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../branding/icon.png")),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../branding/icon.png"
+            )),
         )
         .expect("write valid image fixture");
         fs::write(&bad_path, b"not an image").expect("write corrupt image fixture");
@@ -3428,9 +3520,19 @@ mod tests {
         wait_for_repaints(&repaint_count, 2);
         let results = result_rx.try_iter().collect::<Vec<_>>();
         assert_eq!(results.len(), 2);
-        assert!(results.iter().any(|result| result.path == good_path && result.error.is_none()));
-        assert!(results.iter().any(|result| result.path == bad_path && result.error.is_some()));
-        worker.join().expect("image worker should exit after requests close");
+        assert!(
+            results
+                .iter()
+                .any(|result| result.path == good_path && result.error.is_none())
+        );
+        assert!(
+            results
+                .iter()
+                .any(|result| result.path == bad_path && result.error.is_some())
+        );
+        worker
+            .join()
+            .expect("image worker should exit after requests close");
         let _ = fs::remove_file(good_path);
         let _ = fs::remove_file(bad_path);
     }

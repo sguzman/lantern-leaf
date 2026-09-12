@@ -2,7 +2,9 @@ pub(crate) mod format;
 pub(crate) mod reader;
 mod starter;
 
-use eframe::egui::{self, CentralPanel, Color32, Context, RichText, SidePanel, TopBottomPanel};
+use eframe::egui::{
+    self, CentralPanel, Color32, Context, RichText, ScrollArea, SidePanel, TopBottomPanel,
+};
 use lanternleaf_app::contracts::{ReaderSnapshot, UiMode};
 use lanternleaf_app::state::AppState;
 
@@ -191,34 +193,39 @@ impl LanternLeafApp {
                 ui.label(format!("Stats: {}", panels.show_stats));
                 ui.label(format!("TTS: {}", panels.show_tts));
                 ui.label(format!("Search: {}", show_search_panel));
-                if panels.show_settings {
-                    ui.separator();
-                    ui.heading("Settings");
-                    self.render_settings_sidebar(ui, reader_snapshot);
-                }
-                if panels.show_stats {
-                    ui.separator();
-                    ui.heading("Stats");
-                    self.render_stats_panel(ui, reader_snapshot);
-                }
-                if show_search_panel {
-                    ui.separator();
-                    ui.heading("Search");
-                    self.render_search_panel(ui, state);
-                }
-                if panels.show_tts {
-                    ui.separator();
-                    ui.heading("TTS");
-                    if let Some(snapshot) = reader_snapshot {
-                        self.render_tts_widget(ui, snapshot);
-                    } else {
-                        ui.label("No reader session.");
-                    }
-                }
-                ui.separator();
-                ui.heading("Status diagnostics");
-                self.render_status_diagnostics_panel(ui, state);
-                self.render_anchor_diagnostics(ui, reader_snapshot);
+                ScrollArea::vertical()
+                    .id_source("reader-panel-body")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        if panels.show_settings {
+                            ui.separator();
+                            ui.heading("Settings");
+                            self.render_settings_sidebar(ui, reader_snapshot);
+                        }
+                        if panels.show_stats {
+                            ui.separator();
+                            ui.heading("Stats");
+                            self.render_stats_panel(ui, reader_snapshot);
+                        }
+                        if show_search_panel {
+                            ui.separator();
+                            ui.heading("Search");
+                            self.render_search_panel(ui, state);
+                        }
+                        if panels.show_tts {
+                            ui.separator();
+                            ui.heading("TTS");
+                            if let Some(snapshot) = reader_snapshot {
+                                self.render_tts_widget(ui, snapshot);
+                            } else {
+                                ui.label("No reader session.");
+                            }
+                        }
+                        ui.separator();
+                        ui.heading("Status diagnostics");
+                        self.render_status_diagnostics_panel(ui, state);
+                        self.render_anchor_diagnostics(ui, reader_snapshot);
+                    });
             });
         SidePanel::right("shortcuts").show(ctx, |ui| {
             ui.heading("Shortcut registry");

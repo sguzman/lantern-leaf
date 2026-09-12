@@ -1575,8 +1575,15 @@ mod tests {
         let size = clamp_image_size(800.0, [1600, 800], 50.0, 300.0);
         assert_eq!(size, [400.0, 200.0]);
 
+        let narrower = clamp_image_size(800.0, [1600, 800], 25.0, 300.0);
+        assert!(narrower[0] < size[0]);
+        assert_eq!(narrower[1] / narrower[0], size[1] / size[0]);
+
         let tall = clamp_image_size(800.0, [400, 1600], 100.0, 300.0);
         assert_eq!(tall, [75.0, 300.0]);
+        let shorter = clamp_image_size(800.0, [400, 1600], 100.0, 128.0);
+        assert!(shorter[1] < tall[1]);
+        assert_eq!(shorter[0] / shorter[1], tall[0] / tall[1]);
     }
 
     #[test]
