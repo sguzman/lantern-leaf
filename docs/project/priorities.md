@@ -20,7 +20,7 @@ Canonical reader/session semantics are backend-neutral; ordinary WinRT Windows v
 
 - TXT/Markdown/HTML/EPUB ingestion/parity remains covered;
 - native pretty rendering is bounded and responsive;
-- pretty and text-only spoken-sentence highlight/follow are accepted on real EPUBs;
+- pretty and text-only spoken-sentence highlight/follow are accepted on real EPUBs through Goal 0009;
 - ordinary Windows TTS no longer shows the prior duplicate-line refill bug;
 - app-level Zira preference and per-book voice overrides work;
 - TTS/audio normalization no longer owns text-only document presentation.
@@ -39,23 +39,34 @@ A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558
 
 ## P2.7 — Goal 0012: pretty presentation controls + inline images
 
-**A5 DIRECTOR-ACCEPTED — REAL-DESKTOP SIGNOFF IS THE ACTIVE GATE**
+**A6 REAL-DESKTOP PRESENTATION GEOMETRY / USABILITY CORRECTION IS THE SINGLE AUTHORIZED GOAL**
 
-The implementation now provides:
+A1–A5 already establish:
 
-1. discoverable native Presentation controls separate from TTS;
-2. live font, spacing, margin, highlight, heading/base/paragraph/block/media rendering controls;
-3. app-default -> per-book persistence and presentation-only reset;
-4. safe EPUB image provenance/reference resolution with production-chain fixtures;
-5. lazy bounded off-render-thread pretty preparation and image decoding;
-6. worker-completion repaint wakeups for pretty-build success and image decode success/failure while TTS is idle;
-7. exact registered-font alias tracking and deterministic safe fallback for unavailable regular/bold/monospace/optional families;
-8. controlled egui/epaint tests that force Body/Heading/Monospace and pretty `LayoutJob` layout under missing/partial font availability;
-9. preserved Goal 0008/0009 TTS/canonical synchronization regressions.
+- discoverable Presentation controls;
+- app-default -> per-book persistence/reset;
+- EPUB inline images and safe provenance/path handling;
+- bounded off-render-thread pretty/image workers;
+- worker-completion repaint wakeups;
+- exact font alias registry and safe missing-font fallback;
+- real egui/epaint controlled-font layout safety.
 
-Accepted automated evidence: A4 production fix `c92256fb429aea1d13707a811b0147e4337bbd05`; A5 layout-proof implementation `46d70b34d2a560373e831471f24b58d17b1fe8bc`; worker terminal `e2938b2cf543df237beb79f83e5159e4e598b4cd`; Windows CI `34718069167`.
+Physical Windows QA after A5 confirms startup and inline imagery now work, but final presentation signoff is blocked by concrete layout defects. A6 must:
 
-One focused Windows desktop pass is required before Goal 0012 is finally closed. Startup on the previously crashing machine/config is the first gate; only then verify presentation persistence/reset, idle inline images, and brief TTS synchronization.
+1. remove the hidden 720-px centered text-column behavior from horizontal-margin semantics;
+2. make horizontal margin a literal monotonic inset with a useful UI range;
+3. make vertical margin a viewport inset rather than scroll-document padding;
+4. invalidate/version pretty block-height/prefix measurements when presentation geometry changes;
+5. keep the currently spoken canonical sentence visibly highlighted after one-shot follow is consumed, including 48+ boundary regression coverage under changed geometry;
+6. make the expanded settings/presentation side panel vertically scrollable and bounded;
+7. prove word/letter spacing through real egui layout, correcting the production path if needed;
+8. give pretty tables/TOCs readable minimum widths and horizontal overflow rather than character-level collapse;
+9. preserve blockquote semantics with a restrained bounded visual treatment;
+10. communicate unavailable/effective font fallback in the UI without changing persisted intent;
+11. prove media max width/height controls;
+12. preserve inline images, A3 wakeups, A4/A5 font safety, and Goal 0008/0009 TTS behavior.
+
+No human QA until A6 is director-accepted.
 
 ## P2.8 — Goal 0010: Caliberate catalog covers + provider availability UX
 
@@ -63,7 +74,13 @@ One focused Windows desktop pass is required before Goal 0012 is finally closed.
 
 Goal 0010 remains about provider-unavailable classification, first-class lazy catalog covers, bounded off-GUI-thread visible-row loading, covers before first open/materialization, Recents/local fallback, and intentional loading/no-cover/provider-error states.
 
-## P2.9 — Goal 0011: Windows Natural/HD voice capability
+## P2.9 — Goal 0013: starter shell responsive containment
+
+**QUEUED — NOT ACTIVE**
+
+Physical QA showed Recents and Browser Tabs/adjacent starter groups bleeding across their allocated columns. Goal 0013 will make starter columns responsive/contained, wrap long rows, and stack to one column when two readable columns do not fit. It is intentionally separate from Goal 0012 reader/TTS presentation semantics.
+
+## P2.10 — Goal 0011: Windows Natural/HD voice capability
 
 **DEFERRED BY USER — DORMANT UNTIL EXPLICITLY RE-AUTHORIZED**
 
@@ -71,7 +88,7 @@ Do not investigate, implement, or test Natural/Narrator/HD voices for now. Prese
 
 ## P3 — Native PDF visual stability
 
-**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED WHILE GOAL 0012 AWAITS SIGNOFF**
+**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED DURING GOAL 0012 A6**
 
 - page raster/render ownership;
 - texture/cache lifecycle;
