@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-12 after Goal 0012 A3 real-desktop startup rejection and A4 reopening.
+Updated: 2026-09-12 after Goal 0012 A4 director review.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -45,29 +45,23 @@ Stable audible TTS, no unsolicited duplicate ordinary lines, correct pretty/text
 
 ## Goal 0012 — pretty presentation controls and inline images
 
-**A3 REAL-DESKTOP STARTUP REJECTED; A4 FONT-SAFETY CORRECTION READY / SINGLE AUTHORIZED GOAL**
+**A4 REJECTED BEFORE HUMAN QA; A5 LAYOUT-PROOF CORRECTION READY / SINGLE AUTHORIZED GOAL**
 
-A1–A3 substantially implemented and automated-validated:
+A1–A3 remain substantively accepted and preserved: native Presentation controls, layered persistence/reset, EPUB inline-image provenance/rendering, bounded off-render-thread pretty/image workers, and explicit worker-completion repaint wakeups.
 
-- a separate native-egui Presentation settings surface;
-- live font family/weight/size, line spacing, margins, word/letter spacing, highlight colors, heading/base/paragraph/block/media controls;
-- app-default -> per-book presentation persistence and presentation-only reset;
-- safe EPUB image provenance/reference resolution including normalized, relative, nested, encoded, query/fragment-bearing references;
-- generated multi-spine PNG/JPEG EPUB production-chain coverage;
-- lazy bounded image decode and pretty-build workers with heavy work off the render thread;
-- bounded texture state, transient negative cache, visible placeholders, aspect-ratio/media sizing;
-- explicit worker-completion repaint wakeups for pretty-build success and image-decode success/failure;
-- deterministic tests proving async wakeup before receiver polling and nonblocking queue-full behavior.
+The first A3 desktop signoff exposed a startup panic when the configured Lexend family was absent: egui attempted to use unbound `FontFamily::Name("LanternLeafProportionalRegular")`.
 
-A3 implementation `dccc5b999aa7732d1f71a248d8595cf5bde4a40d`, terminal `ae411ffaadebebb23f137b40728dfb4dbc944048`, and Windows CI `34655821185` were accepted for desktop QA.
+A4 implementation `c92256fb429aea1d13707a811b0147e4337bbd05` is directionally correct and should be preserved. It replaces the coarse `fonts_configured` boolean with an exact alias `FontRegistry`, uses registered aliases only for global styles, and falls back to built-in proportional/monospace families when requested aliases are absent. Windows workflow rerun `34714389917` passed native workspace and hosted renderer jobs.
 
-The first Windows desktop run then exposed a startup regression before functional QA: after font discovery logged `requested_family=Lexend`, egui panicked because `FontFamily::Name("LanternLeafProportionalRegular")` was not bound to any fonts, and LanternLeaf exited with code 101.
+A4 is not director-accepted because:
 
-Director diagnosis: Goal 0012's font setup uses a coarse `inserted_any` / `fonts_configured` success signal. Unrelated aliases can be registered while the exact configured/global or per-book family alias remains absent; production code then references a named family that was never bound. Missing optional fonts must fall back safely rather than crash.
+- the worker branch did not synchronize the actual latest director `main` and is diverged from the director A4 documentation/status lineage;
+- the new font regression only tests resolver/helper return values and does not install controlled font definitions into an egui `Context` and force the real epaint text-layout path that previously panicked;
+- the full controlled missing/partial font matrix from the A4 contract is not covered.
 
-A4 is bounded to a production-owned font registry/availability contract, safe global TextStyle fallback, safe per-book presentation family/weight fallback, and deterministic controlled-font-availability regressions that force egui text layout. Preserve all A1–A3 presentation/image/async-wakeup work and all Goal 0008/0009 behavior.
+A5 is bounded to synchronizing current director `main`, preserving `c92256f`, and adding deterministic real-egui layout regressions for missing Lexend, partial aliases, missing bold/monospace, unavailable per-book family, available alias selection, bound-name invariants, and config preservation.
 
-No human QA is authorized until A4 is terminal, CI-green, and director-accepted.
+No human QA is authorized until A5 is terminal, CI-green, and director-accepted.
 
 ## Caliberate catalog covers / availability UX
 
@@ -87,10 +81,10 @@ Preserve the existing ordinary Windows voice backend. Goal 0011 remains a dorman
 
 **CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY FUTURE**
 
-Gate 3 native PDF visual stability remains future work and is not authorized during Goal 0012 A4.
+Gate 3 native PDF visual stability remains future work and is not authorized during Goal 0012 A5.
 
 ## Workflow status
 
 **MACRO-GOAL / MULTI-ATTEMPT PROTOCOL ACTIVE**
 
-Goal 0012 A4 is the single authorized goal in `docs/work/ready/`. Continue the existing `codex/0012-pretty-presentation-controls-and-inline-images` branch/report lineage and synchronize current `main` before implementation. Goal 0010 remains queued; Goal 0011 remains deferred; PDF work remains future.
+Goal 0012 A5 is the single authorized goal in `docs/work/ready/`. Continue the existing `codex/0012-pretty-presentation-controls-and-inline-images` branch/report lineage, synchronize the actual latest `main` before implementation, and preserve A4 implementation `c92256f`. Goal 0010 remains queued; Goal 0011 remains deferred; PDF work remains future.
