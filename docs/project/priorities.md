@@ -39,22 +39,26 @@ A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558
 
 ## P2.7 — Goal 0012: pretty presentation controls + inline images
 
-**A3 DIRECTOR-ACCEPTED — REAL-DESKTOP SIGNOFF IS THE ACTIVE GATE**
+**A4 FONT REGISTRY / MISSING-FONT FALLBACK IS THE SINGLE AUTHORIZED GOAL**
 
-Automated/director-accepted implementation now provides:
+A1–A3 already provide the desired Presentation UI, layered persistence/reset, EPUB image provenance and production fixtures, lazy bounded off-render-thread image decode, bounded texture/cache behavior, and explicit idle worker-completion repaint wakeups.
 
-1. discoverable native Presentation controls separate from TTS;
-2. live font, spacing, margin, highlight, heading/base/paragraph/block/media rendering controls;
-3. existing app-default -> per-book persistence and presentation-only reset;
-4. safe EPUB image provenance/reference resolution with production-chain fixtures;
-5. lazy bounded off-render-thread pretty preparation and image decoding;
-6. worker-completion repaint wakeups for pretty-build success and image decode success/failure while TTS is idle;
-7. deterministic tests proving wakeup does not depend on later receiver polling and queue-full submission remains nonblocking;
-8. preserved Goal 0008/0009 TTS/canonical synchronization regressions.
+A3 automated evidence (`dccc5b9`, terminal `ae411ff`, Windows CI `34655821185`) was accepted for desktop QA, but the first physical Windows run crashed immediately after startup font discovery:
 
-Accepted automated evidence: A3 implementation `dccc5b999aa7732d1f71a248d8595cf5bde4a40d`, terminal `ae411ffaadebebb23f137b40728dfb4dbc944048`, Windows CI `34655821185`.
+`FontFamily::Name("LanternLeafProportionalRegular") is not bound to any fonts`
 
-One focused Windows desktop pass is required before Goal 0012 is finally closed. Do not start a new Codex macro-goal before that pass is reviewed.
+The correction is narrow. A4 must:
+
+1. replace the coarse `inserted_any` / `fonts_configured` assumption with exact production-owned alias availability/registry semantics;
+2. ensure global egui TextStyles never reference an unbound LanternLeaf named family;
+3. ensure pretty/per-book font selection never manufactures an unbound family alias;
+4. provide deterministic fallback to a bound family or egui built-in family when requested regular/bold/monospace/optional fonts are absent;
+5. preserve configured app/book family intent instead of silently rewriting config because a font is unavailable on one machine;
+6. add controlled-font-availability tests, independent of CI font inventory, that force egui layout and catch the exact panic class;
+7. keep runtime render frames free of font discovery/file I/O;
+8. preserve all existing Goal 0012 presentation/image/async-wakeup behavior and Goal 0008/0009 TTS/canonical sync regressions.
+
+No human QA until A4 is director-accepted.
 
 ## P2.8 — Goal 0010: Caliberate catalog covers + provider availability UX
 
@@ -70,7 +74,7 @@ Do not investigate, implement, or test Natural/Narrator/HD voices for now. Prese
 
 ## P3 — Native PDF visual stability
 
-**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED WHILE GOAL 0012 AWAITS SIGNOFF**
+**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED DURING GOAL 0012 A4**
 
 - page raster/render ownership;
 - texture/cache lifecycle;
