@@ -39,23 +39,23 @@ A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558
 
 ## P2.7 — Goal 0012: pretty presentation controls + inline images
 
-**A4 REJECTED; A5 REAL-EGUI FONT-LAYOUT PROOF IS THE SINGLE AUTHORIZED GOAL**
+**A5 DIRECTOR-ACCEPTED — REAL-DESKTOP SIGNOFF IS THE ACTIVE GATE**
 
-A1–A3 provide the desired Presentation UI, layered persistence/reset, EPUB inline images, bounded off-render-thread work, and async completion wakeups.
+The implementation now provides:
 
-A4 implementation `c92256fb429aea1d13707a811b0147e4337bbd05` adds the correct production direction: exact `FontRegistry` alias tracking and deterministic proportional/monospace fallback instead of assuming every named family exists. Windows workflow `34714389917` is green.
+1. discoverable native Presentation controls separate from TTS;
+2. live font, spacing, margin, highlight, heading/base/paragraph/block/media rendering controls;
+3. app-default -> per-book persistence and presentation-only reset;
+4. safe EPUB image provenance/reference resolution with production-chain fixtures;
+5. lazy bounded off-render-thread pretty preparation and image decoding;
+6. worker-completion repaint wakeups for pretty-build success and image decode success/failure while TTS is idle;
+7. exact registered-font alias tracking and deterministic safe fallback for unavailable regular/bold/monospace/optional families;
+8. controlled egui/epaint tests that force Body/Heading/Monospace and pretty `LayoutJob` layout under missing/partial font availability;
+9. preserved Goal 0008/0009 TTS/canonical synchronization regressions.
 
-A5 must only:
+Accepted automated evidence: A4 production fix `c92256fb429aea1d13707a811b0147e4337bbd05`; A5 layout-proof implementation `46d70b34d2a560373e831471f24b58d17b1fe8bc`; worker terminal `e2938b2cf543df237beb79f83e5159e4e598b4cd`; Windows CI `34718069167`.
 
-1. synchronize the actual latest director `main` into the existing Goal 0012 branch while preserving `c92256f`;
-2. retain exact-alias production fallback semantics;
-3. add controlled empty/partial/complete font-definition tests independent of host font inventory;
-4. install those definitions/styles into an egui `Context` and force body/heading/monospace plus representative pretty `LayoutJob` layout so the exact prior epaint panic class is exercised;
-5. cover missing Lexend, unrelated aliases, missing bold, missing monospace, unavailable per-book family, available real alias, bound-name invariants, and unchanged configured font intent;
-6. keep font discovery/file I/O out of ordinary render frames;
-7. preserve all Goal 0012 presentation/image/wakeup and Goal 0008/0009 TTS/canonical regressions.
-
-No human QA until A5 is director-accepted.
+One focused Windows desktop pass is required before Goal 0012 is finally closed. Startup on the previously crashing machine/config is the first gate; only then verify presentation persistence/reset, idle inline images, and brief TTS synchronization.
 
 ## P2.8 — Goal 0010: Caliberate catalog covers + provider availability UX
 
@@ -71,7 +71,7 @@ Do not investigate, implement, or test Natural/Narrator/HD voices for now. Prese
 
 ## P3 — Native PDF visual stability
 
-**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED DURING GOAL 0012 A5**
+**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED WHILE GOAL 0012 AWAITS SIGNOFF**
 
 - page raster/render ownership;
 - texture/cache lifecycle;
