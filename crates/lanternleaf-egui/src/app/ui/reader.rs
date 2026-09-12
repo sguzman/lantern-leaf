@@ -1,6 +1,6 @@
 use eframe::egui::{
-    Align, Color32, FontFamily, Frame, Grid, Image, Label, RichText, ScrollArea, Slider, Stroke,
-    TextFormat, Ui, text::LayoutJob,
+    Align, Color32, FontFamily, Frame, Grid, Image, Label, Rect, RichText, ScrollArea, Slider,
+    Stroke, TextFormat, Ui, text::LayoutJob,
 };
 use lanternleaf_app::contracts::{PrettyKind, ReaderSnapshot};
 use lanternleaf_app::pipeline::ReaderCommand;
@@ -23,6 +23,10 @@ use crate::pretty::{
 
 const BLOCKQUOTE_RULE_WIDTH: f32 = 1.0;
 const BLOCKQUOTE_INDENT: f32 = 14.0;
+
+fn blockquote_rule_segment(rect: Rect) -> [eframe::egui::Pos2; 2] {
+    [rect.left_top(), rect.left_bottom()]
+}
 
 pub(crate) struct PrettyBuildRequest {
     pub(crate) key: PrettyPageCacheKey,
@@ -409,7 +413,7 @@ impl LanternLeafApp {
                                                 .linear_multiply(0.55);
                                             let bg_fill =
                                                 ui.visuals().faint_bg_color.linear_multiply(0.35);
-                                            Frame::none()
+                                            let quote_frame = Frame::none()
                                                 .fill(bg_fill)
                                                 .inner_margin(eframe::egui::Margin {
                                                     left: BLOCKQUOTE_INDENT,
@@ -418,17 +422,14 @@ impl LanternLeafApp {
                                                     bottom: 6.0,
                                                 })
                                                 .show(ui, |ui| {
-                                                    let rect = ui.max_rect();
-                                                    ui.painter().line_segment(
-                                                        [rect.left_top(), rect.left_bottom()],
-                                                        Stroke::new(
-                                                            BLOCKQUOTE_RULE_WIDTH,
-                                                            border_color,
-                                                        ),
-                                                    );
-                                                    response =
-                                                        Some(ui.add(Label::new(job).wrap(true)));
+                                                    ui.add(Label::new(job).wrap(true))
                                                 });
+                                            let quote_rect = quote_frame.response.rect;
+                                            ui.painter().line_segment(
+                                                blockquote_rule_segment(quote_rect),
+                                                Stroke::new(BLOCKQUOTE_RULE_WIDTH, border_color),
+                                            );
+                                            response = Some(quote_frame.inner);
                                         } else {
                                             response = Some(ui.add(Label::new(job).wrap(true)));
                                         }
@@ -2358,6 +2359,101 @@ mod tests {
             );
             assert!(window.contains(&canonical_idx));
             assert!(window.len() <= 24);
+        }
+    }
+
+    #[test]
+    fn blockquote_rule_uses_measured_quote_rect_without_neighbor_bleed() {
+        let ctx = eframe::egui::Context::default();
+        let mut before = None;
+        let mut quote = None;
+        let mut after = None;
+        let _ = ctx.run(Default::default(), |ctx| {
+            eframe::egui::CentralPanel::default().show(ctx, |ui| {
+                ui.set_width(300.0);
+                before = Some(ui.label("ordinary paragraph before the quote"));
+                let quote_frame = Frame::none()
+                    .fill(Color32::from_gray(240))
+                    .inner_margin(eframe::egui::Margin {
+                        left: BLOCKQUOTE_INDENT,
+                        right: 8.0,
+                        top: 6.0,
+                        bottom: 6.0,
+                    })
+                    .show(ui, |ui| {
+                        ui.set_width(240.0);
+                        ui.add(
+                            Label::new(
+                                "A long quote line that wraps across multiple measured lines. "
+                                    .repeat(8),
+                            )
+                            .wrap(true),
+                        )
+                    });
+                quote = Some(quote_frame.response.rect);
+                after = Some(ui.label("ordinary paragraph after the quote"));
+            });
+        });
+
+        let before = before.expect("before paragraph should be laid out");
+        let quote = quote.expect("quote frame should be laid out");
+        let after = after.expect("after paragraph should be laid out");
+        let [rule_top, rule_bottom] = blockquote_rule_segment(quote);
+        assert!(quote.height() > 40.0, "quote should occupy multiple lines");
+        assert_eq!(rule_top.y, quote.top());
+        assert_eq!(rule_bottom.y, quote.bottom());
+        assert!(rule_top.y >= before.rect.bottom());
+        assert!(rule_bottom.y <= after.rect.top());
+        assert!(rule_bottom.y - rule_top.y < after.rect.bottom() - before.rect.top());
+    }
+
+    #[test]
+    fn geometry_change_follow_consume_keeps_highlight_in_normal_window_for_64_boundaries() {
+        let geometry_a = "width=720;font=16;spacing=1";
+        let geometry_b = "width=480;font=19;spacing=1.3";
+        let mut measured_heights = vec![48.0; 96];
+        let mut geometry_key = Some(geometry_a.to_owned());
+        assert!(!measured_heights.is_empty());
+        if pretty_geometry_changed(geometry_key.as_deref(), geometry_b) {
+            measured_heights.clear();
+        }
+        assert!(measured_heights.is_empty(), "geometry A measurements must be invalidated");
+        geometry_key = Some(geometry_b.to_owned());
+        assert_eq!(geometry_key.as_deref(), Some(geometry_b));
+
+        let heights_b = (0..96)
+            .map(|index| 32.0 + (index % 5) as f32 * 11.0)
+            .collect::<Vec<_>>();
+        let prefix_b = prefix_sums(&heights_b);
+        let mut follow = crate::app::AutoScrollState::default();
+        let source = "stateful-geometry-book.epub";
+
+        for canonical_idx in 0..64 {
+            follow.request_cursor(source, canonical_idx);
+            assert!(follow.pending_for(source, canonical_idx));
+            // A real frame elapses between canonical boundaries; avoid making
+            // the test depend on wall-clock sleep while preserving state.
+            follow.last_jump_at = None;
+            assert!(matches!(
+                follow.decide_scroll(source, canonical_idx, crate::app::AnchorFallback::Exact),
+                crate::app::ScrollDecision::Scroll
+            ));
+            follow.record(source, canonical_idx, crate::app::AnchorFallback::Exact);
+            assert!(!follow.pending_for(source, canonical_idx));
+
+            // This is the post-consumption frame: no forced target is passed, and
+            // the viewport remains at the location selected by follow.
+            let viewport_start = prefix_b[canonical_idx];
+            let viewport_end = viewport_start + 220.0;
+            let normal_window = pretty_render_window(
+                heights_b.len(),
+                viewport_start,
+                viewport_end,
+                &prefix_b,
+                8,
+                None,
+            );
+            assert!(normal_window.contains(&canonical_idx));
         }
     }
 
