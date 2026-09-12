@@ -39,34 +39,27 @@ A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558
 
 ## P2.7 — Goal 0012: pretty presentation controls + inline images
 
-**A6 REAL-DESKTOP PRESENTATION GEOMETRY / USABILITY CORRECTION IS THE SINGLE AUTHORIZED GOAL**
+**A7 BOUNDED BLOCKQUOTE / POST-FOLLOW PROOF IS THE SINGLE AUTHORIZED GOAL**
 
-A1–A5 already establish:
+A1–A5 establish Presentation controls, layered persistence/reset, inline EPUB images, bounded off-render-thread workers, async completion wakeups, exact font alias safety, and real egui missing-font layout proof.
 
-- discoverable Presentation controls;
-- app-default -> per-book persistence/reset;
-- EPUB inline images and safe provenance/path handling;
-- bounded off-render-thread pretty/image workers;
-- worker-completion repaint wakeups;
-- exact font alias registry and safe missing-font fallback;
-- real egui/epaint controlled-font layout safety.
+A6 implementation `6dcf9815ef87303caa3a3421bb8cc9e832f6b8ea` adds substantial presentation fixes and is to be preserved:
 
-Physical Windows QA after A5 confirms startup and inline imagery now work, but final presentation signoff is blocked by concrete layout defects. A6 must:
+1. literal horizontal margins with no hidden 720-px column cap;
+2. vertical viewport insets rather than scroll-document padding;
+3. presentation geometry invalidation of measured pretty-block heights;
+4. scrollable settings/presentation side panel;
+5. real-egui word/letter-spacing behavior;
+6. readable table/TOC minimum widths plus horizontal overflow;
+7. visible optional-font availability/effective fallback state;
+8. media sizing evidence while preserving inline image behavior.
 
-1. remove the hidden 720-px centered text-column behavior from horizontal-margin semantics;
-2. make horizontal margin a literal monotonic inset with a useful UI range;
-3. make vertical margin a viewport inset rather than scroll-document padding;
-4. invalidate/version pretty block-height/prefix measurements when presentation geometry changes;
-5. keep the currently spoken canonical sentence visibly highlighted after one-shot follow is consumed, including 48+ boundary regression coverage under changed geometry;
-6. make the expanded settings/presentation side panel vertically scrollable and bounded;
-7. prove word/letter spacing through real egui layout, correcting the production path if needed;
-8. give pretty tables/TOCs readable minimum widths and horizontal overflow rather than character-level collapse;
-9. preserve blockquote semantics with a restrained bounded visual treatment;
-10. communicate unavailable/effective font fallback in the UI without changing persisted intent;
-11. prove media max width/height controls;
-12. preserve inline images, A3 wakeups, A4/A5 font safety, and Goal 0008/0009 TTS behavior.
+A6 Windows workflow `34721716717` is green, but director acceptance is blocked by two narrow issues:
 
-No human QA until A6 is director-accepted.
+- the quote rule still uses pre-layout `ui.max_rect()` height rather than final measured quote-block geometry, so the original long-rule failure class remains;
+- the added 64-boundary highlight test does not exercise geometry A -> B invalidation plus follow request -> consume -> subsequent normal render-window selection.
+
+A7 must preserve A6, bind quote decoration to final measured quote geometry, and add the missing stateful post-follow proof. Change production highlight/window behavior only if that stronger regression exposes a real defect. No human QA until A7 is director-accepted.
 
 ## P2.8 — Goal 0010: Caliberate catalog covers + provider availability UX
 
@@ -88,7 +81,7 @@ Do not investigate, implement, or test Natural/Narrator/HD voices for now. Prese
 
 ## P3 — Native PDF visual stability
 
-**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED DURING GOAL 0012 A6**
+**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED DURING GOAL 0012 A7**
 
 - page raster/render ownership;
 - texture/cache lifecycle;

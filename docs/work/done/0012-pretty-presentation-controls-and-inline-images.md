@@ -1,269 +1,156 @@
-# 0012 — A6 correction: real-desktop pretty geometry and presentation-panel usability
+# 0012 — A7 correction: bounded blockquote geometry and post-follow highlight proof
 
 ## Outcome
 
-Preserve the accepted Goal 0012 presentation/image/font-safety work while fixing the concrete pretty-layout and settings-panel defects exposed by the first successful physical Windows presentation pass.
+Preserve Goal 0012 A6 implementation `6dcf9815ef87303caa3a3421bb8cc9e832f6b8ea` and close the two remaining director blockers before another physical Windows pass:
+
+1. blockquote decoration must be constrained to the actual measured quote block rectangle;
+2. durable pretty highlight after one-shot follow consumption must be proven with the stateful geometry-change lifecycle requested by A6.
 
 This is not a new macro-goal. Continue the existing Goal 0012 branch/report lineage.
 
 ## Starting evidence
 
-A5 implementation `46d70b34d2a560373e831471f24b58d17b1fe8bc`, terminal `e2938b2cf543df237beb79f83e5159e4e598b4cd`, and Windows CI `34718069167` were director-accepted for physical QA.
+A6 implementation `6dcf9815ef87303caa3a3421bb8cc9e832f6b8ea` and Windows workflow `34721716717` passed automated validation. Director review is recorded in `docs/work/reviews/0012-a6-director-rejection.md`.
 
-The physical pass then verified:
+A6 work to preserve:
 
-- LanternLeaf starts successfully on the machine/config that previously crashed;
-- inline/cover EPUB imagery appears in pretty view;
-- the Presentation section is visible;
-- font size, base font scale, paragraph spacing, block spacing, H1 scale, and H2 scale visibly work;
-- TTS spoken identity and follow/scroll remain synchronized.
-
-The same pass exposed reader-layout failures documented in `docs/work/reviews/0012-a5-real-desktop-rejection.md`.
-
-## Preserve prior accepted work
-
-Preserve unless a direct correction requires the smallest local change:
-
-- Goal 0008/0009 canonical TTS identity, highlight/follow ownership, text-only semantics, and no ordinary duplicate-line playback;
-- A3 async pretty/image completion repaint wakeups;
-- A4/A5 exact `FontRegistry` safety and deterministic missing-font fallback;
-- Presentation app-default -> per-book persistence/reset;
-- EPUB image provenance/reference normalization and inline image rendering;
-- bounded pretty virtualization and off-render-thread pretty/image heavy work;
-- no Natural/Narrator/HD voice work;
-- no Caliberate catalog-cover work;
-- no PDF work.
+- literal horizontal margin semantics with no hidden 720-px cap;
+- vertical margin as viewport/frame inset rather than scroll-document padding;
+- presentation geometry-key invalidation of measured pretty-block heights;
+- vertically scrollable settings/presentation panel body;
+- real-egui word/letter-spacing behavior;
+- readable table/TOC widths with horizontal overflow;
+- visible font availability/effective fallback state;
+- media sizing regressions;
+- inline EPUB imagery, A3 async wakeups, A4/A5 font safety, and Goal 0008/0009 TTS/canonical behavior.
 
 ## Mandatory first step
 
 Before implementation:
 
 1. fetch current director `main`;
-2. synchronize it into `codex/0012-pretty-presentation-controls-and-inline-images`;
-3. make this A6 contract and `0012-a5-real-desktop-rejection.md` authoritative;
+2. synchronize it into `codex/0012-pretty-presentation-controls-and-inline-images` while preserving `6dcf981`;
+3. make this A7 contract and `docs/work/reviews/0012-a6-director-rejection.md` authoritative;
 4. re-arm the Goal 0012 watcher;
-5. append Attempt A6 to `docs/work/reports/0012.md` only after the branch is synchronized.
+5. append Attempt A7 to `docs/work/reports/0012.md` only after synchronization.
 
-## A — make horizontal margin literal and remove hidden geometry
+## A — bind blockquote decoration to measured block geometry
 
-Current pretty layout conflates horizontal margin with an implicit centered 720-px max-width column.
-
-Correct semantics:
-
-- `margin_horizontal = 0` means no large LanternLeaf-imposed reading gutter beyond ordinary widget/frame padding;
-- increasing horizontal margin creates a visible, approximately symmetric left/right inset in the pretty viewport;
-- horizontal margin must respond monotonically across its UI range;
-- do not silently cap the text column at 720 px under the name of "horizontal margin";
-- if a separate maximum text-column width is still desirable, expose it as a separate explicit presentation policy/control rather than hiding it inside margin arithmetic;
-- UI slider range should match the core-supported useful range instead of becoming inert on wide windows.
-
-Add a deterministic geometry helper/test proving representative viewport widths produce different content widths/left insets for 0, medium, and high margins.
-
-## B — make vertical margin a viewport inset, not document length
-
-Current implementation inserts `vertical_margin` inside the scroll document at both ends.
-
-Correct semantics:
-
-- vertical margin reduces/insets the visible reading viewport at top and bottom;
-- it must not merely prepend/append blank scrollable document space;
-- changing vertical margin must not push the scrollbar/document bottom farther away by the same margin amount;
-- top and bottom inset should be symmetric unless constrained by the actual available viewport;
-- the scrollable content extent should be driven by document blocks, not artificial top/bottom padding.
-
-Prefer a viewport/frame inset or equivalent layout ownership outside the scroll content.
-
-## C — presentation geometry must invalidate virtualization measurements
-
-Any setting that changes block geometry must invalidate or version the measured-height/prefix-sum cache used by pretty virtualization.
-
-At minimum account for:
-
-- font family/weight when metrics can differ;
-- font size;
-- base font scale;
-- line spacing;
-- word spacing;
-- letter spacing;
-- paragraph spacing;
-- block/list spacing;
-- heading scales;
-- table cell geometry;
-- media sizing settings when they change rendered block height/width;
-- horizontal content width/margin changes.
-
-Do not rebuild the semantic document or perform heavy work merely because a slider moves. The goal is lightweight render-geometry invalidation/re-measurement, not reparsing.
-
-Required regression shape:
-
-1. render/seed measured block heights for presentation geometry A;
-2. change one or more geometry-affecting settings to geometry B;
-3. prove stale A measurements are not reused as authoritative B prefix sums;
-4. prove the active canonical highlighted block remains present/rendered after the follow request is consumed;
-5. run 48+ canonical TTS boundaries under production pretty-window selection while geometry B is active and verify highlight visibility/follow ownership does not become a one-frame flash.
-
-Do not change canonical playback ownership to fix a render-window bug.
-
-## D — restore durable pretty highlight visibility
-
-Physical symptom: spoken highlight appears briefly, then disappears, while speech identity and scrolling remain synchronized.
-
-A6 must make the current canonical sentence visibly highlighted for the duration of that sentence whenever its pretty target is visible/renderable.
-
-Acceptance:
-
-- first-sample boundary changes canonical sentence identity;
-- highlight becomes visible on the corresponding pretty sentence;
-- after the auto-follow request is recorded/consumed, the same sentence remains highlighted until the next canonical boundary;
-- virtualization may not evict the currently highlighted target solely because the one-shot follow request is no longer pending;
-- if the target is genuinely outside the viewport after user-driven scrolling, preserve current user-control policy; do not introduce an aggressive permanent scroll lock.
-
-## E — settings/presentation side panel must be scrollable
-
-The expanded left SidePanel currently clips controls below the physical window.
+A6 still paints the quote rule from `ui.max_rect()` inside the frame before the quote label establishes final measured geometry. That can produce a rule extending beyond the actual quote content.
 
 Correct behavior:
 
-- the side-panel body containing Settings/Stats/Search/TTS/diagnostics must have bounded vertical scrolling when content exceeds available height;
-- top panel toggles should remain usable;
-- every Presentation control, including controls below highlight appearance, must be reachable with wheel/thumb scrolling at the tested desktop height;
-- no panel content may paint outside its allocated panel rect;
-- avoid nested-scroll traps where ordinary wheel scrolling becomes impossible.
+- preserve blockquote/source-quote semantics;
+- keep the A6 restrained tint/indent/rule style or improve it minimally;
+- paint any left rule only from a rectangle whose top/bottom are derived from the final measured quote/frame/inner response;
+- do not use an unconstrained pre-layout `ui.max_rect()` as quote-rule height authority;
+- a short quote gets a short rule;
+- a long quote gets a rule matching that quote block only, not the rest of the viewport/page;
+- adjacent paragraphs/headings must never inherit or sit behind the quote rule;
+- sentence highlight background inside a quote remains visible and bounded.
 
-Add a small production seam/layout test where practical, but the code path itself must clearly own a `ScrollArea` or equivalent bounded body.
+Preferred implementation shapes include painting after `Frame::show` from the returned response/inner-response geometry, or allocating an explicit quote rect that exactly owns the quote layout. Keep this local to rendering; do not change document semantics.
 
-## F — word and letter spacing need real layout proof
+### Required regression
 
-The settings patch path currently stores/applies `word_spacing` and `letter_spacing`, and the renderer assigns `extra_letter_spacing`. Physical QA nevertheless found both controls visually ineffective.
+Use a real egui context/layout seam with at least:
 
-Do not declare success from value plumbing alone.
+- ordinary paragraph before quote;
+- multi-line/long blockquote;
+- ordinary paragraph after quote.
 
-Add deterministic egui layout tests that:
+Prove the quote-decoration vertical extent is contained within the measured quote block rect and does not overlap the neighboring paragraphs. A pure constant assertion on rule width is insufficient.
 
-- layout identical representative text at zero and nonzero letter spacing and prove measurable width/glyph-position change;
-- layout identical representative multi-word text at zero and nonzero word spacing and prove measurable inter-word/layout change;
-- exercise the production `spans_to_job*` path, not a separate toy formatter;
-- preserve mixed bold/italic/code spans.
+## B — prove durable highlight after follow consumption under changed geometry
 
-If the current `extra_letter_spacing` implementation does not produce the required effect in the real egui version, replace it with the smallest reliable production technique.
+A6 likely fixed the physical flash/disappear symptom by invalidating stale measured heights, but its 64-boundary test does not exercise the lifecycle that failed on desktop.
 
-## G — readable pretty tables / TOC
+Required deterministic regression shape:
 
-The current plain `Grid` may squeeze columns until text wraps nearly character-by-character.
+1. construct representative bounded pretty blocks / height authority for geometry A;
+2. seed at least some measured A heights as the renderer would after a frame;
+3. change one or more geometry-affecting settings to geometry B and prove A measurements are invalidated/not authoritative;
+4. for a canonical target, model/request the one-shot follow and select/render the target window;
+5. record/consume that follow as production `AutoScrollState` does;
+6. on the subsequent frame, run normal production pretty-window selection with no forced follow target while the viewport remains at the followed location;
+7. prove the same active highlighted target remains inside the render window and therefore can stay visibly highlighted until the next canonical boundary;
+8. repeat over at least 48 canonical boundaries / representative targets under geometry B.
 
-Implement a bounded readable-width policy:
+The regression must connect the production geometry invalidation/window-selection/follow lifecycle. Do not satisfy this with a constant-height helper loop that manually begins every viewport at the target without exercising follow state.
 
-- derive column count from the table;
-- provide a sensible minimum readable cell/column width;
-- use available reader width when the table fits;
-- when a table cannot fit without destructive squeezing, prefer horizontal table scrolling/overflow to character-level collapse;
-- keep row striping/header emphasis/borders bounded;
-- do not let a wide table expand the overall application/panel geometry or bleed outside the pretty viewport.
+### Production correction policy
 
-Add a deterministic fixture equivalent to a two-column book TOC with headers like `CHAPTER` / `PAGE`, Roman-numeral rows, long chapter titles, and page links. Assert the layout policy does not reduce the text column to near-character width.
+Do **not** change canonical playback ownership.
 
-## H — restrain blockquote presentation without losing semantics
+Do **not** force the highlighted block into the render window forever: user-driven scrolling away from the spoken sentence must remain possible.
 
-Preserve blockquote/source quote semantics, but replace the visually dominant black vertical stripe with a bounded, subtle quote treatment.
+If the stronger stateful regression passes with current production logic, keep production highlight/window code unchanged. If it fails, make the smallest render-only correction necessary to retain the target after follow consumption while it is still naturally in/near the followed viewport.
 
-Requirements:
+## C — preserve all A6 accepted improvements
 
-- quote style remains distinguishable from ordinary paragraphs;
-- any left rule/indent/background is constrained to the actual quote block rect;
-- very long blockquotes must not create a dominant full-page black line;
-- nested/long quoted text remains readable;
-- the quote treatment must not interfere with sentence highlight rendering.
+Re-run focused regressions proving:
 
-## I — font availability must be visible in the UI
+- horizontal margin is literal/monotonic;
+- vertical margin does not extend document length;
+- settings panel body scrolls;
+- word and letter spacing measurably affect real egui layout;
+- TOC/table columns remain readable with bounded horizontal overflow;
+- font unavailable/effective-fallback UI remains correct;
+- image max width/height preserve aspect ratio;
+- inline images still use bounded off-render-thread decode and completion wakeups;
+- A4/A5 font fallback never returns unbound named families.
 
-A4/A5 safe fallback behavior is accepted and must remain.
-
-Improve the Presentation font selector so a user can distinguish configured intent from effective availability:
-
-- unavailable optional families must not look like a silent no-op;
-- either annotate choices as unavailable/fallback, disable unavailable choices while preserving persisted intent, or display an explicit `Effective font: ...` / fallback indicator;
-- do not reintroduce runtime font discovery in ordinary frames; consume the already prepared `FontRegistry`;
-- do not mutate persisted `font_family` merely because the current machine lacks it.
-
-## J — verify media sizing controls
-
-Physical QA confirmed image rendering but did not conclusively verify media max width/height controls.
-
-Add production regressions proving changing `image_max_width_pct` and `image_max_height_px` measurably changes `clamp_image_size()` / rendered target sizing while preserving aspect ratio and cache bounds.
-
-No additional human media-specific pass is required beyond the final A6 desktop pass unless automation reveals a new defect.
+No broad redesign is authorized.
 
 ## Validation
 
 Run:
 
-- focused pretty geometry/cache invalidation tests;
-- persistent-highlight/follow regressions including 48+ boundaries;
-- word/letter spacing real-egui layout tests;
-- table width policy/TOC fixture tests;
-- settings-panel containment tests/seams where practical;
-- blockquote bounded-style test/seam where practical;
-- media sizing regressions;
-- A4/A5 font-safety layout matrix;
+- focused blockquote measured-rect regression;
+- stateful geometry A -> B -> follow -> consume -> normal-window 48+ boundary regression;
+- all A6 geometry/spacing/table/panel/font/media regressions;
 - A3 async worker wakeup regressions;
-- Goal 0008/0009 TTS/canonical regressions;
+- Goal 0008/0009 TTS/canonical/text-only regressions;
 - `cargo test --workspace -- --test-threads=1`;
 - `cargo check --workspace`;
+- `cargo build --workspace`;
 - `git diff --check`;
 - repo-native Windows QA preparation;
-- Windows TTS probe;
+- Windows TTS probes;
 - hosted renderer probe;
 - Windows CI.
 
+If an unrelated known nondeterministic test flakes, rerun the identical implementation commit and document both runs rather than weakening A7 gates.
+
 ## Acceptance gates
 
-1. No hidden hard-coded 720-px column controls horizontal margin behavior.
-2. Horizontal margin changes pretty viewport/content inset visibly and monotonically.
-3. Vertical margin insets the viewing viewport rather than extending document scroll length.
-4. Geometry-affecting presentation changes cannot leave stale measured-height/prefix caches authoritative.
-5. Current spoken sentence remains visibly highlighted after the one-shot follow event is consumed.
-6. 48+ production pretty-boundary transitions preserve highlight/follow under changed presentation geometry.
-7. Presentation/sidebar controls are vertically scrollable and reachable at bounded desktop height.
-8. Word spacing and letter spacing produce measurable real-egui layout changes through production formatting.
-9. Realistic TOC/table content remains readable; overflow scrolls rather than collapsing to character-width columns.
-10. Blockquotes remain semantically distinct without a dominant unbounded black rule.
-11. Font fallback safety remains intact and the UI communicates unavailable/effective fallback state.
-12. Media max width/height controls have regression evidence.
-13. Inline EPUB images remain functional while TTS is idle.
-14. Goal 0008/0009 TTS playback/canonical identity/text-only behavior remain green.
-15. Heavy pretty/image/font discovery work remains off the render thread.
-16. Repository/Windows gates pass.
-17. No human QA until director accepts A6.
+1. Worker branch contains current director `main` before A7 implementation and preserves A6 `6dcf981`.
+2. No blockquote rule uses unconstrained pre-layout `ui.max_rect()` height ownership.
+3. Real egui regression proves quote decoration stays inside final measured quote block geometry and does not bleed into neighboring content.
+4. A6 horizontal/vertical margin semantics remain intact.
+5. A6 geometry invalidation remains intact.
+6. Stateful geometry-A -> geometry-B regression proves stale measurements are not reused.
+7. Follow is requested and consumed through production-adjacent state, then the next normal render-window selection still contains the active highlighted target while the viewport remains at the followed location.
+8. The post-follow proof covers at least 48 canonical boundaries/targets.
+9. User-driven scrolling is not replaced by permanent target forcing.
+10. A6 panel scrolling, spacing, table/TOC, font fallback UI, and media sizing regressions remain green.
+11. Inline images and async wakeups remain green.
+12. Goal 0008/0009 TTS/canonical/text-only regressions remain green.
+13. Heavy work remains off the egui/render thread.
+14. Repository/Windows gates and Windows CI pass.
+15. No human QA until director accepts A7.
 
 ## Explicit non-goals
 
-Do not broaden A6 into:
-
-- starter-shell multi-column redesign beyond any shared SidePanel containment helper strictly required by E;
-- Caliberate catalog covers;
-- Natural/Narrator/HD voices;
-- PDF rendering;
-- Piper catalog/model management;
-- a new document-layout engine.
-
-The separate starter-shell overlap observed in the same physical session is tracked outside Goal 0012.
+Do not broaden A7 into starter-shell Goal 0013, Caliberate catalog-cover Goal 0010, Natural/Narrator/HD voices, PDF work, Piper management, or a new document-layout engine.
 
 ## Repository handoff
 
-Continue branch `codex/0012-pretty-presentation-controls-and-inline-images` and existing report `docs/work/reports/0012.md`.
+Continue branch `codex/0012-pretty-presentation-controls-and-inline-images` and report `docs/work/reports/0012.md`.
 
-Move this goal `ready -> active`, append **Attempt A6**, implement only this correction, validate, terminalize `done` or `blocked`, push, signal terminal state, and restore shared checkout to `main` without merging.
+Move this goal `ready -> active`, append **Attempt A7**, implement only this bounded correction, validate, terminalize `done` or `blocked`, push, signal terminal state, and restore the shared checkout to `main` without merging.
 
 ## Human verification after director acceptance
 
-One focused Windows pass should verify:
-
-- no giant baked-in left gutter at zero/low horizontal margin;
-- horizontal and vertical margin semantics feel literal;
-- panel scrolling reaches all Presentation controls;
-- word/letter spacing visibly changes text;
-- TOC/table remains readable;
-- blockquote styling is restrained;
-- unavailable font behavior is understandable;
-- inline images still render while idle;
-- TTS pretty highlight remains continuously visible for each spoken sentence and follows correctly.
+If A7 is accepted, the next physical Windows pass should verify the already-defined Goal 0012 reader surface: literal margins, scrollable Presentation controls, visible word/letter spacing, readable TOC/table, restrained bounded blockquotes, understandable font fallback, idle inline images, and continuously visible synchronized TTS highlight/follow.
