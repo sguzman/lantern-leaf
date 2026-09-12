@@ -39,9 +39,9 @@ A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558
 
 ## P2.7 — Goal 0012: pretty presentation controls + inline images
 
-**A7 DIRECTOR-ACCEPTED — REAL-DESKTOP SIGNOFF IS THE ACTIVE GATE**
+**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-Goal 0012 now has automated/director acceptance for:
+Goal 0012 is closed with accepted evidence for:
 
 1. discoverable Presentation controls with app-default -> per-book persistence/reset;
 2. inline EPUB imagery with safe provenance/path normalization;
@@ -55,26 +55,37 @@ Goal 0012 now has automated/director acceptance for:
 10. readable TOC/table minimum widths with horizontal overflow;
 11. restrained measured blockquote rule geometry;
 12. visible requested/effective font fallback state;
-13. media width/height sizing evidence;
-14. stateful geometry-change -> follow -> consume -> ordinary render-window coverage across 64 canonical boundaries without changing canonical playback ownership.
+13. automated media width/height sizing evidence;
+14. stateful geometry-change -> follow -> consume -> ordinary render-window coverage across 64 canonical boundaries without changing canonical playback ownership;
+15. final physical Windows confirmation that the previously failing visual controls now work, inline images remain present, and the spoken highlight remains continuously visible.
 
-A7 implementation `6fd324869ce6cca0c858c3ee32fabe627efba47b`, terminal `762452ada592b7b906b0537319fd4b3060ad1c34`, and Windows baseline `34723376577` are accepted automated evidence.
+A7 implementation `6fd324869ce6cca0c858c3ee32fabe627efba47b`, terminal `762452ada592b7b906b0537319fd4b3060ad1c34`, Windows baseline `34723376577`, and `docs/work/reviews/0012-real-desktop-acceptance.md` are accepted final evidence.
 
-One focused Windows desktop pass is required before Goal 0012 finally closes. No new Codex macro-goal is authorized until that pass is reviewed.
+The final human pass exposed a separate non-blocking interactive issue around media max-width/max-height changes: an unexpected scroll jump prevented physical confirmation of the visible size effect. This is queued as Goal 0014 rather than reopening Goal 0012.
 
-## P2.8 — Goal 0010: Caliberate catalog covers + provider availability UX
+## P2.8 — Goal 0013: starter shell responsive containment
+
+**READY — NEXT AUTHORIZED CODEX MACRO-GOAL**
+
+Physical QA still shows Recents, Calibre, and Browser Tabs/adjacent starter groups bleeding across their allocated columns at ordinary desktop width, though much less severely than before. Goal 0013 will make starter columns responsive/contained, wrap or stack long rows, and fall back to one column when two readable columns do not fit.
+
+This is the next authorized implementation because the defect remains directly visible in the current shell and is narrowly separable from reader/TTS behavior.
+
+## P2.9 — Goal 0010: Caliberate catalog covers + provider availability UX
 
 **QUEUED — NOT ACTIVE**
 
 Goal 0010 remains about provider-unavailable classification, first-class lazy catalog covers, bounded off-GUI-thread visible-row loading, covers before first open/materialization, Recents/local fallback, and intentional loading/no-cover/provider-error states.
 
-## P2.9 — Goal 0013: starter shell responsive containment
+Re-evaluate Goal 0010 against the narrow Goal 0014 residual after Goal 0013 is accepted.
+
+## P2.10 — Goal 0014: reader media-sizing anchor stability
 
 **QUEUED — NOT ACTIVE**
 
-Physical QA showed Recents and Browser Tabs/adjacent starter groups bleeding across their allocated columns. Goal 0013 will make starter columns responsive/contained, wrap long rows, and stack to one column when two readable columns do not fit. It remains separate from Goal 0012 reader presentation semantics.
+Live changes to media max-width/max-height must not throw the viewport to an unrelated document location. When a selected limit is actually binding, the visible image should resize predictably while preserving aspect ratio; non-binding limits may legitimately show no size change. Preserve Goal 0012 accepted geometry, virtualization, image, and TTS/highlight behavior.
 
-## P2.10 — Goal 0011: Windows Natural/HD voice capability
+## P2.11 — Goal 0011: Windows Natural/HD voice capability
 
 **DEFERRED BY USER — DORMANT UNTIL EXPLICITLY RE-AUTHORIZED**
 
@@ -82,7 +93,7 @@ Do not investigate, implement, or test Natural/Narrator/HD voices for now. Prese
 
 ## P3 — Native PDF visual stability
 
-**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED WHILE GOAL 0012 AWAITS SIGNOFF**
+**FUTURE CORE PRODUCT GATE; NOT CURRENTLY AUTHORIZED**
 
 - page raster/render ownership;
 - texture/cache lifecycle;
