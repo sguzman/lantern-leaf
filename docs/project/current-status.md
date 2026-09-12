@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-12 after Goal 0012 A5 physical presentation QA and A6 reopening.
+Updated: 2026-09-12 after Goal 0012 A6 director review and A7 reopening.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -45,40 +45,43 @@ Stable audible TTS, no unsolicited duplicate ordinary lines, correct pretty/text
 
 ## Goal 0012 — pretty presentation controls and inline images
 
-**A5 STARTUP/FONT SAFETY ACCEPTED; PHYSICAL PRESENTATION SIGNOFF REJECTED; A6 READY / SINGLE AUTHORIZED GOAL**
+**A6 REJECTED BEFORE HUMAN QA; A7 BOUNDED CORRECTION READY / SINGLE AUTHORIZED GOAL**
 
-Verified on the physical Windows machine after A5:
+Physical Windows QA after A5 already verified:
 
-- LanternLeaf now starts on the same machine/config that previously crashed on an unbound font alias;
-- inline/cover EPUB imagery visibly renders in pretty view;
-- the expanded Presentation settings surface is present;
-- font size, base font scale, paragraph spacing, block spacing, H1 scale, and H2 scale visibly work;
-- TTS spoken identity remains synchronized and pretty follow/scroll still advances with speech.
+- LanternLeaf starts on the machine/config that previously crashed;
+- inline/cover EPUB images render in pretty view;
+- the Presentation section exists;
+- multiple presentation controls visibly work;
+- canonical TTS identity/follow remains synchronized.
 
-The usable presentation pass exposed concrete layout defects:
+A6 implementation `6dcf9815ef87303caa3a3421bb8cc9e832f6b8ea` is cleanly based on director `main`, and Windows workflow `34721716717` passed native workspace and hosted renderer jobs.
 
-- pretty view has a large implicit centered gutter because horizontal margin is conflated with a hidden 720-px max text width;
-- horizontal margin can appear inert at wide viewport sizes;
-- vertical margin is implemented as scroll-document padding rather than viewport inset;
-- word/letter spacing did not visibly change text in physical QA despite value plumbing;
-- the expanded left settings/presentation panel is not vertically scrollable and lower controls become unreachable;
-- optional fonts safely fall back but the UI gives no availability/effective-fallback indication;
-- long blockquotes use a visually dominant left rule;
-- pretty tables/TOCs can collapse to near-character-width columns;
-- spoken highlight now appears briefly then disappears while canonical TTS identity and follow/scroll remain correct;
-- presentation geometry changes can leave measured pretty-block heights/prefix sums stale, which is a likely cause of the one-frame highlight symptom.
+A6 successfully adds/preserves:
 
-A6 is authorized to correct only these reader-presentation geometry/usability defects while preserving A3 async wakeups, A4/A5 font safety, images, persistence, and Goal 0008/0009 TTS semantics.
+- literal horizontal margin semantics with no hidden 720-px column cap;
+- vertical margin as viewport/frame inset rather than scroll-document padding;
+- presentation geometry-key invalidation of measured pretty-block heights;
+- vertically scrollable settings/presentation panel body;
+- real-egui word/letter-spacing behavior;
+- readable table/TOC minimum widths with horizontal overflow;
+- visible optional-font availability/effective fallback state;
+- media width/height sizing evidence;
+- inline images, async repaint wakeups, exact font fallback safety, and Goal 0008/0009 TTS behavior.
 
-See `docs/work/reviews/0012-a5-real-desktop-rejection.md` and the single ready Goal 0012 A6 contract.
+A6 is not director-accepted because the blockquote left rule still derives its height from pre-layout `ui.max_rect()` instead of the final measured quote block rectangle, leaving the original long-rule geometry failure class present. Its 64-boundary highlight test also does not exercise the required stateful geometry-A -> geometry-B -> follow -> consume -> subsequent normal-window lifecycle.
 
-No human QA is authorized until A6 is terminal, CI-green, and director-accepted.
+A7 is deliberately narrow: preserve A6, bind quote decoration to measured quote geometry, and add the missing post-follow stateful highlight proof. Production highlight/window logic should only change if that stronger proof exposes a real render-only defect.
+
+See `docs/work/reviews/0012-a6-director-rejection.md` and the single ready Goal 0012 A7 contract.
+
+No human QA is authorized until A7 is terminal, CI-green, and director-accepted.
 
 ## Starter shell containment
 
 **QUEUED AS GOAL 0013 — NOT ACTIVE**
 
-The same physical session showed Recents and Browser Tabs/adjacent starter groups visually overlapping. This is tracked separately as responsive starter-shell containment rather than mixed into Goal 0012's reader/TTS correction.
+Physical QA showed Recents and Browser Tabs/adjacent starter groups visually overlapping. This is tracked separately as responsive starter-shell containment rather than mixed into Goal 0012.
 
 ## Caliberate catalog covers / availability UX
 
@@ -98,12 +101,12 @@ Preserve the existing ordinary Windows voice backend. Goal 0011 remains a dorman
 
 **CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY FUTURE**
 
-Gate 3 native PDF visual stability remains future work and is not authorized during Goal 0012 A6.
+Gate 3 native PDF visual stability remains future work and is not authorized during Goal 0012 A7.
 
 ## Workflow status
 
 **MACRO-GOAL / MULTI-ATTEMPT PROTOCOL ACTIVE**
 
-Goal 0012 A6 is the single authorized goal in `docs/work/ready/`. Continue `codex/0012-pretty-presentation-controls-and-inline-images`, synchronize current `main` before implementation, re-arm the watcher, preserve A1–A5, and append Attempt A6 to `docs/work/reports/0012.md`.
+Goal 0012 A7 is the single authorized goal in `docs/work/ready/`. Continue `codex/0012-pretty-presentation-controls-and-inline-images`, synchronize current `main`, preserve A6 `6dcf981`, re-arm the watcher, and append Attempt A7 to `docs/work/reports/0012.md`.
 
 Goal 0010 and Goal 0013 remain queued; Goal 0011 remains deferred; PDF work remains future.
