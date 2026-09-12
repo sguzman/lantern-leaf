@@ -39,27 +39,28 @@ A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558
 
 ## P2.7 — Goal 0012: pretty presentation controls + inline images
 
-**A7 BOUNDED BLOCKQUOTE / POST-FOLLOW PROOF IS THE SINGLE AUTHORIZED GOAL**
+**A7 DIRECTOR-ACCEPTED — REAL-DESKTOP SIGNOFF IS THE ACTIVE GATE**
 
-A1–A5 establish Presentation controls, layered persistence/reset, inline EPUB images, bounded off-render-thread workers, async completion wakeups, exact font alias safety, and real egui missing-font layout proof.
+Goal 0012 now has automated/director acceptance for:
 
-A6 implementation `6dcf9815ef87303caa3a3421bb8cc9e832f6b8ea` adds substantial presentation fixes and is to be preserved:
+1. discoverable Presentation controls with app-default -> per-book persistence/reset;
+2. inline EPUB imagery with safe provenance/path normalization;
+3. bounded off-render-thread pretty/image workers and completion repaint wakeups;
+4. exact font alias safety and real egui missing-font layout fallback;
+5. literal horizontal margins with no hidden 720-px cap;
+6. vertical viewport insets instead of scroll-document padding;
+7. presentation-geometry invalidation of measured virtualization heights;
+8. scrollable settings/presentation panel body;
+9. real-egui word/letter spacing;
+10. readable TOC/table minimum widths with horizontal overflow;
+11. restrained measured blockquote rule geometry;
+12. visible requested/effective font fallback state;
+13. media width/height sizing evidence;
+14. stateful geometry-change -> follow -> consume -> ordinary render-window coverage across 64 canonical boundaries without changing canonical playback ownership.
 
-1. literal horizontal margins with no hidden 720-px column cap;
-2. vertical viewport insets rather than scroll-document padding;
-3. presentation geometry invalidation of measured pretty-block heights;
-4. scrollable settings/presentation side panel;
-5. real-egui word/letter-spacing behavior;
-6. readable table/TOC minimum widths plus horizontal overflow;
-7. visible optional-font availability/effective fallback state;
-8. media sizing evidence while preserving inline image behavior.
+A7 implementation `6fd324869ce6cca0c858c3ee32fabe627efba47b`, terminal `762452ada592b7b906b0537319fd4b3060ad1c34`, and Windows baseline `34723376577` are accepted automated evidence.
 
-A6 Windows workflow `34721716717` is green, but director acceptance is blocked by two narrow issues:
-
-- the quote rule still uses pre-layout `ui.max_rect()` height rather than final measured quote-block geometry, so the original long-rule failure class remains;
-- the added 64-boundary highlight test does not exercise geometry A -> B invalidation plus follow request -> consume -> subsequent normal render-window selection.
-
-A7 must preserve A6, bind quote decoration to final measured quote geometry, and add the missing stateful post-follow proof. Change production highlight/window behavior only if that stronger regression exposes a real defect. No human QA until A7 is director-accepted.
+One focused Windows desktop pass is required before Goal 0012 finally closes. No new Codex macro-goal is authorized until that pass is reviewed.
 
 ## P2.8 — Goal 0010: Caliberate catalog covers + provider availability UX
 
@@ -71,7 +72,7 @@ Goal 0010 remains about provider-unavailable classification, first-class lazy ca
 
 **QUEUED — NOT ACTIVE**
 
-Physical QA showed Recents and Browser Tabs/adjacent starter groups bleeding across their allocated columns. Goal 0013 will make starter columns responsive/contained, wrap long rows, and stack to one column when two readable columns do not fit. It is intentionally separate from Goal 0012 reader/TTS presentation semantics.
+Physical QA showed Recents and Browser Tabs/adjacent starter groups bleeding across their allocated columns. Goal 0013 will make starter columns responsive/contained, wrap long rows, and stack to one column when two readable columns do not fit. It remains separate from Goal 0012 reader presentation semantics.
 
 ## P2.10 — Goal 0011: Windows Natural/HD voice capability
 
@@ -81,7 +82,7 @@ Do not investigate, implement, or test Natural/Narrator/HD voices for now. Prese
 
 ## P3 — Native PDF visual stability
 
-**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED DURING GOAL 0012 A7**
+**FUTURE CORE PRODUCT GATE; NOT AUTHORIZED WHILE GOAL 0012 AWAITS SIGNOFF**
 
 - page raster/render ownership;
 - texture/cache lifecycle;
