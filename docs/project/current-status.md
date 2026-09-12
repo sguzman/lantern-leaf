@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-12 after Goal 0012 A3 director acceptance for focused real-desktop QA.
+Updated: 2026-09-12 after Goal 0012 A4 director review.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -45,23 +45,23 @@ Stable audible TTS, no unsolicited duplicate ordinary lines, correct pretty/text
 
 ## Goal 0012 — pretty presentation controls and inline images
 
-**A3 DIRECTOR-ACCEPTED — FOCUSED REAL-DESKTOP QA PENDING**
+**A4 REJECTED BEFORE HUMAN QA; A5 LAYOUT-PROOF CORRECTION READY / SINGLE AUTHORIZED GOAL**
 
-Goal 0012 now includes:
+A1–A3 remain substantively accepted and preserved: native Presentation controls, layered persistence/reset, EPUB inline-image provenance/rendering, bounded off-render-thread pretty/image workers, and explicit worker-completion repaint wakeups.
 
-- a separate native-egui Presentation settings surface;
-- live font family/weight/size, line spacing, margins, word/letter spacing, highlight colors, heading/base/paragraph/block/media controls;
-- app-default -> per-book presentation persistence and presentation-only reset;
-- safe EPUB image provenance/reference resolution including normalized, relative, nested, encoded, query/fragment-bearing references;
-- generated multi-spine PNG/JPEG EPUB production-chain coverage;
-- lazy bounded image decode and pretty-build workers with heavy work off the render thread;
-- bounded texture state, transient negative cache, visible placeholders, and aspect-ratio/media sizing;
-- explicit worker-completion repaint wakeups for pretty-build success and image-decode success/failure, so idle/TTS-off readers consume completed async work without needing unrelated input;
-- deterministic tests proving those repaint notifications occur before receiver polling and queue-full submission remains nonblocking.
+The first A3 desktop signoff exposed a startup panic when the configured Lexend family was absent: egui attempted to use unbound `FontFamily::Name("LanternLeafProportionalRegular")`.
 
-A3 implementation `dccc5b999aa7732d1f71a248d8595cf5bde4a40d`, worker terminal `ae411ffaadebebb23f137b40728dfb4dbc944048`, and terminal Windows CI `34655821185` are director-accepted automated evidence.
+A4 implementation `c92256fb429aea1d13707a811b0147e4337bbd05` is directionally correct and should be preserved. It replaces the coarse `fonts_configured` boolean with an exact alias `FontRegistry`, uses registered aliases only for global styles, and falls back to built-in proportional/monospace families when requested aliases are absent. Windows workflow rerun `34714389917` passed native workspace and hosted renderer jobs.
 
-One focused Windows desktop pass is now authorized for live presentation controls, persistence/reset, real EPUB inline images while idle, and a short Goal 0009 TTS synchronization sanity check. Goal 0012 is not finally closed until that human pass succeeds.
+A4 is not director-accepted because:
+
+- the worker branch did not synchronize the actual latest director `main` and is diverged from the director A4 documentation/status lineage;
+- the new font regression only tests resolver/helper return values and does not install controlled font definitions into an egui `Context` and force the real epaint text-layout path that previously panicked;
+- the full controlled missing/partial font matrix from the A4 contract is not covered.
+
+A5 is bounded to synchronizing current director `main`, preserving `c92256f`, and adding deterministic real-egui layout regressions for missing Lexend, partial aliases, missing bold/monospace, unavailable per-book family, available alias selection, bound-name invariants, and config preservation.
+
+No human QA is authorized until A5 is terminal, CI-green, and director-accepted.
 
 ## Caliberate catalog covers / availability UX
 
@@ -81,10 +81,10 @@ Preserve the existing ordinary Windows voice backend. Goal 0011 remains a dorman
 
 **CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY FUTURE**
 
-Gate 3 native PDF visual stability remains future work and is not authorized while Goal 0012 awaits desktop signoff.
+Gate 3 native PDF visual stability remains future work and is not authorized during Goal 0012 A5.
 
 ## Workflow status
 
-**HUMAN QA GATE ACTIVE**
+**MACRO-GOAL / MULTI-ATTEMPT PROTOCOL ACTIVE**
 
-Goal 0012 is in `docs/work/done/` at the worker level and is director-accepted for one focused desktop pass. No new Codex goal is authorized until that pass is reviewed. Goal 0010 remains queued; Goal 0011 remains deferred; PDF work remains future.
+Goal 0012 A5 is the single authorized goal in `docs/work/ready/`. Continue the existing `codex/0012-pretty-presentation-controls-and-inline-images` branch/report lineage, synchronize the actual latest `main` before implementation, and preserve A4 implementation `c92256f`. Goal 0010 remains queued; Goal 0011 remains deferred; PDF work remains future.
