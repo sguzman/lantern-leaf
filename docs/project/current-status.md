@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-12 after Goal 0012 A6 director review and A7 reopening.
+Updated: 2026-09-12 after Goal 0012 A7 director acceptance for focused real-desktop signoff.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -45,43 +45,39 @@ Stable audible TTS, no unsolicited duplicate ordinary lines, correct pretty/text
 
 ## Goal 0012 — pretty presentation controls and inline images
 
-**A6 REJECTED BEFORE HUMAN QA; A7 BOUNDED CORRECTION READY / SINGLE AUTHORIZED GOAL**
+**A7 DIRECTOR-ACCEPTED — FOCUSED REAL-DESKTOP SIGNOFF PENDING**
 
-Physical Windows QA after A5 already verified:
+Physical Windows QA after A5 already verified startup on the formerly crashing configuration, inline/cover EPUB imagery, the Presentation surface, multiple working visual controls, and synchronized canonical TTS identity/follow.
 
-- LanternLeaf starts on the machine/config that previously crashed;
-- inline/cover EPUB images render in pretty view;
-- the Presentation section exists;
-- multiple presentation controls visibly work;
-- canonical TTS identity/follow remains synchronized.
+A6 implementation `6dcf9815ef87303caa3a3421bb8cc9e832f6b8ea` added the substantive presentation correction set:
 
-A6 implementation `6dcf9815ef87303caa3a3421bb8cc9e832f6b8ea` is cleanly based on director `main`, and Windows workflow `34721716717` passed native workspace and hosted renderer jobs.
-
-A6 successfully adds/preserves:
-
-- literal horizontal margin semantics with no hidden 720-px column cap;
+- literal horizontal margins with no hidden 720-px text-column cap;
 - vertical margin as viewport/frame inset rather than scroll-document padding;
 - presentation geometry-key invalidation of measured pretty-block heights;
-- vertically scrollable settings/presentation panel body;
+- vertically scrollable settings/presentation body;
 - real-egui word/letter-spacing behavior;
-- readable table/TOC minimum widths with horizontal overflow;
+- readable table/TOC widths with horizontal overflow;
 - visible optional-font availability/effective fallback state;
-- media width/height sizing evidence;
-- inline images, async repaint wakeups, exact font fallback safety, and Goal 0008/0009 TTS behavior.
+- media sizing evidence while preserving inline image behavior.
 
-A6 is not director-accepted because the blockquote left rule still derives its height from pre-layout `ui.max_rect()` instead of the final measured quote block rectangle, leaving the original long-rule geometry failure class present. Its 64-boundary highlight test also does not exercise the required stateful geometry-A -> geometry-B -> follow -> consume -> subsequent normal-window lifecycle.
+A7 implementation `6fd324869ce6cca0c858c3ee32fabe627efba47b` closes the remaining director blockers:
 
-A7 is deliberately narrow: preserve A6, bind quote decoration to measured quote geometry, and add the missing post-follow stateful highlight proof. Production highlight/window logic should only change if that stronger proof exposes a real render-only defect.
+- blockquote rule geometry is derived from the final measured quote frame rectangle rather than pre-layout `ui.max_rect()`;
+- a real egui long-quote regression proves the rule remains within the quote and does not bleed into neighboring paragraphs;
+- a stateful geometry-A -> geometry-B -> follow -> consume -> subsequent ordinary render-window regression runs across 64 canonical boundaries and proves the active target remains naturally renderable after the one-shot follow lifecycle is consumed;
+- canonical playback/highlight ownership remains unchanged and no permanent target forcing was introduced.
 
-See `docs/work/reviews/0012-a6-director-rejection.md` and the single ready Goal 0012 A7 contract.
+Windows baseline run `34723376577` passed both native workspace and hosted renderer jobs, including workspace tests, Windows TTS, repository QA preparation, watcher policy, and hosted renderer capability gates.
 
-No human QA is authorized until A7 is terminal, CI-green, and director-accepted.
+One focused physical Windows pass is now authorized. Goal 0012 is not finally closed until that pass verifies literal margins, panel scrolling, word/letter spacing, readable TOCs/tables, restrained blockquotes, understandable font fallback, idle inline images, and continuously visible spoken-sentence pretty highlighting.
+
+See `docs/work/reviews/0012-a7-director-acceptance.md`.
 
 ## Starter shell containment
 
 **QUEUED AS GOAL 0013 — NOT ACTIVE**
 
-Physical QA showed Recents and Browser Tabs/adjacent starter groups visually overlapping. This is tracked separately as responsive starter-shell containment rather than mixed into Goal 0012.
+Physical QA showed Recents and Browser Tabs/adjacent starter groups visually overlapping. This remains a separate responsive starter-shell containment goal and is not part of Goal 0012 signoff.
 
 ## Caliberate catalog covers / availability UX
 
@@ -101,12 +97,12 @@ Preserve the existing ordinary Windows voice backend. Goal 0011 remains a dorman
 
 **CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY FUTURE**
 
-Gate 3 native PDF visual stability remains future work and is not authorized during Goal 0012 A7.
+Gate 3 native PDF visual stability remains future work and is not authorized while Goal 0012 awaits physical signoff.
 
 ## Workflow status
 
-**MACRO-GOAL / MULTI-ATTEMPT PROTOCOL ACTIVE**
+**HUMAN QA GATE ACTIVE**
 
-Goal 0012 A7 is the single authorized goal in `docs/work/ready/`. Continue `codex/0012-pretty-presentation-controls-and-inline-images`, synchronize current `main`, preserve A6 `6dcf981`, re-arm the watcher, and append Attempt A7 to `docs/work/reports/0012.md`.
+Goal 0012 A7 is worker-terminal, CI-green, integrated, and director-accepted for one focused desktop pass. No new Codex macro-goal is authorized until that pass is reviewed.
 
 Goal 0010 and Goal 0013 remain queued; Goal 0011 remains deferred; PDF work remains future.
