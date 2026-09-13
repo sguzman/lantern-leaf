@@ -78,9 +78,13 @@ A lower-severity residual under severe letter-spacing/font-scaling edits is queu
 
 ### Goal 0010 — Caliberate catalog covers + provider availability UX
 
-**STATUS: READY — NEXT AUTHORIZED MACRO-GOAL**
+**STATUS: A5 REJECTED BEFORE HUMAN QA — A6 CORRECTION READY**
 
-Add first-class lazy catalog covers, bounded visible-row loading, intentional loading/no-cover/provider-error states, and correct provider-unavailable classification. Do not resurrect the withdrawn fake materialization defect from the test where Caliberate itself was not running.
+A5 proved the intended broad shape: an explicit Caliberate cover route, `has_cover` propagation, bounded visible-row lazy loading, off-render-thread request/decode work, and intentional placeholders. It is not integrated.
+
+Director review found that per-cover requests incorrectly share the full-catalog `CalibreLoad` boolean scope and lack an explicit book-identified completion path. Successful requests can leave the global busy flag set, while provider errors, endpoint/no-cover outcomes, and decode failures can leave rows stuck indefinitely as `Loading cover…`.
+
+A6 must preserve the useful A5 architecture while adding concurrency-safe per-cover terminal outcomes, proper retry/unavailable/error state transitions, current-main synchronization in both LanternLeaf and Caliberate, post-change Caliberate cover-route tests, and completed Windows CI before success signaling. See `docs/work/reviews/0010-a5-director-rejection.md`.
 
 ### Goal 0015 — highlight viewport-band reflow polish
 
