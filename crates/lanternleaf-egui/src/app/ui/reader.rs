@@ -1,6 +1,6 @@
 use eframe::egui::{
-    Align, Color32, FontFamily, Frame, Grid, Image, Label, Rect, RichText, ScrollArea, Slider,
-    Stroke, TextFormat, Ui, scroll_area::State as ScrollAreaState, text::LayoutJob,
+    Align, Color32, Context, FontFamily, Frame, Grid, Image, Label, Rect, RichText, ScrollArea,
+    Slider, Stroke, TextFormat, Ui, scroll_area::State as ScrollAreaState, text::LayoutJob,
 };
 use lanternleaf_app::contracts::{PrettyKind, ReaderSnapshot};
 use lanternleaf_app::pipeline::ReaderCommand;
@@ -30,6 +30,22 @@ pub(crate) struct PrettyScrollAnchor {
     pub(crate) within_block_fraction: f32,
     pub(crate) canonical_sentence_idx: Option<usize>,
     pub(crate) within_sentence_fraction: Option<f32>,
+    pub(crate) viewport_fraction: f32,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PrettyViewportWitness {
+    pub(crate) anchor: PrettyScrollAnchor,
+    pub(crate) geometry_key: String,
+    pub(crate) viewport_height: f32,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PrettyReflowTransaction {
+    pub(crate) anchor: PrettyScrollAnchor,
+    pub(crate) geometry_key: String,
+    pub(crate) pending_offset: Option<f32>,
+    pub(crate) applied_offset: Option<f32>,
 }
 
 fn capture_pretty_scroll_anchor(
@@ -95,6 +111,7 @@ fn capture_pretty_scroll_anchor(
         within_block_fraction: within_block_fraction.clamp(0.0, 1.0),
         canonical_sentence_idx: nearest_sentence.map(|(idx, _, _, _)| idx),
         within_sentence_fraction: nearest_sentence.map(|(_, fraction, _, _)| fraction),
+        viewport_fraction: 0.0,
     })
 }
 
@@ -103,6 +120,7 @@ fn restore_pretty_scroll_offset(
     block_heights: &[f32],
     blocks: &[PrettyBlock],
     targets: &[Option<PrettySentenceTarget>],
+    viewport_height: f32,
 ) -> Option<f32> {
     if block_heights.is_empty() || anchor.block_index >= block_heights.len() {
         return None;
@@ -148,7 +166,10 @@ fn restore_pretty_scroll_offset(
             }
         }
     }
-    Some(prefix[block_index] + block_heights[block_index] * within_block_fraction.clamp(0.0, 1.0))
+    Some(
+        prefix[block_index] + block_heights[block_index] * within_block_fraction.clamp(0.0, 1.0)
+            - anchor.viewport_fraction.clamp(0.0, 1.0) * viewport_height.max(0.0),
+    )
 }
 
 fn semantic_anchor_for_geometry_transition(
@@ -162,6 +183,78 @@ fn semantic_anchor_for_geometry_transition(
     (geometry_changed && !follow_requested)
         .then(|| capture_pretty_scroll_anchor(scroll_offset, block_heights, blocks, targets))
         .flatten()
+}
+
+fn capture_pretty_viewport_witness(
+    scroll_offset: f32,
+    viewport_height: f32,
+    block_heights: &[f32],
+    blocks: &[PrettyBlock],
+    targets: &[Option<PrettySentenceTarget>],
+    highlighted_canonical_idx: Option<usize>,
+) -> Option<PrettyViewportWitness> {
+    let mut anchor = capture_pretty_scroll_anchor(scroll_offset, block_heights, blocks, targets)?;
+    if let Some(canonical_idx) = highlighted_canonical_idx {
+        if let Some(target) = targets
+            .get(canonical_idx)
+            .and_then(|target| target.as_ref())
+        {
+            let prefix = prefix_sums(block_heights);
+            let visible_min = scroll_offset;
+            let visible_max = scroll_offset + viewport_height.max(0.0);
+            let block_index = target.block_index;
+            if let Some(block_height) = block_heights.get(block_index) {
+                let block_top = prefix[block_index];
+                if block_top < visible_max && block_top + *block_height > visible_min {
+                    if let Some(segment) = target.segments.iter().find(|segment| {
+                        segment.block_index == block_index
+                            && segment.text_start.is_some()
+                            && segment.text_end.is_some()
+                    }) {
+                        if let (Some(start), Some(end)) = (segment.text_start, segment.text_end) {
+                            if start < end {
+                                if let Some(text_len) = blocks
+                                    .get(block_index)
+                                    .map(block_text)
+                                    .map(|text| text.len())
+                                {
+                                    let within_block_fraction =
+                                        start as f32 / text_len.max(1) as f32;
+                                    anchor = PrettyScrollAnchor {
+                                        block_index,
+                                        within_block_fraction,
+                                        canonical_sentence_idx: Some(canonical_idx),
+                                        within_sentence_fraction: Some(0.0),
+                                        viewport_fraction: ((block_top
+                                            + block_height * within_block_fraction
+                                            - visible_min)
+                                            / viewport_height.max(1.0))
+                                        .clamp(0.0, 1.0),
+                                    };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Some(PrettyViewportWitness {
+        anchor,
+        geometry_key: String::new(),
+        viewport_height,
+    })
+}
+
+fn pretty_user_scroll_input(ctx: &Context, clip_rect: Rect) -> bool {
+    ctx.input(|input| {
+        input.scroll_delta.y.abs() > f32::EPSILON
+            || (input.pointer.primary_down()
+                && input
+                    .pointer
+                    .hover_pos()
+                    .is_some_and(|pos| clip_rect.contains(pos)))
+    })
 }
 
 fn blockquote_rule_segment(rect: Rect) -> [eframe::egui::Pos2; 2] {
@@ -375,6 +468,7 @@ impl LanternLeafApp {
             let geometry_key = pretty_geometry_key(snapshot, content_width);
             let geometry_changed =
                 pretty_geometry_changed(self.pretty_geometry_key.as_deref(), &geometry_key);
+            let user_scroll_input = pretty_user_scroll_input(ui.ctx(), ui.clip_rect());
             Frame::none()
                 .inner_margin(eframe::egui::Margin {
                     left: effective_horizontal_margin,
@@ -384,42 +478,59 @@ impl LanternLeafApp {
                 })
                 .show(ui, |ui| {
                     let scroll_id = ui.make_persistent_id("pretty_page");
-                    let restore_scroll_offset = if geometry_changed {
-                        let previous_anchor =
-                            ScrollAreaState::load(ui.ctx(), scroll_id).and_then(|state| {
-                                semantic_anchor_for_geometry_transition(
-                                    geometry_changed,
-                                    follow_requested,
-                                    state.offset.y,
-                                    &self.pretty_block_heights,
-                                    &self.pretty_page_cache_blocks,
-                                    &self.pretty_sentence_targets,
-                                )
+                    if user_scroll_input {
+                        self.pretty_reflow_transaction = None;
+                    } else if follow_requested {
+                        self.pretty_reflow_transaction = None;
+                    } else if geometry_changed {
+                        let anchor = self
+                            .pretty_stable_witness
+                            .as_ref()
+                            .map(|witness| witness.anchor)
+                            .or_else(|| {
+                                ScrollAreaState::load(ui.ctx(), scroll_id).and_then(|state| {
+                                    semantic_anchor_for_geometry_transition(
+                                        true,
+                                        false,
+                                        state.offset.y,
+                                        &self.pretty_block_heights,
+                                        &self.pretty_page_cache_blocks,
+                                        &self.pretty_sentence_targets,
+                                    )
+                                })
                             });
+                        if let Some(anchor) = anchor {
+                            if let Some(transaction) = self.pretty_reflow_transaction.as_mut() {
+                                transaction.geometry_key = geometry_key.clone();
+                                transaction.pending_offset = None;
+                                transaction.applied_offset = None;
+                            } else {
+                                self.pretty_reflow_transaction = Some(PrettyReflowTransaction {
+                                    anchor,
+                                    geometry_key: geometry_key.clone(),
+                                    pending_offset: None,
+                                    applied_offset: None,
+                                });
+                            }
+                        }
                         self.pretty_block_heights.clear();
                         self.pretty_geometry_key = Some(geometry_key.clone());
-                        previous_anchor
-                    } else {
-                        if geometry_changed {
-                            self.pretty_block_heights.clear();
-                            self.pretty_geometry_key = Some(geometry_key.clone());
-                        }
-                        None
-                    };
+                    }
                     let estimates = self.pretty_block_heights_for(base_px, pretty_cfg);
-                    let restore_scroll_offset = restore_scroll_offset.and_then(|anchor| {
-                        restore_pretty_scroll_offset(
-                            anchor,
-                            &estimates,
-                            &self.pretty_page_cache_blocks,
-                            &self.pretty_sentence_targets,
-                        )
-                    });
+                    let pending_offset = self
+                        .pretty_reflow_transaction
+                        .as_ref()
+                        .and_then(|transaction| transaction.pending_offset);
+                    let transaction_target_block = self
+                        .pretty_reflow_transaction
+                        .as_ref()
+                        .map(|transaction| transaction.anchor.block_index);
                     let mut pretty_scroll_area = ScrollArea::vertical().id_source("pretty_page");
-                    if let Some(offset) = restore_scroll_offset {
+                    if let Some(offset) = pending_offset {
                         pretty_scroll_area = pretty_scroll_area.vertical_scroll_offset(offset);
                     }
-                    pretty_scroll_area.show_viewport(ui, |ui, viewport| {
+                    let mut anchor_measured = false;
+                    let scroll_output = pretty_scroll_area.show_viewport(ui, |ui, viewport| {
                         ui.set_width(content_width);
                         ui.vertical(|ui| {
                             ui.set_width(content_width);
@@ -440,7 +551,10 @@ impl LanternLeafApp {
                                 viewport.max.y,
                                 &prefix,
                                 overscan,
-                                follow_requested.then_some(highlight_block_idx).flatten(),
+                                follow_requested
+                                    .then_some(highlight_block_idx)
+                                    .flatten()
+                                    .or(transaction_target_block),
                             );
                             let render_start = render_window.start;
                             let render_end = render_window.end;
@@ -892,6 +1006,9 @@ impl LanternLeafApp {
                                 if let Some(response) = response.as_ref() {
                                     measured_heights[block_i] =
                                         (response.rect.height() + spacing.max(0.0)).max(1.0);
+                                    if transaction_target_block == Some(block_i) {
+                                        anchor_measured = true;
+                                    }
                                 }
                                 ui.add_space(spacing.max(0.0));
                             }
@@ -902,6 +1019,36 @@ impl LanternLeafApp {
                             self.pretty_block_heights = measured_heights;
                         });
                     });
+                    if user_scroll_input {
+                        self.pretty_reflow_transaction = None;
+                    } else if let Some(transaction) = self.pretty_reflow_transaction.as_mut() {
+                        transaction.applied_offset = pending_offset;
+                        let viewport_height = scroll_output.inner_rect.height();
+                        if anchor_measured {
+                            transaction.pending_offset = restore_pretty_scroll_offset(
+                                transaction.anchor,
+                                &self.pretty_block_heights,
+                                &self.pretty_page_cache_blocks,
+                                &self.pretty_sentence_targets,
+                                viewport_height,
+                            );
+                        }
+                        if pending_offset.is_some() && !geometry_changed {
+                            self.pretty_reflow_transaction = None;
+                        }
+                    } else if !geometry_changed && !follow_requested {
+                        if let Some(mut witness) = capture_pretty_viewport_witness(
+                            scroll_output.state.offset.y,
+                            scroll_output.inner_rect.height(),
+                            &self.pretty_block_heights,
+                            &self.pretty_page_cache_blocks,
+                            &self.pretty_sentence_targets,
+                            canonical_highlight_idx,
+                        ) {
+                            witness.geometry_key = geometry_key.clone();
+                            self.pretty_stable_witness = Some(witness);
+                        }
+                    }
                 });
         });
         trace!(
@@ -2482,7 +2629,7 @@ mod tests {
         assert_eq!(anchor.block_index, 2);
         assert_eq!(anchor.canonical_sentence_idx, Some(0));
         assert!(anchor.within_sentence_fraction.unwrap_or_default() >= 0.0);
-        let restored = restore_pretty_scroll_offset(anchor, &after, &blocks, &targets)
+        let restored = restore_pretty_scroll_offset(anchor, &after, &blocks, &targets, 0.0)
             .expect("the canonical sentence should resolve after reflow");
         let expected_fraction = (prefix_text.len() as f32
             + (paragraph.len() - prefix_text.len()) as f32
@@ -2527,8 +2674,9 @@ mod tests {
                 Some(block_index),
                 "canonical identity must survive at block {block_index}"
             );
-            let restored = restore_pretty_scroll_offset(anchor, &new_heights, &blocks, &targets)
-                .expect("each canonical anchor should restore after reflow");
+            let restored =
+                restore_pretty_scroll_offset(anchor, &new_heights, &blocks, &targets, 0.0)
+                    .expect("each canonical anchor should restore after reflow");
             let expected = new_prefix[block_index]
                 + new_heights[block_index]
                     * (100.0 + 50.0 * anchor.within_sentence_fraction.unwrap_or_default())
@@ -2553,7 +2701,7 @@ mod tests {
         for (label, new_heights) in cases {
             let anchor = capture_pretty_scroll_anchor(40.0 + 72.0 + 11.0, &old, &blocks, &[])
                 .unwrap_or_else(|| panic!("{label}: expected an idle reading anchor"));
-            let restored = restore_pretty_scroll_offset(anchor, &new_heights, &blocks, &[])
+            let restored = restore_pretty_scroll_offset(anchor, &new_heights, &blocks, &[], 0.0)
                 .unwrap_or_else(|| panic!("{label}: expected a reflow offset"));
             let new_prefix = prefix_sums(&new_heights);
             assert_eq!(anchor.block_index, 2, "{label}: block identity changed");
@@ -2583,6 +2731,127 @@ mod tests {
         assert!(
             semantic_anchor_for_geometry_transition(false, false, 180.0, &heights, &blocks, &[])
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn reflow_transaction_retains_one_anchor_across_rapid_geometry_burst() {
+        let old_heights = [90.0, 140.0, 220.0, 110.0];
+        let measured_heights = [180.0, 70.0, 310.0, 160.0];
+        let blocks = (0..old_heights.len())
+            .map(|index| test_paragraph(index, format!("stable sentence {index}")))
+            .collect::<Vec<_>>();
+        let targets = (0..old_heights.len())
+            .map(|block_index| {
+                Some(PrettySentenceTarget {
+                    block_index,
+                    source_block_id: None,
+                    local_sentence_index: 0,
+                    text_start: Some(0),
+                    text_end: Some(16),
+                    source: "burst",
+                    segments: vec![PrettySentenceSegment {
+                        block_index,
+                        text_start: Some(0),
+                        text_end: Some(16),
+                    }],
+                })
+            })
+            .collect::<Vec<_>>();
+        let anchor = capture_pretty_scroll_anchor(
+            90.0 + 140.0 + 220.0 * 0.4,
+            &old_heights,
+            &blocks,
+            &targets,
+        )
+        .expect("the initial stable frame should provide an anchor");
+        let mut transaction = PrettyReflowTransaction {
+            anchor,
+            geometry_key: "A".to_owned(),
+            pending_offset: None,
+            applied_offset: None,
+        };
+        for key in ["B", "C", "D"] {
+            transaction.geometry_key = key.to_owned();
+            transaction.pending_offset = None;
+            assert_eq!(
+                transaction.anchor, anchor,
+                "burst frame {key} recaptured the anchor"
+            );
+        }
+        transaction.pending_offset = restore_pretty_scroll_offset(
+            transaction.anchor,
+            &measured_heights,
+            &blocks,
+            &targets,
+            480.0,
+        );
+        assert!(transaction.pending_offset.is_some());
+        assert_eq!(
+            transaction.anchor.canonical_sentence_idx,
+            anchor.canonical_sentence_idx
+        );
+        assert_eq!(
+            transaction.anchor.block_index, 2,
+            "cumulative reflow changed semantic neighborhood"
+        );
+    }
+
+    #[test]
+    fn visible_highlight_is_a_one_shot_stable_viewport_witness() {
+        let heights = [100.0, 120.0, 180.0, 90.0];
+        let blocks = (0..heights.len())
+            .map(|index| test_paragraph(index, format!("highlighted block {index} has content")))
+            .collect::<Vec<_>>();
+        let targets = vec![
+            None,
+            None,
+            Some(PrettySentenceTarget {
+                block_index: 2,
+                source_block_id: None,
+                local_sentence_index: 0,
+                text_start: Some(12),
+                text_end: Some(24),
+                source: "highlight",
+                segments: vec![PrettySentenceSegment {
+                    block_index: 2,
+                    text_start: Some(12),
+                    text_end: Some(24),
+                }],
+            }),
+            None,
+        ];
+        let witness =
+            capture_pretty_viewport_witness(220.0, 160.0, &heights, &blocks, &targets, Some(2))
+                .expect("visible highlighted sentence should anchor the stable witness");
+        assert_eq!(witness.anchor.canonical_sentence_idx, Some(2));
+        assert_eq!(witness.anchor.block_index, 2);
+        assert!(witness.anchor.viewport_fraction <= 1.0);
+        assert_eq!(witness.geometry_key, "");
+    }
+
+    #[test]
+    fn user_scroll_cancels_pending_reflow_without_changing_anchor_data() {
+        let anchor = PrettyScrollAnchor {
+            block_index: 4,
+            within_block_fraction: 0.5,
+            canonical_sentence_idx: Some(7),
+            within_sentence_fraction: Some(0.25),
+            viewport_fraction: 0.4,
+        };
+        let mut transaction = Some(PrettyReflowTransaction {
+            anchor,
+            geometry_key: "B".to_owned(),
+            pending_offset: Some(900.0),
+            applied_offset: None,
+        });
+        let user_scroll_input = true;
+        if user_scroll_input {
+            transaction = None;
+        }
+        assert!(
+            transaction.is_none(),
+            "manual scroll must cancel stale restoration"
         );
     }
 
