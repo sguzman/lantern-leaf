@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-13 after Goal 0014 A3 real-desktop acceptance.
+Updated: 2026-09-13 after Goal 0010 A5 director rejection and A6 correction promotion.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -73,13 +73,17 @@ Implementation `430e9c1` and Windows baseline run `34768445726` are the accepted
 
 ## Goal 0010 — Caliberate catalog covers / provider availability UX
 
-**READY — NEXT AUTHORIZED CODEX MACRO-GOAL**
+**A5 REJECTED BEFORE HUMAN QA — A6 CORRECTION READY**
 
-Goal 0010 is now the single ready macro-goal. It owns first-class Caliberate catalog covers before first open/materialization, bounded visible-row loading off the UI thread, intentional placeholder/loading/no-cover/provider-error states, and correct provider-unavailable classification.
+A5 established a promising foundation: explicit Caliberate cover endpoint support, `has_cover` propagation, bounded visible-row lazy scheduling, off-render-thread network/disk/decode work, and intentional placeholder text. The sibling Caliberate branch added a minimal `/api/v1/books/{id}/cover` sidecar route.
+
+Director review found blocking completion-state defects before integration. Per-cover requests incorrectly use the global `CalibreLoad` boolean scope; a successful cached-books response does not clear that scope, and provider failure / endpoint 404 / decode failure can leave local cover IDs permanently pending as `Loading cover…`. The UI is also watching full-catalog `calibre_load_event` for thumbnail failure even though `EnsureCalibreThumbnail` does not emit that event.
+
+A5 also started from stale LanternLeaf lifecycle docs and terminalized while required Windows CI run `34777773736` was still in progress. The sibling Caliberate tests cited in the report were run before the cover endpoint push rather than after it.
+
+A6 must preserve the useful A5 architecture but add an explicit book-identified terminal cover outcome, concurrency-safe pending ownership, correct retry/unavailable/error states, current-main synchronization in both repositories, post-change Caliberate endpoint tests, and completed Windows CI before success signaling. See `docs/work/reviews/0010-a5-director-rejection.md` and the correction section in `docs/work/ready/0010-caliberate-catalog-reliability.md`.
 
 The earlier `42866` open failure remains withdrawn as evidence of a LanternLeaf materialization defect because Caliberate was not running during that attempt.
-
-See `docs/work/ready/0010-caliberate-catalog-reliability.md`.
 
 ## Goal 0015 — highlight viewport-band reflow polish
 
@@ -101,6 +105,6 @@ Gate 3 native PDF visual stability remains future work and is not currently auth
 
 ## Workflow status
 
-**GOAL 0010 READY**
+**GOAL 0010 A6 READY**
 
-Goal 0014 is closed. Goal 0010 is the single authorized next macro-goal. Goal 0015 is queued minor polish; Goal 0011 remains deferred; PDF work remains future.
+Goal 0014 is closed. Goal 0010 remains the single authorized macro-goal, now as an A6 correction. Goal 0015 is queued minor polish; Goal 0011 remains deferred; PDF work remains future.
