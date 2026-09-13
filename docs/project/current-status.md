@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-12 after Goal 0013 final real-desktop acceptance and Goal 0014 promotion.
+Updated: 2026-09-12 after Goal 0014 A1 director rejection for stale-base/contract drift.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -63,18 +63,15 @@ GitHub Windows baseline run `34725734155` passed. The focused physical Windows p
 
 ## Goal 0014 — reader presentation-geometry anchor stability
 
-**READY — NEXT AUTHORIZED CODEX MACRO-GOAL**
+**A1 REJECTED — CORRECTION REQUIRED; GENERALIZED READY CONTRACT REMAINS AUTHORITATIVE**
 
-The newest physical pass establishes an important distinction:
+The physical defect remains correctly framed as generic semantic viewport-anchor loss across presentation geometry changes: canonical highlighting is currently correct, while scroll position can jump to a different semantic location after reflow.
 
-- canonical highlighting is currently correct across presentation editing;
-- viewport anchoring is not generally correct when geometry changes.
+The authoritative generalized contract is `docs/work/ready/0014-reader-presentation-anchor-stability.md` on director `main`. It requires semantic block/sentence continuity across horizontal-margin/content-width reflow, text metrics, block/heading spacing, media sizing, compound geometry changes, and active-TTS follow precedence.
 
-The production geometry key already includes content width, horizontal/vertical margins, font size, line/word/letter spacing, font family/weight, and the full pretty configuration. When that key changes, LanternLeaf correctly clears stale measured block heights. But the `ScrollArea` can still retain a raw document-space Y offset while the newly reflowed document maps that Y to a different semantic location. Horizontal margin is especially visible because changing content width rewraps text and changes cumulative block heights throughout the book.
+Attempt A1 produced a promising implementation direction: it captures the old `pretty_page` scroll position as block index plus within-block offset before invalidation, restores against new estimates, and gives pending canonical TTS follow precedence. Its focused tests and Windows CI passed.
 
-Goal 0014 therefore supersedes the earlier media-only framing. It now owns a generic semantic viewport-anchor policy for every geometry-key transition. Idle presentation editing should preserve the user's semantic reading anchor; a legitimate pending canonical TTS follow request takes precedence during playback. The goal also retains media max-width/max-height visible-resize and anchor verification.
-
-See `docs/work/ready/0014-reader-presentation-anchor-stability.md`.
+A1 is not accepted because it started from stale director `main` `d6b2b35` instead of the already-authoritative generalized main `bca97d7b...`, used the obsolete media-only branch/goal document, and terminalized lifecycle artifacts for the superseded contract. The correction must start from current director `main`, preserve valid A1 work, and prove semantic continuity under materially rewrapping blocks rather than relying only on absolute within-block pixel arithmetic. See `docs/work/reviews/0014-a1-director-rejection.md`.
 
 ## Caliberate catalog covers / availability UX
 
@@ -98,6 +95,6 @@ Gate 3 native PDF visual stability remains future work and is not currently auth
 
 ## Workflow status
 
-**GOAL 0014 READY**
+**GOAL 0014 CORRECTION REQUIRED**
 
-Goal 0013 is closed. Goal 0014 is the single authorized next macro-goal. Goal 0010 remains queued; Goal 0011 remains deferred; PDF work remains future.
+Goal 0013 is closed. Goal 0014 remains the single authorized macro-goal under its generalized ready contract; A1 is rejected and must be corrected before human QA. Goal 0010 remains queued; Goal 0011 remains deferred; PDF work remains future.
