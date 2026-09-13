@@ -469,7 +469,7 @@ struct LanternLeafApp {
     starter_calibre_last_count: usize,
     calibre_cover_pending: HashSet<u64>,
     calibre_cover_retry_after: HashMap<u64, Instant>,
-    calibre_cover_error: Option<String>,
+    calibre_cover_failures: HashMap<u64, String>,
     last_calibre_cover_event_request_id: u64,
     starter_browser_tab_query: String,
     starter_browser_tabs_force_refresh: bool,
@@ -495,6 +495,7 @@ struct StarterViewModel<'a> {
     loading_browser_tabs: bool,
     source_open_event: Option<&'a SourceOpenEvent>,
     calibre_load_event: Option<&'a CalibreLoadEvent>,
+    calibre_cover_events: &'a [lanternleaf_app::contracts::CalibreCoverEvent],
     operations: &'a OperationState,
     last_remote_update_at: u64,
     remote_url: Option<&'a String>,
@@ -514,6 +515,7 @@ impl<'a> StarterViewModel<'a> {
             loading_browser_tabs: state.starter.loading_browser_tabs,
             source_open_event: state.runtime_jobs.source_open_event.as_ref(),
             calibre_load_event: state.runtime_jobs.calibre_load_event.as_ref(),
+            calibre_cover_events: &state.runtime_jobs.calibre_cover_events,
             operations: &state.app_shell.operations,
             last_remote_update_at: state.reader_playback.last_updated_at,
             remote_url: state
@@ -984,7 +986,7 @@ impl LanternLeafApp {
             starter_calibre_last_count: 0,
             calibre_cover_pending: HashSet::new(),
             calibre_cover_retry_after: HashMap::new(),
-            calibre_cover_error: None,
+            calibre_cover_failures: HashMap::new(),
             last_calibre_cover_event_request_id: 0,
             starter_browser_tab_query: String::new(),
             starter_browser_tabs_force_refresh: false,
@@ -1109,7 +1111,7 @@ impl LanternLeafApp {
             starter_calibre_last_count: 0,
             calibre_cover_pending: HashSet::new(),
             calibre_cover_retry_after: HashMap::new(),
-            calibre_cover_error: None,
+            calibre_cover_failures: HashMap::new(),
             last_calibre_cover_event_request_id: 0,
             starter_browser_tab_query: String::new(),
             starter_browser_tabs_force_refresh: false,
@@ -3296,17 +3298,11 @@ mod tts_repaint_policy_tests {
         assert!(registry.family_available(config::FontFamily::Serif));
         assert!(!registry.family_available(config::FontFamily::Lexend));
         assert_eq!(
-            registry.effective_family_label(
-                config::FontFamily::Serif,
-                config::FontWeight::Normal
-            ),
+            registry.effective_family_label(config::FontFamily::Serif, config::FontWeight::Normal),
             "Serif Regular"
         );
         assert_eq!(
-            registry.effective_family_label(
-                config::FontFamily::Lexend,
-                config::FontWeight::Normal
-            ),
+            registry.effective_family_label(config::FontFamily::Lexend, config::FontWeight::Normal),
             "egui proportional fallback"
         );
     }

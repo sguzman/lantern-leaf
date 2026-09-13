@@ -1,8 +1,8 @@
 use crate::contracts::{
     BootstrapState, BridgeError, BrowserTabsHealth, BrowserTabsTab, BrowserTabsWindow,
-    CalibreBookDto, CalibreLoadEvent, LogLevelEvent, OpenSourceResult, PdfTranscriptionEvent,
-    ReaderPlaybackStateEvent, ReaderStateEvent, RecentBook, SessionState, SessionStateEvent,
-    SourceOpenEvent, TtsStateEvent, UiMode,
+    CalibreBookDto, CalibreCoverEvent, CalibreLoadEvent, LogLevelEvent, OpenSourceResult,
+    PdfTranscriptionEvent, ReaderPlaybackStateEvent, ReaderStateEvent, RecentBook, SessionState,
+    SessionStateEvent, SourceOpenEvent, TtsStateEvent, UiMode,
 };
 use crate::logging::{command_span, event_span};
 use crate::state::{
@@ -405,6 +405,7 @@ pub enum AppEvent {
         tabs: Vec<BrowserTabsTab>,
     },
     CalibreLoadProgress(CalibreLoadEvent),
+    CalibreCoverCompleted(CalibreCoverEvent),
     TtsStateUpdated(TtsStateEvent),
     PdfTranscriptionProgress(PdfTranscriptionEvent),
     LogLevelUpdated(LogLevelEvent),
@@ -674,10 +675,7 @@ pub fn plan_command(state: &AppState, request_id: u64, command: AppCommand) -> D
             vec![RuntimeEffect::OpenCalibreBook { book }],
         ),
         AppCommand::EnsureCalibreThumbnail { id } => (
-            vec![AppEvent::OperationChanged {
-                scope: OperationScope::CalibreLoad,
-                active: true,
-            }],
+            Vec::new(),
             vec![RuntimeEffect::EnsureCalibreThumbnail { id }],
         ),
         AppCommand::SetRuntimeLogLevel { level } => (
@@ -936,6 +934,18 @@ pub fn apply_event(state: &mut AppState, event: AppEvent) {
                 state.set_loading_calibre(false);
                 clear_scope(state, OperationScope::CalibreLoad);
             }
+        }
+        AppEvent::CalibreCoverCompleted(event) => {
+            debug!(
+                request_id = event.request_id,
+                book_id = event.book_id,
+                outcome = %event.outcome,
+                "Calibre cover request completed"
+            );
+            if let Some(path) = event.thumbnail_path.clone() {
+                state.set_calibre_cover(event.book_id, Some(path));
+            }
+            state.push_calibre_cover_event(event);
         }
         AppEvent::TtsStateUpdated(event) => {
             if event.request_id < state.runtime_jobs.last_tts_event_request_id {
@@ -1768,6 +1778,51 @@ mod tests {
             state.app_shell.service_status.calibre_available,
             Some(false)
         );
+    }
+
+    #[test]
+    fn cover_requests_have_no_catalog_operation_scope() {
+        let state = AppState::default();
+        let plan = plan_command(&state, 41, AppCommand::EnsureCalibreThumbnail { id: 7 });
+        assert!(plan.local_events.is_empty());
+        assert!(matches!(
+            plan.effects.as_slice(),
+            [PlannedEffect {
+                effect: RuntimeEffect::EnsureCalibreThumbnail { id: 7 },
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn cover_completion_updates_book_and_records_terminal_outcome() {
+        let mut state = AppState::default();
+        state.set_starter_calibre_books(vec![CalibreBookDto {
+            id: 7,
+            title: "Cover book".to_string(),
+            extension: "epub".to_string(),
+            authors: "Author".to_string(),
+            year: None,
+            file_size_bytes: None,
+            source_path: None,
+            cover_thumbnail: None,
+            has_cover: true,
+        }]);
+        apply_event(
+            &mut state,
+            AppEvent::CalibreCoverCompleted(CalibreCoverEvent {
+                request_id: 42,
+                book_id: 7,
+                outcome: "loaded".to_string(),
+                thumbnail_path: Some("thumb.jpg".to_string()),
+                message: None,
+            }),
+        );
+        assert_eq!(
+            state.starter.calibre_books[0].cover_thumbnail.as_deref(),
+            Some("thumb.jpg")
+        );
+        assert_eq!(state.runtime_jobs.calibre_cover_events.len(), 1);
     }
 
     #[test]

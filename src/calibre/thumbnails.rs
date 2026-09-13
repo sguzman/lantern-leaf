@@ -159,8 +159,9 @@ fn ensure_book_thumbnail(
     if allow_remote_fetch
         && (matches!(config.provider, CalibreProvider::Calibre) || has_cover)
         && let Some(bytes) = fetch_thumbnail_from_server(config, book_id, deadline)?
-        && write_thumbnail_file(&thumb_path, &bytes).is_ok()
     {
+        write_thumbnail_file(&thumb_path, &bytes)
+            .with_context(|| format!("caching cover for calibre book {book_id}"))?;
         return Ok(Some(thumb_path));
     }
 

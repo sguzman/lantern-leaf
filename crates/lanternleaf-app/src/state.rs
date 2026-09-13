@@ -1,8 +1,8 @@
 use crate::contracts::{
     BootstrapConfig, BootstrapState, BrowserTabsHealth, BrowserTabsTab, BrowserTabsWindow,
-    CalibreBookDto, CalibreLoadEvent, LogLevelEvent, PdfTranscriptionEvent, ReaderPlaybackState,
-    ReaderPlaybackStateEvent, ReaderSnapshot, RecentBook, SessionState, SourceOpenEvent,
-    TtsStateEvent, UiMode,
+    CalibreBookDto, CalibreCoverEvent, CalibreLoadEvent, LogLevelEvent, PdfTranscriptionEvent,
+    ReaderPlaybackState, ReaderPlaybackStateEvent, ReaderSnapshot, RecentBook, SessionState,
+    SourceOpenEvent, TtsStateEvent, UiMode,
 };
 use crate::pipeline::{PersistenceOutcome, PersistenceTrigger};
 use lanternleaf_core::{epub_loader, session};
@@ -162,6 +162,7 @@ pub struct StarterState {
 pub struct RuntimeJobState {
     pub source_open_event: Option<SourceOpenEvent>,
     pub calibre_load_event: Option<CalibreLoadEvent>,
+    pub calibre_cover_events: Vec<CalibreCoverEvent>,
     pub pdf_transcription_event: Option<PdfTranscriptionEvent>,
     pub log_level_event: Option<LogLevelEvent>,
     pub tts_state_subscribed: bool,
@@ -401,6 +402,21 @@ impl AppState {
 
     pub fn set_loading_calibre(&mut self, loading: bool) {
         self.starter.loading_calibre = loading;
+    }
+
+    pub fn push_calibre_cover_event(&mut self, event: CalibreCoverEvent) {
+        self.runtime_jobs.calibre_cover_events.push(event);
+        if self.runtime_jobs.calibre_cover_events.len() > 64 {
+            let excess = self.runtime_jobs.calibre_cover_events.len() - 64;
+            self.runtime_jobs.calibre_cover_events.drain(..excess);
+        }
+    }
+
+    pub fn set_calibre_cover(&mut self, book_id: u64, thumbnail_path: Option<String>) {
+        let books = std::sync::Arc::make_mut(&mut self.starter.calibre_books);
+        if let Some(book) = books.iter_mut().find(|book| book.id == book_id) {
+            book.cover_thumbnail = thumbnail_path;
+        }
     }
 
     pub fn set_loading_browser_tabs(&mut self, loading: bool) {

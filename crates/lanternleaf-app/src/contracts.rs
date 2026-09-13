@@ -113,6 +113,15 @@ pub struct CalibreLoadEvent {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CalibreCoverEvent {
+    pub request_id: u64,
+    pub book_id: u64,
+    pub outcome: String,
+    pub thumbnail_path: Option<String>,
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct TtsStateEvent {

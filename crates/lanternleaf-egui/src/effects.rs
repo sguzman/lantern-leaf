@@ -5,9 +5,9 @@ use std::thread;
 use std::time::Instant;
 
 use lanternleaf_app::contracts::{
-    BootstrapState, BridgeError, CalibreBookDto, CalibreLoadEvent, LogLevelEvent, OpenSourceResult,
-    PrettyKind, ReaderStateEvent, RecentBook, SessionState, SessionStateEvent, SourceOpenEvent,
-    UiMode,
+    BootstrapState, BridgeError, CalibreBookDto, CalibreCoverEvent, CalibreLoadEvent,
+    LogLevelEvent, OpenSourceResult, PrettyKind, ReaderStateEvent, RecentBook, SessionState,
+    SessionStateEvent, SourceOpenEvent, UiMode,
 };
 use lanternleaf_app::pipeline::{
     AppEvent, EffectOwner, OperationScope, PanelToggle, PersistenceOutcome, PersistenceTrigger,
@@ -669,21 +669,44 @@ fn handle_calibre_thumbnail(
     request_id: u64,
     book_id: u64,
 ) -> Result<Vec<AppEvent>, BridgeError> {
-    let mut book = calibre::load_cached_books(&context.calibre_config)
-        .map_err(|err| bridge_error("calibre_cache_load_failed", err.to_string()))?
-        .into_iter()
-        .find(|book| book.id == book_id)
-        .ok_or_else(|| bridge_error("calibre_not_found", "Book not found"))?;
-    if let Err(err) = calibre::ensure_thumbnail_for_book(&context.calibre_config, &mut book, true) {
-        let message = err.to_string();
-        let code = if message.contains("provider unavailable") {
-            "calibre_provider_unavailable"
-        } else {
-            "calibre_cover_failed"
-        };
-        return Err(bridge_error(code, message));
+    let outcome = |outcome: &str, thumbnail_path: Option<String>, message: Option<String>| {
+        Ok(vec![AppEvent::CalibreCoverCompleted(CalibreCoverEvent {
+            request_id,
+            book_id,
+            outcome: outcome.to_string(),
+            thumbnail_path,
+            message,
+        })])
+    };
+    let mut book = match calibre::load_cached_books(&context.calibre_config) {
+        Ok(books) => match books.into_iter().find(|book| book.id == book_id) {
+            Some(book) => book,
+            None => return outcome("cover_error", None, Some("Book not found".to_string())),
+        },
+        Err(err) => return outcome("cover_error", None, Some(err.to_string())),
+    };
+    match calibre::ensure_thumbnail_for_book(&context.calibre_config, &mut book, true) {
+        Ok(_) if book.cover_thumbnail.is_some() => outcome(
+            "loaded",
+            book.cover_thumbnail
+                .map(|path| path.to_string_lossy().to_string()),
+            None,
+        ),
+        Ok(_) => outcome(
+            "cover_unavailable",
+            None,
+            Some("No cover was returned by the provider".to_string()),
+        ),
+        Err(err) => {
+            let message = err.to_string();
+            let kind = if message.contains("provider unavailable") {
+                "provider_unavailable"
+            } else {
+                "cover_error"
+            };
+            outcome(kind, None, Some(message))
+        }
     }
-    handle_calibre_cached_books(context, request_id)
 }
 
 fn handle_reader_command(

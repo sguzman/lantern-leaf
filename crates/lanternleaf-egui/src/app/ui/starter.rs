@@ -217,7 +217,7 @@ impl LanternLeafApp {
                     });
                     self.calibre_cover_pending.clear();
                     self.calibre_cover_retry_after.clear();
-                    self.calibre_cover_error = None;
+                    self.calibre_cover_failures.clear();
                 }
                 ui.checkbox(&mut self.starter_calibre_force_refresh, "Force refresh");
                 if model.loading_calibre || model.operations.calibre_load {
@@ -249,18 +249,32 @@ impl LanternLeafApp {
                 ui.label("No Calibre books loaded.");
                 return;
             }
-            if let Some(event) = model.calibre_load_event
-                && event.request_id > self.last_calibre_cover_event_request_id
-            {
-                self.last_calibre_cover_event_request_id = event.request_id;
-                if event.phase == "failed" {
-                    self.calibre_cover_error = event.message.clone();
-                    let retry_at = std::time::Instant::now() + std::time::Duration::from_secs(2);
-                    for id in self.calibre_cover_pending.drain() {
-                        self.calibre_cover_retry_after.insert(id, retry_at);
+            for event in model.calibre_cover_events {
+                if event.request_id <= self.last_calibre_cover_event_request_id {
+                    continue;
+                }
+                self.last_calibre_cover_event_request_id = self
+                    .last_calibre_cover_event_request_id
+                    .max(event.request_id);
+                self.calibre_cover_pending.remove(&event.book_id);
+                match event.outcome.as_str() {
+                    "loaded" | "cover_unavailable" => {
+                        self.calibre_cover_retry_after.remove(&event.book_id);
+                        self.calibre_cover_failures.remove(&event.book_id);
                     }
-                } else if event.phase == "finished" {
-                    self.calibre_cover_error = None;
+                    "provider_unavailable" => {
+                        self.calibre_cover_failures
+                            .insert(event.book_id, "Provider unavailable".to_string());
+                        self.calibre_cover_retry_after.insert(
+                            event.book_id,
+                            std::time::Instant::now() + std::time::Duration::from_secs(2),
+                        );
+                    }
+                    _ => {
+                        self.calibre_cover_failures
+                            .insert(event.book_id, "Cover fetch/decode failed".to_string());
+                        self.calibre_cover_retry_after.remove(&event.book_id);
+                    }
                 }
             }
             for book in model.calibre_books {
@@ -336,7 +350,7 @@ impl LanternLeafApp {
                             .calibre_cover_retry_after
                             .get(&book_id)
                             .is_some_and(|until| *until > std::time::Instant::now());
-                        let provider_error = self.calibre_cover_error.is_some();
+                        let cover_failure = self.calibre_cover_failures.get(&book_id).cloned();
                         if book.has_cover
                             && cover_path.is_none()
                             && !cover_pending
@@ -356,8 +370,8 @@ impl LanternLeafApp {
                                 Some("No cover")
                             } else if cover_pending {
                                 Some("Loading cover…")
-                            } else if provider_error {
-                                Some("Provider unavailable")
+                            } else if let Some(failure) = cover_failure.as_deref() {
+                                Some(failure)
                             } else {
                                 Some("Cover unavailable")
                             };
