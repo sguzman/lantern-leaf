@@ -1,6 +1,6 @@
 use eframe::egui::{
     Align, Color32, FontFamily, Frame, Grid, Image, Label, Rect, RichText, ScrollArea, Slider,
-    Stroke, TextFormat, Ui, text::LayoutJob,
+    Stroke, TextFormat, Ui, scroll_area::State as ScrollAreaState, text::LayoutJob,
 };
 use lanternleaf_app::contracts::{PrettyKind, ReaderSnapshot};
 use lanternleaf_app::pipeline::ReaderCommand;
@@ -23,6 +23,40 @@ use crate::pretty::{
 
 const BLOCKQUOTE_RULE_WIDTH: f32 = 1.0;
 const BLOCKQUOTE_INDENT: f32 = 14.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PrettyScrollAnchor {
+    pub(crate) block_index: usize,
+    pub(crate) within_block: f32,
+}
+
+fn capture_pretty_scroll_anchor(
+    scroll_offset: f32,
+    block_heights: &[f32],
+) -> Option<PrettyScrollAnchor> {
+    if block_heights.is_empty() {
+        return None;
+    }
+    let prefix = prefix_sums(block_heights);
+    let total_height = prefix.last().copied().unwrap_or_default();
+    let offset = scroll_offset.clamp(0.0, total_height.max(0.0));
+    let block_index = prefix
+        .partition_point(|start| *start <= offset)
+        .saturating_sub(1)
+        .min(block_heights.len().saturating_sub(1));
+    Some(PrettyScrollAnchor {
+        block_index,
+        within_block: (offset - prefix[block_index]).max(0.0),
+    })
+}
+
+fn restore_pretty_scroll_offset(anchor: PrettyScrollAnchor, block_heights: &[f32]) -> Option<f32> {
+    if block_heights.is_empty() || anchor.block_index >= block_heights.len() {
+        return None;
+    }
+    let prefix = prefix_sums(block_heights);
+    Some(prefix[anchor.block_index] + anchor.within_block.max(0.0))
+}
 
 fn blockquote_rule_segment(rect: Rect) -> [eframe::egui::Pos2; 2] {
     [rect.left_top(), rect.left_bottom()]
@@ -224,6 +258,17 @@ impl LanternLeafApp {
             let vertical_margin = snapshot.settings.margin_vertical as f32;
             let (content_width, effective_horizontal_margin) =
                 pretty_content_geometry(ui.available_width(), horizontal_margin);
+            let mut pretty_cfg = snapshot.settings.pretty;
+            // The top-level reader spacing fields remain the canonical
+            // config/persistence owner; copy them into the render policy for
+            // LayoutJob creation and geometry invalidation.
+            pretty_cfg.word_spacing = snapshot.settings.word_spacing;
+            pretty_cfg.letter_spacing = snapshot.settings.letter_spacing;
+            let base_px =
+                (snapshot.settings.font_size as f32 * pretty_cfg.base_font_scale).clamp(8.0, 48.0);
+            let geometry_key = pretty_geometry_key(snapshot, content_width);
+            let geometry_changed =
+                pretty_geometry_changed(self.pretty_geometry_key.as_deref(), &geometry_key);
             Frame::none()
                 .inner_margin(eframe::egui::Margin {
                     left: effective_horizontal_margin,
@@ -232,21 +277,36 @@ impl LanternLeafApp {
                     bottom: vertical_margin,
                 })
                 .show(ui, |ui| {
-                    ScrollArea::vertical()
-                        .id_source("pretty_page")
-                        .show_viewport(ui, |ui, viewport| {
-                    ui.set_width(content_width);
-                    ui.vertical(|ui| {
+                    let scroll_id = ui.make_persistent_id("pretty_page");
+                    let restore_scroll_offset = if geometry_changed && !follow_requested {
+                        let previous_anchor =
+                            ScrollAreaState::load(ui.ctx(), scroll_id).and_then(|state| {
+                                capture_pretty_scroll_anchor(
+                                    state.offset.y,
+                                    &self.pretty_block_heights,
+                                )
+                            });
+                        self.pretty_block_heights.clear();
+                        self.pretty_geometry_key = Some(geometry_key.clone());
+                        previous_anchor
+                    } else {
+                        if geometry_changed {
+                            self.pretty_block_heights.clear();
+                            self.pretty_geometry_key = Some(geometry_key.clone());
+                        }
+                        None
+                    };
+                    let estimates = self.pretty_block_heights_for(base_px, pretty_cfg);
+                    let restore_scroll_offset = restore_scroll_offset
+                        .and_then(|anchor| restore_pretty_scroll_offset(anchor, &estimates));
+                    let mut pretty_scroll_area = ScrollArea::vertical().id_source("pretty_page");
+                    if let Some(offset) = restore_scroll_offset {
+                        pretty_scroll_area = pretty_scroll_area.vertical_scroll_offset(offset);
+                    }
+                    pretty_scroll_area.show_viewport(ui, |ui, viewport| {
+                        ui.set_width(content_width);
+                        ui.vertical(|ui| {
                             ui.set_width(content_width);
-                            let mut pretty_cfg = snapshot.settings.pretty;
-                            // The top-level reader spacing fields remain the
-                            // canonical config/persistence owner; copy them
-                            // into the render policy for LayoutJob creation.
-                            pretty_cfg.word_spacing = snapshot.settings.word_spacing;
-                            pretty_cfg.letter_spacing = snapshot.settings.letter_spacing;
-                            let base_px = (snapshot.settings.font_size as f32
-                                * pretty_cfg.base_font_scale)
-                                .clamp(8.0, 48.0);
                             let (regular_family, bold_family, mono_regular, mono_bold) =
                                 presentation_font_families(
                                     snapshot.settings.font_family,
@@ -254,17 +314,8 @@ impl LanternLeafApp {
                                     &self.font_registry,
                                 );
 
-                            let geometry_key = pretty_geometry_key(snapshot, content_width);
-                            if pretty_geometry_changed(
-                                self.pretty_geometry_key.as_deref(),
-                                &geometry_key,
-                            ) {
-                                self.pretty_block_heights.clear();
-                                self.pretty_geometry_key = Some(geometry_key);
-                            }
                             let total_blocks = self.pretty_page_cache_blocks.len();
                             let overscan = 8usize;
-                            let estimates = self.pretty_block_heights_for(base_px, pretty_cfg);
                             let prefix = prefix_sums(&estimates);
                             let total_height = prefix.last().copied().unwrap_or(0.0);
                             let render_window = pretty_render_window(
@@ -421,9 +472,7 @@ impl LanternLeafApp {
                                                     top: 6.0,
                                                     bottom: 6.0,
                                                 })
-                                                .show(ui, |ui| {
-                                                    ui.add(Label::new(job).wrap(true))
-                                                });
+                                                .show(ui, |ui| ui.add(Label::new(job).wrap(true)));
                                             let quote_rect = quote_frame.response.rect;
                                             ui.painter().line_segment(
                                                 blockquote_rule_segment(quote_rect),
@@ -536,7 +585,11 @@ impl LanternLeafApp {
                                                     .fill(ui.visuals().faint_bg_color)
                                                     .stroke(Stroke::new(
                                                         1.0_f32,
-                                                        ui.visuals().widgets.noninteractive.bg_stroke.color,
+                                                        ui.visuals()
+                                                            .widgets
+                                                            .noninteractive
+                                                            .bg_stroke
+                                                            .color,
                                                     ))
                                                     .inner_margin(8.0)
                                                     .show(ui, |ui| {
@@ -544,15 +597,17 @@ impl LanternLeafApp {
                                                     })
                                                     .response,
                                             );
-                                        } else if let Some(texture) = self.pretty_image_cache.texture_for(
-                                            ui.ctx(),
-                                            &img.local_path,
-                                            (ui.available_width()
-                                                * (pretty_cfg.image_max_width_pct / 100.0))
-                                                as u32,
-                                            pretty_cfg.image_max_height_px as u32,
-                                            pretty_cfg.image_cache_max_entries,
-                                        ) {
+                                        } else if let Some(texture) =
+                                            self.pretty_image_cache.texture_for(
+                                                ui.ctx(),
+                                                &img.local_path,
+                                                (ui.available_width()
+                                                    * (pretty_cfg.image_max_width_pct / 100.0))
+                                                    as u32,
+                                                pretty_cfg.image_max_height_px as u32,
+                                                pretty_cfg.image_cache_max_entries,
+                                            )
+                                        {
                                             let size = clamp_image_size(
                                                 ui.available_width(),
                                                 [texture.size()[0], texture.size()[1]],
@@ -609,54 +664,66 @@ impl LanternLeafApp {
                                                         pretty_cfg.table_cell_padding,
                                                     ))
                                                     .show(ui, |ui| {
-                                                        Grid::new(format!("pretty_table_{}", block_i))
-                                                            .spacing([
-                                                                pretty_cfg.table_cell_padding,
-                                                                pretty_cfg.table_cell_padding,
-                                                            ])
-                                                            .striped(true)
-                                                            .show(ui, |ui| {
-                                                        for (row_i, row) in rows.iter().enumerate()
-                                                        {
-                                                            for (column_i, cell) in row.iter().enumerate() {
-                                                                let mut spans = cell.spans.clone();
-                                                                if cell.header {
-                                                                    for span in &mut spans {
-                                                                        span.style.bold = true;
+                                                        Grid::new(format!(
+                                                            "pretty_table_{}",
+                                                            block_i
+                                                        ))
+                                                        .spacing([
+                                                            pretty_cfg.table_cell_padding,
+                                                            pretty_cfg.table_cell_padding,
+                                                        ])
+                                                        .striped(true)
+                                                        .show(ui, |ui| {
+                                                            for (row_i, row) in
+                                                                rows.iter().enumerate()
+                                                            {
+                                                                for (column_i, cell) in
+                                                                    row.iter().enumerate()
+                                                                {
+                                                                    let mut spans =
+                                                                        cell.spans.clone();
+                                                                    if cell.header {
+                                                                        for span in &mut spans {
+                                                                            span.style.bold = true;
+                                                                        }
                                                                     }
+                                                                    let job = spans_to_job(
+                                                                        ui,
+                                                                        &spans,
+                                                                        base_px,
+                                                                        None,
+                                                                        regular_family.clone(),
+                                                                        bold_family.clone(),
+                                                                        mono_regular.clone(),
+                                                                        mono_bold.clone(),
+                                                                        pretty_cfg,
+                                                                        snapshot
+                                                                            .settings
+                                                                            .line_spacing,
+                                                                    );
+                                                                    let cell_frame = if row_i % 2
+                                                                        == 1
+                                                                    {
+                                                                        Frame::none().fill(stripe)
+                                                                    } else {
+                                                                        Frame::none()
+                                                                    };
+                                                                    cell_frame.show(ui, |ui| {
+                                                                        ui.set_width(
+                                                                            column_widths
+                                                                                .get(column_i)
+                                                                                .copied()
+                                                                                .unwrap_or(120.0),
+                                                                        );
+                                                                        ui.add(
+                                                                            Label::new(job)
+                                                                                .wrap(true),
+                                                                        );
+                                                                    });
                                                                 }
-                                                                let job = spans_to_job(
-                                                                    ui,
-                                                                    &spans,
-                                                                    base_px,
-                                                                    None,
-                                                                    regular_family.clone(),
-                                                                    bold_family.clone(),
-                                                                    mono_regular.clone(),
-                                                                    mono_bold.clone(),
-                                                                    pretty_cfg,
-                                                                    snapshot.settings.line_spacing,
-                                                                );
-                                                                let cell_frame = if row_i % 2 == 1 {
-                                                                    Frame::none().fill(stripe)
-                                                                } else {
-                                                                    Frame::none()
-                                                                };
-                                                                cell_frame.show(ui, |ui| {
-                                                                    ui.set_width(
-                                                                        column_widths
-                                                                            .get(column_i)
-                                                                            .copied()
-                                                                            .unwrap_or(120.0),
-                                                                    );
-                                                                    ui.add(
-                                                                        Label::new(job).wrap(true),
-                                                                    );
-                                                                });
+                                                                ui.end_row();
                                                             }
-                                                            ui.end_row();
-                                                        }
-                                                            });
+                                                        });
                                                     });
                                             });
                                     }
@@ -717,8 +784,8 @@ impl LanternLeafApp {
                                     - prefix.get(render_end).copied().unwrap_or(total_height),
                             );
                             self.pretty_block_heights = measured_heights;
-                    });
                         });
+                    });
                 });
         });
         trace!(
@@ -2263,6 +2330,60 @@ mod tests {
     }
 
     #[test]
+    fn semantic_pretty_anchor_preserves_block_and_relative_offset_across_reflow() {
+        let before = [40.0, 72.0, 96.0, 54.0, 120.0];
+        let after = [56.0, 104.0, 144.0, 68.0, 180.0];
+        let anchor = capture_pretty_scroll_anchor(40.0 + 72.0 + 19.0, &before)
+            .expect("a visible document should provide a semantic anchor");
+        assert_eq!(anchor.block_index, 2);
+        assert_eq!(anchor.within_block, 19.0);
+        assert_eq!(
+            restore_pretty_scroll_offset(anchor, &after),
+            Some(56.0 + 104.0 + 19.0)
+        );
+    }
+
+    #[test]
+    fn semantic_pretty_anchor_policy_covers_idle_reflow_dimensions() {
+        let cases = [
+            ("horizontal margin/content width", [40.0, 72.0, 96.0]),
+            ("text metrics", [40.0, 90.0, 122.0]),
+            ("block and heading spacing", [52.0, 82.0, 110.0]),
+            ("media sizing", [40.0, 72.0, 148.0]),
+            ("compound geometry", [58.0, 108.0, 164.0]),
+        ];
+        let old = [40.0, 72.0, 96.0];
+        for (label, new_heights) in cases {
+            let anchor = capture_pretty_scroll_anchor(40.0 + 72.0 + 11.0, &old)
+                .unwrap_or_else(|| panic!("{label}: expected an idle reading anchor"));
+            let restored = restore_pretty_scroll_offset(anchor, &new_heights)
+                .unwrap_or_else(|| panic!("{label}: expected a reflow offset"));
+            let new_prefix = prefix_sums(&new_heights);
+            assert_eq!(anchor.block_index, 2, "{label}: block identity changed");
+            assert_eq!(
+                restored,
+                new_prefix[2] + 11.0,
+                "{label}: relative offset changed"
+            );
+        }
+    }
+
+    #[test]
+    fn pending_tts_follow_takes_precedence_over_idle_anchor_restore() {
+        let idle_anchor = capture_pretty_scroll_anchor(180.0, &[60.0, 80.0, 100.0]);
+        let follow_requested = true;
+        assert!(follow_requested);
+        assert!(
+            idle_anchor.is_some(),
+            "the user anchor exists but is not used"
+        );
+        assert_eq!(
+            follow_requested.then_some(None::<PrettyScrollAnchor>),
+            Some(None)
+        );
+    }
+
+    #[test]
     fn production_pretty_layout_proves_word_and_letter_spacing_change_width() {
         let registry = controlled_registry(&[]);
         let ctx = controlled_context(&registry);
@@ -2417,7 +2538,10 @@ mod tests {
         if pretty_geometry_changed(geometry_key.as_deref(), geometry_b) {
             measured_heights.clear();
         }
-        assert!(measured_heights.is_empty(), "geometry A measurements must be invalidated");
+        assert!(
+            measured_heights.is_empty(),
+            "geometry A measurements must be invalidated"
+        );
         geometry_key = Some(geometry_b.to_owned());
         assert_eq!(geometry_key.as_deref(), Some(geometry_b));
 
