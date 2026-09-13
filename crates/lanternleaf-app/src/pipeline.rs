@@ -1206,6 +1206,7 @@ mod tests {
                 file_size_bytes: None,
                 source_path: None,
                 cover_thumbnail: None,
+                has_cover: false,
             },
         };
         assert_eq!(effect.owner(), EffectOwner::SourceOpen);
@@ -1229,6 +1230,7 @@ mod tests {
                     file_size_bytes: None,
                     source_path: None,
                     cover_thumbnail: None,
+                    has_cover: false,
                 },
             },
         );

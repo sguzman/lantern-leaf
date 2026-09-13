@@ -83,7 +83,7 @@ pub(super) fn load_books_with_cancel(
                 THUMB_PREFETCH_LIMIT,
                 THUMB_PREFETCH_BUDGET,
                 cancel,
-                true,
+                matches!(config.provider, CalibreProvider::Calibre),
             );
             if changed {
                 let _ = write_cache(config, &signature, &cached);
@@ -114,7 +114,7 @@ pub(super) fn load_books_with_cancel(
                     THUMB_PREFETCH_LIMIT,
                     THUMB_PREFETCH_BUDGET,
                     cancel,
-                    true,
+                    matches!(config.provider, CalibreProvider::Calibre),
                 );
                 if changed {
                     let _ = write_cache(config, &signature, &cached);
@@ -141,7 +141,7 @@ pub(super) fn load_books_with_cancel(
         THUMB_PREFETCH_LIMIT,
         THUMB_PREFETCH_BUDGET,
         cancel,
-        true,
+        matches!(config.provider, CalibreProvider::Calibre),
     );
     ensure_not_cancelled(cancel, "before_write_cache")?;
     info!(book_count = books.len(), "Writing calibre cache file");
@@ -281,6 +281,7 @@ fn fetch_legacy_books(
             year,
             file_size_bytes,
             cover_thumbnail: None,
+            has_cover: false,
             path: None,
         });
     }
@@ -396,6 +397,7 @@ mod tests {
             year: Some(2020),
             file_size_bytes: Some(4),
             cover_thumbnail: None,
+            has_cover: false,
             path: None,
         };
         let legacy_signature = cache_signature(&legacy);

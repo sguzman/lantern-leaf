@@ -674,7 +674,15 @@ fn handle_calibre_thumbnail(
         .into_iter()
         .find(|book| book.id == book_id)
         .ok_or_else(|| bridge_error("calibre_not_found", "Book not found"))?;
-    let _ = calibre::ensure_thumbnail_for_book(&context.calibre_config, &mut book, true);
+    if let Err(err) = calibre::ensure_thumbnail_for_book(&context.calibre_config, &mut book, true) {
+        let message = err.to_string();
+        let code = if message.contains("provider unavailable") {
+            "calibre_provider_unavailable"
+        } else {
+            "calibre_cover_failed"
+        };
+        return Err(bridge_error(code, message));
+    }
     handle_calibre_cached_books(context, request_id)
 }
 
@@ -1142,6 +1150,7 @@ fn calibre_book_from_dto(book: CalibreBookDto) -> calibre::CalibreBook {
         file_size_bytes: book.file_size_bytes,
         path: book.source_path.map(PathBuf::from),
         cover_thumbnail: book.cover_thumbnail.map(PathBuf::from),
+        has_cover: book.has_cover,
     }
 }
 
@@ -1172,6 +1181,7 @@ fn map_calibre_book(book: calibre::CalibreBook) -> CalibreBookDto {
         cover_thumbnail: book
             .cover_thumbnail
             .map(|path| path.to_string_lossy().to_string()),
+        has_cover: book.has_cover,
     }
 }
 

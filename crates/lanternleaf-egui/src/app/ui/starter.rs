@@ -1,4 +1,4 @@
-use eframe::egui::{self, Color32, ComboBox, Image, Label, ScrollArea, Ui, Vec2};
+use eframe::egui::{self, Align2, Color32, ComboBox, FontId, Image, Label, ScrollArea, Ui, Vec2};
 use lanternleaf_app::pipeline::AppCommand;
 use lanternleaf_app::state::AppState;
 use tracing::{trace, warn};
@@ -141,6 +141,7 @@ impl LanternLeafApp {
                             self.render_thumbnail(
                                 ui,
                                 recent.thumbnail_path.as_deref().map(PathBuf::from),
+                                None,
                             );
                             ui.vertical(|ui| {
                                 ui.set_min_width(0.0);
@@ -214,6 +215,9 @@ impl LanternLeafApp {
                     self.execute_command(AppCommand::LoadCalibreBooks {
                         force_refresh: self.starter_calibre_force_refresh,
                     });
+                    self.calibre_cover_pending.clear();
+                    self.calibre_cover_retry_after.clear();
+                    self.calibre_cover_error = None;
                 }
                 ui.checkbox(&mut self.starter_calibre_force_refresh, "Force refresh");
                 if model.loading_calibre || model.operations.calibre_load {
@@ -244,6 +248,26 @@ impl LanternLeafApp {
             if model.calibre_books.is_empty() && !model.loading_calibre {
                 ui.label("No Calibre books loaded.");
                 return;
+            }
+            if let Some(event) = model.calibre_load_event
+                && event.request_id > self.last_calibre_cover_event_request_id
+            {
+                self.last_calibre_cover_event_request_id = event.request_id;
+                if event.phase == "failed" {
+                    self.calibre_cover_error = event.message.clone();
+                    let retry_at = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                    for id in self.calibre_cover_pending.drain() {
+                        self.calibre_cover_retry_after.insert(id, retry_at);
+                    }
+                } else if event.phase == "finished" {
+                    self.calibre_cover_error = None;
+                }
+            }
+            for book in model.calibre_books {
+                if book.cover_thumbnail.is_some() {
+                    self.calibre_cover_pending.remove(&book.id);
+                    self.calibre_cover_retry_after.remove(&book.id);
+                }
             }
             let query = self.starter_calibre_query.trim().to_lowercase();
             let should_rebuild = self.starter_calibre_last_query != query
@@ -305,12 +329,39 @@ impl LanternLeafApp {
                 .show_rows(ui, row_height, total_rows, |ui, range| {
                     for row in range {
                         let book = &model.calibre_books[self.starter_calibre_view[row]];
+                        let book_id = book.id;
+                        let cover_path = book.cover_thumbnail.clone();
+                        let cover_pending = self.calibre_cover_pending.contains(&book_id);
+                        let retry_blocked = self
+                            .calibre_cover_retry_after
+                            .get(&book_id)
+                            .is_some_and(|until| *until > std::time::Instant::now());
+                        let provider_error = self.calibre_cover_error.is_some();
+                        if book.has_cover
+                            && cover_path.is_none()
+                            && !cover_pending
+                            && !retry_blocked
+                            && self.calibre_cover_pending.len() < 4
+                        {
+                            self.calibre_cover_pending.insert(book_id);
+                            self.execute_command(AppCommand::EnsureCalibreThumbnail {
+                                id: book_id,
+                            });
+                        }
                         ui.separator();
                         ui.horizontal_top(|ui| {
-                            self.render_thumbnail(
-                                ui,
-                                book.cover_thumbnail.as_deref().map(PathBuf::from),
-                            );
+                            let status = if cover_path.is_some() {
+                                None
+                            } else if !book.has_cover {
+                                Some("No cover")
+                            } else if cover_pending {
+                                Some("Loading cover…")
+                            } else if provider_error {
+                                Some("Provider unavailable")
+                            } else {
+                                Some("Cover unavailable")
+                            };
+                            self.render_thumbnail(ui, cover_path.map(PathBuf::from), status);
                             ui.vertical(|ui| {
                                 ui.set_min_width(0.0);
                                 ui.set_max_width(ui.available_width());
@@ -329,6 +380,12 @@ impl LanternLeafApp {
                                     ));
                                     if book.cover_thumbnail.is_some() {
                                         ui.label("Thumbnail cached");
+                                    } else if book.has_cover {
+                                        ui.label(if cover_pending {
+                                            "Loading cover…"
+                                        } else {
+                                            "Cover pending"
+                                        });
                                     }
                                 });
                                 ui.horizontal_wrapped(|ui| {
@@ -591,7 +648,7 @@ impl LanternLeafApp {
         self.execute_command(AppCommand::RefreshBrowserTab { tab_id, window_id });
     }
 
-    fn render_thumbnail(&mut self, ui: &mut Ui, path: Option<PathBuf>) {
+    fn render_thumbnail(&mut self, ui: &mut Ui, path: Option<PathBuf>, status: Option<&str>) {
         let size = Vec2::new(THUMB_WIDTH as f32, THUMB_HEIGHT as f32);
         if let Some(path) = path {
             if let Some(texture) = self.thumbnail_cache.texture_for(ui.ctx(), &path) {
@@ -601,8 +658,17 @@ impl LanternLeafApp {
         }
         let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
         let painter = ui.painter();
-        painter.rect_filled(rect, 2.0, Color32::from_gray(24));
+        painter.rect_filled(rect, 2.0, Color32::from_gray(32));
         painter.rect_stroke(rect, 2.0, (1.0, Color32::from_gray(60)));
+        if let Some(status) = status {
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                status,
+                FontId::proportional(10.0),
+                Color32::LIGHT_GRAY,
+            );
+        }
     }
 }
 

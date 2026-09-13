@@ -36,6 +36,8 @@ struct BookRow {
     primary_format: Option<String>,
     #[serde(default)]
     formats: Vec<FormatRow>,
+    #[serde(default)]
+    has_cover: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -249,6 +251,7 @@ fn map_book(row: BookRow, allowed: &[String]) -> Option<CalibreBook> {
         file_size_bytes: selected.1,
         path: None,
         cover_thumbnail: None,
+        has_cover: row.has_cover,
     })
 }
 
@@ -567,6 +570,7 @@ mod tests {
             year: None,
             file_size_bytes: None,
             cover_thumbnail: None,
+            has_cover: false,
             path: None,
         };
         let temp = std::env::temp_dir().join(format!(

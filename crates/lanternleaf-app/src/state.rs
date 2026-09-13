@@ -726,6 +726,7 @@ mod tests {
                     file_size_bytes: Some(123),
                     source_path: None,
                     cover_thumbnail: None,
+                    has_cover: false,
                 })
                 .collect(),
         );

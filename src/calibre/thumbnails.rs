@@ -8,7 +8,7 @@ use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::{
     CalibreBook, CalibreConfig, CalibreProvider, THUMB_FETCH_TIMEOUT, THUMB_HEIGHT, THUMB_WIDTH,
@@ -51,9 +51,14 @@ pub(super) fn hydrate_book_thumbnails(
             config,
             book.id,
             book.path.as_deref(),
+            book.has_cover,
             deadline,
             allow_remote_fetch,
-        );
+        )
+        .unwrap_or_else(|err| {
+            warn!(book_id = book.id, error = %err, "Calibre thumbnail hydration failed");
+            None
+        });
         if next != current {
             book.cover_thumbnail = next;
             changed = true;
@@ -93,33 +98,35 @@ pub(super) fn ensure_thumbnail_for_book(
     config: &CalibreConfig,
     book: &mut CalibreBook,
     allow_remote_fetch: bool,
-) -> bool {
+) -> Result<bool> {
     let before = book.cover_thumbnail.clone();
     let deadline = Instant::now() + THUMB_FETCH_TIMEOUT.saturating_mul(6);
     let next = ensure_book_thumbnail(
         config,
         book.id,
         book.path.as_deref(),
+        book.has_cover,
         deadline,
         allow_remote_fetch,
-    );
+    )?;
     if next != before {
         book.cover_thumbnail = next;
-        return true;
+        return Ok(true);
     }
-    false
+    Ok(false)
 }
 
 fn ensure_book_thumbnail(
     config: &CalibreConfig,
     book_id: u64,
     source_path: Option<&Path>,
+    has_cover: bool,
     deadline: Instant,
     allow_remote_fetch: bool,
-) -> Option<PathBuf> {
+) -> Result<Option<PathBuf>> {
     let thumb_path = calibre_thumbnail_path(config, book_id);
     if thumb_path.exists() {
-        return Some(thumb_path);
+        return Ok(Some(thumb_path));
     }
 
     if let Some(dir) = source_path.and_then(Path::parent)
@@ -133,7 +140,7 @@ fn ensure_book_thumbnail(
             source = %local_cover.display(),
             "Hydrated calibre thumbnail from local cover sidecar"
         );
-        return Some(thumb_path);
+        return Ok(Some(thumb_path));
     }
 
     if let Some(epub_source) = source_path.filter(|path| is_epub_source_path(path))
@@ -146,18 +153,18 @@ fn ensure_book_thumbnail(
             source = %epub_source.display(),
             "Hydrated calibre thumbnail from EPUB embedded cover"
         );
-        return Some(thumb_path);
+        return Ok(Some(thumb_path));
     }
 
     if allow_remote_fetch
-        && matches!(config.provider, CalibreProvider::Calibre)
-        && let Some(bytes) = fetch_thumbnail_from_server(config, book_id, deadline)
+        && (matches!(config.provider, CalibreProvider::Calibre) || has_cover)
+        && let Some(bytes) = fetch_thumbnail_from_server(config, book_id, deadline)?
         && write_thumbnail_file(&thumb_path, &bytes).is_ok()
     {
-        return Some(thumb_path);
+        return Ok(Some(thumb_path));
     }
 
-    None
+    Ok(None)
 }
 
 fn is_epub_source_path(path: &Path) -> bool {
@@ -190,30 +197,33 @@ fn fetch_thumbnail_from_server(
     config: &CalibreConfig,
     book_id: u64,
     deadline: Instant,
-) -> Option<Vec<u8>> {
+) -> Result<Option<Vec<u8>>> {
     let remaining = deadline.saturating_duration_since(Instant::now());
     if remaining < Duration::from_millis(40) {
-        return None;
+        return Ok(None);
     }
     let timeout = remaining.min(THUMB_FETCH_TIMEOUT);
     let client = reqwest::blocking::Client::builder()
         .timeout(timeout)
         .build()
-        .ok()?;
+        .context("building cover provider client")?;
     let username = effective_username(config);
     let password = effective_password(config);
-    let endpoints = [
-        format!("get/thumb/{book_id}"),
-        format!("get/cover/{book_id}"),
-    ];
+    let endpoints = match config.provider {
+        CalibreProvider::Caliberate => vec![format!("api/v1/books/{book_id}/cover")],
+        CalibreProvider::Calibre => vec![
+            format!("get/thumb/{book_id}"),
+            format!("get/cover/{book_id}"),
+        ],
+    };
 
     for base in cover_server_urls(config).into_iter().take(1) {
         if Instant::now() >= deadline {
-            return None;
+            return Ok(None);
         }
         for endpoint in &endpoints {
             if Instant::now() >= deadline {
-                return None;
+                return Ok(None);
             }
             let url = format!("{base}/{endpoint}");
             let mut request = client.get(&url);
@@ -221,23 +231,29 @@ fn fetch_thumbnail_from_server(
                 request = request.basic_auth(user, password.clone());
             }
 
-            let Ok(response) = request.send() else {
-                continue;
-            };
-            if response.status() != StatusCode::OK {
+            let response = request
+                .send()
+                .with_context(|| format!("cover provider unavailable at {url}"))?;
+            if response.status() == StatusCode::NOT_FOUND {
                 continue;
             }
-            let Ok(bytes) = response.bytes() else {
-                continue;
-            };
+            if !response.status().is_success() {
+                anyhow::bail!(
+                    "cover provider returned HTTP {} at {url}",
+                    response.status()
+                );
+            }
+            let bytes = response
+                .bytes()
+                .with_context(|| format!("reading cover response from {url}"))?;
             if bytes.is_empty() {
                 continue;
             }
-            return Some(bytes.to_vec());
+            return Ok(Some(bytes.to_vec()));
         }
     }
 
-    None
+    Ok(None)
 }
 
 fn calibre_thumbnail_path(config: &CalibreConfig, book_id: u64) -> PathBuf {
@@ -342,11 +358,12 @@ mod tests {
             &config,
             9_000_001,
             None,
+            false,
             Instant::now() + Duration::from_millis(100),
             true,
         );
 
-        assert!(result.is_none());
+        assert!(result.unwrap().is_none());
         assert!(
             matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
         );

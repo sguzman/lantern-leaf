@@ -128,6 +128,8 @@ pub struct CalibreBook {
     pub file_size_bytes: Option<u64>,
     pub path: Option<PathBuf>,
     pub cover_thumbnail: Option<PathBuf>,
+    #[serde(default)]
+    pub has_cover: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -302,7 +304,7 @@ pub fn ensure_thumbnail_for_book(
     config: &CalibreConfig,
     book: &mut CalibreBook,
     allow_remote_fetch: bool,
-) -> bool {
+) -> Result<bool> {
     thumbnails::ensure_thumbnail_for_book(config, book, allow_remote_fetch)
 }
 

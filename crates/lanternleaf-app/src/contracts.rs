@@ -89,6 +89,8 @@ pub struct CalibreBookDto {
     pub file_size_bytes: Option<u64>,
     pub source_path: Option<String>,
     pub cover_thumbnail: Option<String>,
+    #[serde(default)]
+    pub has_cover: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
