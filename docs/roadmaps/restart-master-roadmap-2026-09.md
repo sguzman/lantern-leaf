@@ -54,31 +54,33 @@ Accepted behavior includes sustained ordinary Windows playback without prior dup
 
 **STATUS: COMPLETE — GOAL 0012 CLOSED**
 
-Goal 0012 now has automated, director, Windows CI, and real-desktop acceptance for the native pretty-reader presentation surface.
+Goal 0012 has automated, director, Windows CI, and real-desktop acceptance for the native pretty-reader presentation surface.
 
-Accepted behavior includes literal horizontal/vertical margins, geometry invalidation, scrollable settings, functional word/letter spacing, readable tables/TOCs, restrained blockquotes, explicit font fallback state, inline EPUB imagery, bounded off-render-thread pretty/image work, and durable spoken-sentence highlight/follow across geometry changes.
+Accepted behavior includes literal margins, geometry invalidation, scrollable settings, functional word/letter spacing, readable tables/TOCs, restrained blockquotes, explicit font fallback state, inline EPUB imagery, bounded off-render-thread pretty/image work, and correct canonical spoken highlighting/follow.
 
-A final human pass confirmed the visual corrections and TTS highlight behavior. One separate residual observation remains queued as Goal 0014: changing media max-width/max-height controls can disturb viewport anchoring and prevented physical confirmation of the visible media-size effect. That does not reopen Goal 0012.
+A later physical pass isolated a separate viewport-anchor defect: canonical highlighting remains correct, but live presentation geometry changes can leave the visible scroll position attached to stale document-space coordinates after reflow. This is Goal 0014 and does not reopen Goal 0012.
 
-## Near-term shell / library cleanup
+## Near-term shell / reader cleanup
 
 ### Goal 0013 — starter shell responsive panel containment
 
+**STATUS: COMPLETE**
+
+The responsive starter-shell correction is accepted with worker/CI/director evidence plus a clean focused real-desktop pass. Two-column layout is width-gated, narrow windows fall back to one column, and long starter content stays contained.
+
+### Goal 0014 — reader presentation-geometry anchor stability
+
 **STATUS: READY — NEXT AUTHORIZED MACRO-GOAL**
 
-Repair the still-visible Recents / Calibre / Browser Tabs overlap using explicit responsive containment, wrapped/stacked child rows, and a stable one-column fallback when two readable columns do not fit.
+Generalize viewport anchoring across every production presentation geometry-key transition. Geometry changes already invalidate stale block measurements, but the reader must preserve a semantic visible block/sentence anchor rather than blindly retaining the old raw scroll Y after reflow.
+
+Horizontal margin/content-width changes are the clearest reproducer, but the solution must apply to font metrics, spacing, heading/block geometry, compound changes, and media sizing through one generic geometry-transition policy. During active TTS, a legitimate pending canonical follow target has precedence over idle anchor preservation. The original media max-width/max-height visible-resize/anchor issue remains part of this goal.
 
 ### Goal 0010 — Caliberate catalog covers + provider availability UX
 
 **STATUS: QUEUED**
 
 Add first-class lazy catalog covers, bounded visible-row loading, intentional loading/no-cover/error states, and correct provider-unavailable classification. Do not resurrect the withdrawn fake materialization defect from the test where Caliberate itself was not running.
-
-### Goal 0014 — media-sizing anchor stability
-
-**STATUS: QUEUED**
-
-Make live max-width/max-height media changes preserve viewport/media anchoring and visibly affect media when the selected limit is actually binding, while preserving Goal 0012 geometry/TTS behavior.
 
 ### Goal 0011 — Windows Natural/HD voices
 
@@ -90,7 +92,7 @@ Do not investigate or test until explicitly re-authorized. Preserve the ordinary
 
 **STATUS: FUTURE CORE PRODUCT GATE; NOT CURRENTLY AUTHORIZED**
 
-After the current near-term native shell/library cleanup sequence:
+After the current near-term native cleanup sequence:
 
 - page raster/rendering;
 - texture/cache lifecycle;
