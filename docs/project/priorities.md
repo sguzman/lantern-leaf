@@ -61,9 +61,13 @@ A minor residual under severe text-metric edits is split to Goal 0015 rather tha
 
 ## P2.10 — Goal 0010: Caliberate catalog covers + provider availability UX
 
-**READY — NEXT AUTHORIZED CODEX MACRO-GOAL**
+**A5 REJECTED BEFORE HUMAN QA — A6 CORRECTION IS THE ACTIVE PRIORITY**
 
-Goal 0010 owns provider-unavailable classification, first-class lazy catalog covers, bounded visible-row loading off the GUI thread, covers before first open/materialization, Recents/local fallback, and intentional loading/no-cover/provider-error states.
+Preserve A5's explicit Caliberate cover contract, `has_cover` propagation, bounded four-request visible-row scheduling, off-GUI-thread request/decode work, and intentional placeholders.
+
+A6 must repair per-cover completion ownership. Independent thumbnail requests must not share the full-catalog boolean `CalibreLoad` scope; every started request must leave pending state with a book-identified terminal outcome. Provider-unavailable, endpoint/no-cover, and fetch/decode failures must become intentional retry/unavailable/error states rather than permanent `Loading cover…`.
+
+A6 must also synchronize current `main` in LanternLeaf and Caliberate, add and run post-change Caliberate cover endpoint tests, preserve Goal 0014/0015 lifecycle state, and wait for required Windows CI success before terminal signaling. See `docs/work/reviews/0010-a5-director-rejection.md`.
 
 Do not resurrect the withdrawn fake materialization defect from the test where Caliberate itself was not running.
 
