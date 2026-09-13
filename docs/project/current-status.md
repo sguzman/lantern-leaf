@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-13 after Goal 0014 A2 real-desktop rejection for final closure and A3 correction promotion.
+Updated: 2026-09-13 after Goal 0014 A3 director acceptance for focused real-desktop signoff.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -63,20 +63,15 @@ GitHub Windows baseline run `34725734155` passed. The focused physical Windows p
 
 ## Goal 0014 — reader presentation-geometry anchor stability
 
-**A2 FUNCTIONALLY IMPROVED BUT REAL-DESKTOP CLOSURE REJECTED — A3 READY**
+**A3 DIRECTOR-ACCEPTED — FINAL FOCUSED REAL-DESKTOP SIGNOFF PENDING**
 
-A2 is a substantial success and remains the production foundation. The reader now uses semantic viewport anchors rather than blindly retaining stale raw scroll Y across reflow. Canonical sentence identity plus normalized within-sentence position is preferred when available, same-block normalized position is the fallback, and a legitimate pending canonical TTS follow retains precedence.
+A2 established the semantic-anchor architecture: canonical sentence identity plus normalized within-sentence position when available, normalized same-block position otherwise, with pending TTS follow precedence.
 
-The real-desktop pass verified that representative visual settings work, semantic continuity is far better than before, and—importantly—binding media max-width and max-height changes visibly resize inline images on the real Windows machine.
+A3 addresses the remaining multi-frame instability observed physically after A2. The reader now retains a last stable `PrettyViewportWitness` and a `PrettyReflowTransaction` across a burst of geometry-key changes instead of repeatedly recapturing from unstable intermediate frames. A visible canonical highlighted sentence/segment can seed that witness as a one-shot edit anchor. Estimates keep bounded virtualization pointed at the anchor neighborhood; restoration is reconciled after the anchor region has real measured geometry. Explicit wheel/drag input cancels stale automatic correction, and pending TTS follow remains authoritative.
 
-Goal 0014 is not closed because two residual defects remain:
+Production implementation `430e9c1` passed focused reader suites, full workspace test/check/build, Windows QA preparation, renderer smoke, and `git diff --check`. GitHub Actions Windows baseline run `34768445726` passed native workspace/TTS and hosted renderer-capability jobs. See `docs/work/reports/0014-a3.md` and `docs/work/reviews/0014-a3-director-acceptance.md`.
 
-- some presentation edits visibly jerk to a distant/unrelated area and then return as geometry settles;
-- some edits occasionally settle on the wrong semantic area, including cases where the highlighted sentence had been visible. `Jump to highlight` still recovers, showing canonical identity is intact while viewport restoration can be wrong.
-
-Current production behavior restores immediately from fresh estimated heights after invalidating measured heights. Rapid slider changes can therefore repeat capture/invalidate/estimated-restore before prior geometry has stabilized. A3 must verify this mechanism and replace one-frame restoration with a bounded multi-frame reflow transaction that retains the last stable semantic viewport witness across an edit burst, coalesces successive geometry changes, reconciles against actual measured new geometry, preserves active TTS follow priority, and yields to explicit user scrolling.
-
-The A3 contract is `docs/work/ready/0014-reader-presentation-anchor-stability.md`. See `docs/work/reviews/0014-a2-real-desktop-rejection.md`.
+One focused real-desktop pass remains because the rejected A2 defect was specifically perceptual and multi-frame: verify no distant-area flash/snap-back, no wrong final semantic settle, stable behavior under rapid slider changes, visible-highlight neighborhood continuity, active TTS precedence, and user-scroll cancellation.
 
 ## Caliberate catalog covers / availability UX
 
@@ -100,6 +95,6 @@ Gate 3 native PDF visual stability remains future work and is not currently auth
 
 ## Workflow status
 
-**GOAL 0014 A3 READY**
+**HUMAN QA GATE ACTIVE — GOAL 0014 A3**
 
-Goal 0014 remains the single authorized macro-goal until reflow stabilization passes director and real-desktop review. Goal 0010 remains queued; Goal 0011 remains deferred; PDF work remains future.
+Goal 0014 remains the single active closure gate until the final reflow-stability desktop pass. Goal 0010 remains queued; Goal 0011 remains deferred; PDF work remains future.
