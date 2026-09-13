@@ -41,51 +41,39 @@ A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-Goal 0012 is closed with accepted evidence for:
+Goal 0012 is closed with accepted presentation controls, inline imagery, geometry invalidation, font fallback safety, bounded worker architecture, readable tables/TOCs, restrained blockquotes, and durable canonical TTS highlighting/follow.
 
-1. discoverable Presentation controls with app-default -> per-book persistence/reset;
-2. inline EPUB imagery with safe provenance/path normalization;
-3. bounded off-render-thread pretty/image workers and completion repaint wakeups;
-4. exact font alias safety and real egui missing-font layout fallback;
-5. literal horizontal margins with no hidden 720-px cap;
-6. vertical viewport insets instead of scroll-document padding;
-7. presentation-geometry invalidation of measured virtualization heights;
-8. scrollable settings/presentation panel body;
-9. real-egui word/letter spacing;
-10. readable TOC/table minimum widths with horizontal overflow;
-11. restrained measured blockquote rule geometry;
-12. visible requested/effective font fallback state;
-13. automated media width/height sizing evidence;
-14. stateful geometry-change -> follow -> consume -> ordinary render-window coverage across 64 canonical boundaries without changing canonical playback ownership;
-15. final physical Windows confirmation that the previously failing visual controls now work, inline images remain present, and the spoken highlight remains continuously visible.
-
-A7 implementation `6fd324869ce6cca0c858c3ee32fabe627efba47b`, terminal `762452ada592b7b906b0537319fd4b3060ad1c34`, Windows baseline `34723376577`, and `docs/work/reviews/0012-real-desktop-acceptance.md` are accepted final evidence.
-
-The final human pass exposed a separate non-blocking interactive issue around media max-width/max-height changes: an unexpected scroll jump prevented physical confirmation of the visible size effect. This is queued as Goal 0014 rather than reopening Goal 0012.
+The final physical passes now distinguish canonical highlight correctness from viewport-anchor continuity. Goal 0012's highlight architecture remains accepted; Goal 0014 owns the newly isolated semantic-anchor problem.
 
 ## P2.8 — Goal 0013: starter shell responsive containment
 
-**A1 DIRECTOR-ACCEPTED — REAL-DESKTOP SIGNOFF IS THE ACTIVE GATE**
+**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-Implementation `58ae9de` uses the actual center width, a deterministic `1120px` two-column breakpoint, one-column fallback below it, bounded starter groups, wrapped controls, and bounded long-content presentation while preserving Calibre virtualization and off-render-thread work.
+Implementation `58ae9de` uses actual center width, a deterministic `1120px` two-column breakpoint, one-column fallback below it, bounded starter groups, wrapped controls, and bounded long-content presentation while preserving Calibre virtualization and off-render-thread work.
 
-Worker validation and GitHub Windows baseline run `34725734155` passed. The director removed one stale duplicate `active/` lifecycle file before integration; this did not affect production code or validation.
+Worker validation and GitHub Windows baseline run `34725734155` passed. The focused physical pass reported the starter shell looked good enough with no remaining containment blocker.
 
-One focused physical Windows pass is required because the defect is explicitly visual/responsive: verify no Recents / Calibre / Browser Tabs bleed at the previously failing width, stable stacking below the breakpoint, stable two-column layout above it, and no horizontal application overflow or resize thrash.
+## P2.9 — Goal 0014: reader presentation-geometry anchor stability
 
-## P2.9 — Goal 0010: Caliberate catalog covers + provider availability UX
+**READY — NEXT AUTHORIZED CODEX MACRO-GOAL**
+
+Changing a geometry-affecting Presentation setting can currently preserve canonical highlighting yet move the visible viewport to an unrelated semantic area. Horizontal margin is especially implicated because content-width changes rewrap the document.
+
+This must be fixed generically at the geometry-transition layer, not as a horizontal-margin special case. The production geometry key already spans content width, horizontal/vertical margins, font size/family/weight, line/word/letter spacing, and the full pretty configuration. On any such transition:
+
+- stale measured heights must still be invalidated;
+- idle/user reading should preserve a semantic visible block/sentence anchor rather than a raw old Y offset;
+- a genuine pending canonical TTS follow request takes precedence during playback;
+- after follow is consumed, ordinary render-window behavior remains natural with no permanent target forcing;
+- representative text-metric, spacing, width, compound, and media geometry changes need stateful regression coverage.
+
+The original media max-width/max-height issue remains inside Goal 0014: binding limits must visibly resize media with preserved aspect ratio without destroying the viewport anchor.
+
+## P2.10 — Goal 0010: Caliberate catalog covers + provider availability UX
 
 **QUEUED — NOT ACTIVE**
 
 Goal 0010 remains about provider-unavailable classification, first-class lazy catalog covers, bounded off-GUI-thread visible-row loading, covers before first open/materialization, Recents/local fallback, and intentional loading/no-cover/provider-error states.
-
-Re-evaluate Goal 0010 against the narrow Goal 0014 residual after Goal 0013 is accepted.
-
-## P2.10 — Goal 0014: reader media-sizing anchor stability
-
-**QUEUED — NOT ACTIVE**
-
-Live changes to media max-width/max-height must not throw the viewport to an unrelated document location. When a selected limit is actually binding, the visible image should resize predictably while preserving aspect ratio; non-binding limits may legitimately show no size change. Preserve Goal 0012 accepted geometry, virtualization, image, and TTS/highlight behavior.
 
 ## P2.11 — Goal 0011: Windows Natural/HD voice capability
 
