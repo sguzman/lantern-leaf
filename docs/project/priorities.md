@@ -65,11 +65,13 @@ The final human pass exposed a separate non-blocking interactive issue around me
 
 ## P2.8 — Goal 0013: starter shell responsive containment
 
-**READY — NEXT AUTHORIZED CODEX MACRO-GOAL**
+**A1 DIRECTOR-ACCEPTED — REAL-DESKTOP SIGNOFF IS THE ACTIVE GATE**
 
-Physical QA still shows Recents, Calibre, and Browser Tabs/adjacent starter groups bleeding across their allocated columns at ordinary desktop width, though much less severely than before. Goal 0013 will make starter columns responsive/contained, wrap or stack long rows, and fall back to one column when two readable columns do not fit.
+Implementation `58ae9de` uses the actual center width, a deterministic `1120px` two-column breakpoint, one-column fallback below it, bounded starter groups, wrapped controls, and bounded long-content presentation while preserving Calibre virtualization and off-render-thread work.
 
-This is the next authorized implementation because the defect remains directly visible in the current shell and is narrowly separable from reader/TTS behavior.
+Worker validation and GitHub Windows baseline run `34725734155` passed. The director removed one stale duplicate `active/` lifecycle file before integration; this did not affect production code or validation.
+
+One focused physical Windows pass is required because the defect is explicitly visual/responsive: verify no Recents / Calibre / Browser Tabs bleed at the previously failing width, stable stacking below the breakpoint, stable two-column layout above it, and no horizontal application overflow or resize thrash.
 
 ## P2.9 — Goal 0010: Caliberate catalog covers + provider availability UX
 
