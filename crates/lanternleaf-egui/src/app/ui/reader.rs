@@ -58,6 +58,17 @@ fn restore_pretty_scroll_offset(anchor: PrettyScrollAnchor, block_heights: &[f32
     Some(prefix[anchor.block_index] + anchor.within_block.max(0.0))
 }
 
+fn semantic_anchor_for_geometry_transition(
+    geometry_changed: bool,
+    follow_requested: bool,
+    scroll_offset: f32,
+    block_heights: &[f32],
+) -> Option<PrettyScrollAnchor> {
+    (geometry_changed && !follow_requested)
+        .then(|| capture_pretty_scroll_anchor(scroll_offset, block_heights))
+        .flatten()
+}
+
 fn blockquote_rule_segment(rect: Rect) -> [eframe::egui::Pos2; 2] {
     [rect.left_top(), rect.left_bottom()]
 }
@@ -278,10 +289,12 @@ impl LanternLeafApp {
                 })
                 .show(ui, |ui| {
                     let scroll_id = ui.make_persistent_id("pretty_page");
-                    let restore_scroll_offset = if geometry_changed && !follow_requested {
+                    let restore_scroll_offset = if geometry_changed {
                         let previous_anchor =
                             ScrollAreaState::load(ui.ctx(), scroll_id).and_then(|state| {
-                                capture_pretty_scroll_anchor(
+                                semantic_anchor_for_geometry_transition(
+                                    geometry_changed,
+                                    follow_requested,
                                     state.offset.y,
                                     &self.pretty_block_heights,
                                 )
@@ -2370,17 +2383,11 @@ mod tests {
 
     #[test]
     fn pending_tts_follow_takes_precedence_over_idle_anchor_restore() {
-        let idle_anchor = capture_pretty_scroll_anchor(180.0, &[60.0, 80.0, 100.0]);
-        let follow_requested = true;
-        assert!(follow_requested);
-        assert!(
-            idle_anchor.is_some(),
-            "the user anchor exists but is not used"
-        );
-        assert_eq!(
-            follow_requested.then_some(None::<PrettyScrollAnchor>),
-            Some(None)
-        );
+        let heights = [60.0, 80.0, 100.0];
+        assert!(capture_pretty_scroll_anchor(180.0, &heights).is_some());
+        assert!(semantic_anchor_for_geometry_transition(true, false, 180.0, &heights).is_some());
+        assert!(semantic_anchor_for_geometry_transition(true, true, 180.0, &heights).is_none());
+        assert!(semantic_anchor_for_geometry_transition(false, false, 180.0, &heights).is_none());
     }
 
     #[test]
