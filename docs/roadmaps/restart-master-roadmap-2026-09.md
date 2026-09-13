@@ -58,7 +58,7 @@ Goal 0012 has automated, director, Windows CI, and real-desktop acceptance for t
 
 Accepted behavior includes literal margins, geometry invalidation, scrollable settings, functional word/letter spacing, readable tables/TOCs, restrained blockquotes, explicit font fallback state, inline EPUB imagery, bounded off-render-thread pretty/image work, and correct canonical spoken highlighting/follow.
 
-A later physical pass isolated a separate viewport-anchor defect: canonical highlighting remains correct, but live presentation geometry changes can leave the visible scroll position attached to stale document-space coordinates after reflow. This is Goal 0014 and does not reopen Goal 0012.
+A later physical pass isolated a separate viewport-anchor defect: canonical highlighting remained correct, but live presentation geometry changes could leave the visible scroll position attached to stale document-space coordinates after reflow. That is Goal 0014 and does not reopen Goal 0012.
 
 ## Near-term shell / reader cleanup
 
@@ -70,11 +70,13 @@ The responsive starter-shell correction is accepted with worker/CI/director evid
 
 ### Goal 0014 — reader presentation-geometry anchor stability
 
-**STATUS: READY — NEXT AUTHORIZED MACRO-GOAL**
+**STATUS: A2 DIRECTOR-ACCEPTED — FOCUSED REAL-DESKTOP SIGNOFF PENDING**
 
-Generalize viewport anchoring across every production presentation geometry-key transition. Geometry changes already invalidate stale block measurements, but the reader must preserve a semantic visible block/sentence anchor rather than blindly retaining the old raw scroll Y after reflow.
+The generalized semantic anchor correction is integrated on `main`. Before a presentation geometry transition invalidates measured pretty-block heights, the reader captures semantic viewport state. It restores against the reflowed geometry using canonical sentence identity plus normalized within-sentence position when available, or normalized same-block position as fallback, rather than blindly retaining the old raw scroll Y.
 
-Horizontal margin/content-width changes are the clearest reproducer, but the solution must apply to font metrics, spacing, heading/block geometry, compound changes, and media sizing through one generic geometry-transition policy. During active TTS, a legitimate pending canonical follow target has precedence over idle anchor preservation. The original media max-width/max-height visible-resize/anchor issue remains part of this goal.
+The policy is centralized across horizontal/content-width reflow, font/text metrics, spacing, media sizing, and compound presentation changes. During active TTS, a legitimate pending canonical follow target has precedence over idle anchor preservation, and natural post-follow render-window behavior remains unchanged.
+
+A2 focused/production-adjacent tests, full workspace validation, Windows build/QA preparation, renderer smoke, and GitHub Windows baseline run `34733109955` passed. One focused real-desktop pass remains to prove semantic location stability during live editing, including active TTS and binding media-size changes when a suitable inline image is available.
 
 ### Goal 0010 — Caliberate catalog covers + provider availability UX
 
