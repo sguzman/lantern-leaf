@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-12 after Goal 0014 A1 director rejection for stale-base/contract drift.
+Updated: 2026-09-12 after Goal 0014 A2 director acceptance for focused real-desktop signoff.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -63,15 +63,21 @@ GitHub Windows baseline run `34725734155` passed. The focused physical Windows p
 
 ## Goal 0014 — reader presentation-geometry anchor stability
 
-**A1 REJECTED — CORRECTION REQUIRED; GENERALIZED READY CONTRACT REMAINS AUTHORITATIVE**
+**A2 DIRECTOR-ACCEPTED — FOCUSED REAL-DESKTOP SIGNOFF PENDING**
 
-The physical defect remains correctly framed as generic semantic viewport-anchor loss across presentation geometry changes: canonical highlighting is currently correct, while scroll position can jump to a different semantic location after reflow.
+The generalized semantic viewport-anchor correction is now integrated on `main`.
 
-The authoritative generalized contract is `docs/work/ready/0014-reader-presentation-anchor-stability.md` on director `main`. It requires semantic block/sentence continuity across horizontal-margin/content-width reflow, text metrics, block/heading spacing, media sizing, compound geometry changes, and active-TTS follow precedence.
+The production reader captures semantic viewport state before a presentation geometry-key transition invalidates measured pretty-block heights. When canonical pretty mapping is available, the anchor prefers canonical sentence identity plus a normalized position within that sentence; otherwise it falls back to normalized position within the same pretty block. After reflow, the viewport is restored against the new geometry rather than retaining the stale raw document-space Y offset.
 
-Attempt A1 produced a promising implementation direction: it captures the old `pretty_page` scroll position as block index plus within-block offset before invalidation, restores against new estimates, and gives pending canonical TTS follow precedence. Its focused tests and Windows CI passed.
+A legitimate pending canonical TTS follow request still takes precedence over idle anchor restoration, so Goal 0012 canonical highlight/follow ownership remains authoritative and no permanent highlighted-target forcing mode was introduced.
 
-A1 is not accepted because it started from stale director `main` `d6b2b35` instead of the already-authoritative generalized main `bca97d7b...`, used the obsolete media-only branch/goal document, and terminalized lifecycle artifacts for the superseded contract. The correction must start from current director `main`, preserve valid A1 work, and prove semantic continuity under materially rewrapping blocks rather than relying only on absolute within-block pixel arithmetic. See `docs/work/reviews/0014-a1-director-rejection.md`.
+The policy is centralized around geometry-key transitions rather than individual controls and therefore covers horizontal/content-width reflow, text metrics, block/heading spacing, media sizing, compound changes, and future fields represented by the same geometry key.
+
+A2 focused reader tests passed in both egui library and binary targets; workspace check/test/build, repo-native Windows QA preparation, renderer smoke, and `git diff --check` passed. GitHub Actions Windows baseline run `34733109955` passed both native workspace/TTS and hosted renderer jobs.
+
+The director removed one stale duplicate `active/` lifecycle copy before integration; production code and validation were unaffected. See `docs/work/reports/0014-a2.md` and `docs/work/reviews/0014-a2-director-acceptance.md`.
+
+One focused physical Windows pass remains because the defect is interactive and was originally observed on the real desktop: verify semantic location stability under large horizontal-margin reflow, a text-metric change, a spacing change, media resizing if available, and geometry editing during active TTS.
 
 ## Caliberate catalog covers / availability UX
 
@@ -95,6 +101,6 @@ Gate 3 native PDF visual stability remains future work and is not currently auth
 
 ## Workflow status
 
-**GOAL 0014 CORRECTION REQUIRED**
+**HUMAN QA GATE ACTIVE**
 
-Goal 0013 is closed. Goal 0014 remains the single authorized macro-goal under its generalized ready contract; A1 is rejected and must be corrected before human QA. Goal 0010 remains queued; Goal 0011 remains deferred; PDF work remains future.
+Goal 0014 A2 is worker-terminal, CI-green, director-accepted, integrated on `main`, and ready for one focused desktop pass. Goal 0010 remains queued; Goal 0011 remains deferred; PDF work remains future.
