@@ -43,35 +43,41 @@ A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558
 
 Goal 0012 is closed with accepted presentation controls, inline imagery, geometry invalidation, font fallback safety, bounded worker architecture, readable tables/TOCs, restrained blockquotes, and durable canonical TTS highlighting/follow.
 
-The final physical passes distinguish canonical highlight correctness from viewport-anchor continuity. Goal 0012's highlight architecture remains accepted; Goal 0014 owns the separately isolated semantic-anchor/reflow-stability problem.
-
 ## P2.8 — Goal 0013: starter shell responsive containment
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
 Implementation `58ae9de` uses actual center width, a deterministic `1120px` two-column breakpoint, one-column fallback below it, bounded starter groups, wrapped controls, and bounded long-content presentation while preserving Calibre virtualization and off-render-thread work.
 
-Worker validation and GitHub Windows baseline run `34725734155` passed. The focused physical pass reported the starter shell looked good enough with no remaining containment blocker.
-
 ## P2.9 — Goal 0014: reader presentation-geometry anchor stability
 
-**A3 DIRECTOR-ACCEPTED — FINAL REAL-DESKTOP SIGNOFF ACTIVE**
+**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-A2 established semantic anchoring across presentation reflow and physically verified the visual controls, including binding media max-width/max-height behavior. A3 now addresses the residual violent transient jump / occasional wrong final settle observed during live geometry editing.
+A2 established generalized semantic anchoring. A3 removed the prior violent multi-frame reflow excursions by retaining one stable viewport witness across edit bursts, using measured geometry for final reconciliation, keeping estimates only as bounded neighborhood guidance, preserving TTS-follow precedence, and yielding to explicit user scrolling.
 
-The reader keeps one last-stable semantic viewport witness across a burst of geometry changes instead of recapturing from unstable intermediate frames. A visible canonical highlighted sentence may seed a one-shot edit anchor. Estimates keep bounded virtualization in the anchor neighborhood; measured geometry is used for final reconciliation. Pending TTS follow still has precedence, and explicit wheel/drag input cancels stale automatic restoration.
+Real-desktop closure verifies calm horizontal-margin behavior, no more instant violent distant-area jerks, correct canonical highlight ownership, and physically working media max-width/max-height controls.
 
-Implementation `430e9c1` passed focused reader tests, full workspace check/test/build, Windows QA preparation, renderer smoke, and GitHub Windows baseline run `34768445726`.
-
-The only remaining gate is focused physical validation of multi-frame behavior: no distant-area flash/snap-back, no wrong final semantic settle, stable rapid-slider bursts, visible-highlight neighborhood continuity, active TTS precedence, and user-scroll cancellation.
+A minor residual under severe text-metric edits is split to Goal 0015 rather than keeping Goal 0014 open indefinitely.
 
 ## P2.10 — Goal 0010: Caliberate catalog covers + provider availability UX
 
-**QUEUED — NOT ACTIVE**
+**A5 REJECTED BEFORE HUMAN QA — A6 CORRECTION IS THE ACTIVE PRIORITY**
 
-Goal 0010 remains about provider-unavailable classification, first-class lazy catalog covers, bounded off-GUI-thread visible-row loading, covers before first open/materialization, Recents/local fallback, and intentional loading/no-cover/provider-error states.
+Preserve A5's explicit Caliberate cover contract, `has_cover` propagation, bounded four-request visible-row scheduling, off-GUI-thread request/decode work, and intentional placeholders.
 
-## P2.11 — Goal 0011: Windows Natural/HD voice capability
+A6 must repair per-cover completion ownership. Independent thumbnail requests must not share the full-catalog boolean `CalibreLoad` scope; every started request must leave pending state with a book-identified terminal outcome. Provider-unavailable, endpoint/no-cover, and fetch/decode failures must become intentional retry/unavailable/error states rather than permanent `Loading cover…`.
+
+A6 must also synchronize current `main` in LanternLeaf and Caliberate, add and run post-change Caliberate cover endpoint tests, preserve Goal 0014/0015 lifecycle state, and wait for required Windows CI success before terminal signaling. See `docs/work/reviews/0010-a5-director-rejection.md`.
+
+Do not resurrect the withdrawn fake materialization defect from the test where Caliberate itself was not running.
+
+## P2.11 — Goal 0015: highlight viewport-band reflow polish
+
+**QUEUED — MINOR POLISH**
+
+During severe letter-spacing/font-scale reflow, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. This is solvable viewport-coordination polish, not a canonical highlight correctness failure. Preserve a temporary transaction-scoped viewport band when practical without permanent highlight pinning or fighting user scroll.
+
+## P2.12 — Goal 0011: Windows Natural/HD voice capability
 
 **DEFERRED BY USER — DORMANT UNTIL EXPLICITLY RE-AUTHORIZED**
 

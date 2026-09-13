@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-13 after Goal 0014 A3 director acceptance for focused real-desktop signoff.
+Updated: 2026-09-13 after Goal 0010 A5 director rejection and A6 correction promotion.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -51,35 +51,45 @@ Goal 0012 is closed.
 
 Accepted presentation/image behavior includes literal margins, presentation geometry invalidation, scrollable settings, working word/letter spacing, readable tables/TOCs, restrained blockquotes, explicit font fallback state, inline EPUB imagery, bounded off-render-thread pretty/image work, and durable canonical spoken highlighting/follow after geometry changes.
 
-A6 implementation `6dcf9815ef87303caa3a3421bb8cc9e832f6b8ea` and A7 implementation `6fd324869ce6cca0c858c3ee32fabe627efba47b` are accepted production corrections. Windows baseline run `34723376577` passed native workspace and hosted renderer jobs. See `docs/work/reviews/0012-real-desktop-acceptance.md`.
-
 ## Goal 0013 — starter shell responsive panel containment
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
 Implementation `58ae9de` uses actual center width, a deterministic `1120px` two-column breakpoint, one-column fallback below it, width-bounded groups, wrapped action/control rows, and bounded long-path/URL presentation while preserving Calibre virtualization and off-render-thread work.
 
-GitHub Windows baseline run `34725734155` passed. The focused physical Windows pass reported the revised starter shell looked good enough and found no remaining Goal 0013 blocker. See `docs/work/reviews/0013-real-desktop-acceptance.md`.
-
 ## Goal 0014 — reader presentation-geometry anchor stability
 
-**A3 DIRECTOR-ACCEPTED — FINAL FOCUSED REAL-DESKTOP SIGNOFF PENDING**
+**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-A2 established the semantic-anchor architecture: canonical sentence identity plus normalized within-sentence position when available, normalized same-block position otherwise, with pending TTS follow precedence.
+Goal 0014 is closed.
 
-A3 addresses the remaining multi-frame instability observed physically after A2. The reader now retains a last stable `PrettyViewportWitness` and a `PrettyReflowTransaction` across a burst of geometry-key changes instead of repeatedly recapturing from unstable intermediate frames. A visible canonical highlighted sentence/segment can seed that witness as a one-shot edit anchor. Estimates keep bounded virtualization pointed at the anchor neighborhood; restoration is reconciled after the anchor region has real measured geometry. Explicit wheel/drag input cancels stale automatic correction, and pending TTS follow remains authoritative.
+A2 established generalized semantic anchoring across presentation reflow. A3 fixed the remaining high-severity multi-frame instability by retaining one last-stable semantic viewport witness across an edit burst, avoiding recapture from unstable intermediate geometry, keeping bounded virtualization in the anchor neighborhood, reconciling after measured geometry is available, preserving pending TTS-follow precedence, and yielding to explicit user wheel/drag input.
 
-Production implementation `430e9c1` passed focused reader suites, full workspace test/check/build, Windows QA preparation, renderer smoke, and `git diff --check`. GitHub Actions Windows baseline run `34768445726` passed native workspace/TTS and hosted renderer-capability jobs. See `docs/work/reports/0014-a3.md` and `docs/work/reviews/0014-a3-director-acceptance.md`.
+Final physical Windows evidence: no more instant violent distant-area jerks; horizontal-margin changes behave beautifully; rapid presentation edits feel much calmer; canonical highlight ownership remains correct; and binding media max-width/max-height behavior is physically verified.
 
-One focused real-desktop pass remains because the rejected A2 defect was specifically perceptual and multi-frame: verify no distant-area flash/snap-back, no wrong final semantic settle, stable behavior under rapid slider changes, visible-highlight neighborhood continuity, active TTS precedence, and user-scroll cancellation.
+A lower-severity residual remains under severe cumulative text-metric edits such as aggressive letter spacing and font scaling: the visible highlight can drift farther than desired before normal auto-follow restores it. This is queued separately as Goal 0015 and does not keep Goal 0014 open. See `docs/work/reviews/0014-a3-real-desktop-acceptance.md`.
 
-## Caliberate catalog covers / availability UX
+Implementation `430e9c1` and Windows baseline run `34768445726` are the accepted A3 implementation/CI evidence.
 
-**QUEUED AS GOAL 0010 — NOT ACTIVE**
+## Goal 0010 — Caliberate catalog covers / provider availability UX
 
-The earlier `42866` open failure occurred while Caliberate was not running and remains withdrawn as evidence of a LanternLeaf materialization defect.
+**A5 REJECTED BEFORE HUMAN QA — A6 CORRECTION READY**
 
-The remaining catalog issue is cover availability: main catalog entries can show black placeholders before open while Recents can show real covers after local materialization. Goal 0010 remains queued for first-class lazy catalog covers and clear provider-unavailable/loading/no-cover states.
+A5 established a promising foundation: explicit Caliberate cover endpoint support, `has_cover` propagation, bounded visible-row lazy scheduling, off-render-thread network/disk/decode work, and intentional placeholder text. The sibling Caliberate branch added a minimal `/api/v1/books/{id}/cover` sidecar route.
+
+Director review found blocking completion-state defects before integration. Per-cover requests incorrectly use the global `CalibreLoad` boolean scope; a successful cached-books response does not clear that scope, and provider failure / endpoint 404 / decode failure can leave local cover IDs permanently pending as `Loading cover…`. The UI is also watching full-catalog `calibre_load_event` for thumbnail failure even though `EnsureCalibreThumbnail` does not emit that event.
+
+A5 also started from stale LanternLeaf lifecycle docs and terminalized while required Windows CI run `34777773736` was still in progress. The sibling Caliberate tests cited in the report were run before the cover endpoint push rather than after it.
+
+A6 must preserve the useful A5 architecture but add an explicit book-identified terminal cover outcome, concurrency-safe pending ownership, correct retry/unavailable/error states, current-main synchronization in both repositories, post-change Caliberate endpoint tests, and completed Windows CI before success signaling. See `docs/work/reviews/0010-a5-director-rejection.md` and the correction section in `docs/work/ready/0010-caliberate-catalog-reliability.md`.
+
+The earlier `42866` open failure remains withdrawn as evidence of a LanternLeaf materialization defect because Caliberate was not running during that attempt.
+
+## Goal 0015 — highlight viewport-band reflow polish
+
+**QUEUED — MINOR POLISH**
+
+Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow without inventing permanent highlight pinning or fighting user scrolling. Do not prioritize ahead of Goal 0010 unless new evidence makes it materially disruptive.
 
 ## Windows Natural/HD voices
 
@@ -91,10 +101,10 @@ Preserve the existing ordinary Windows voice backend. Goal 0011 remains a dorman
 
 **CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY FUTURE**
 
-Gate 3 native PDF visual stability remains future work and is not currently authorized while the near-term non-PDF correction sequence proceeds.
+Gate 3 native PDF visual stability remains future work and is not currently authorized while the near-term non-PDF sequence proceeds.
 
 ## Workflow status
 
-**HUMAN QA GATE ACTIVE — GOAL 0014 A3**
+**GOAL 0010 A6 READY**
 
-Goal 0014 remains the single active closure gate until the final reflow-stability desktop pass. Goal 0010 remains queued; Goal 0011 remains deferred; PDF work remains future.
+Goal 0014 is closed. Goal 0010 remains the single authorized macro-goal, now as an A6 correction. Goal 0015 is queued minor polish; Goal 0011 remains deferred; PDF work remains future.
