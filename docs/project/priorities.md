@@ -43,7 +43,7 @@ A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558
 
 Goal 0012 is closed with accepted presentation controls, inline imagery, geometry invalidation, font fallback safety, bounded worker architecture, readable tables/TOCs, restrained blockquotes, and durable canonical TTS highlighting/follow.
 
-The final physical passes distinguish canonical highlight correctness from viewport-anchor continuity. Goal 0012's highlight architecture remains accepted; Goal 0014 owns the separately isolated semantic-anchor problem.
+The final physical passes distinguish canonical highlight correctness from viewport-anchor continuity. Goal 0012's highlight architecture remains accepted; Goal 0014 owns the separately isolated semantic-anchor/reflow-stability problem.
 
 ## P2.8 — Goal 0013: starter shell responsive containment
 
@@ -55,15 +55,23 @@ Worker validation and GitHub Windows baseline run `34725734155` passed. The focu
 
 ## P2.9 — Goal 0014: reader presentation-geometry anchor stability
 
-**A2 DIRECTOR-ACCEPTED — REAL-DESKTOP SIGNOFF IS THE ACTIVE GATE**
+**A3 READY — NEXT AUTHORIZED CODEX CORRECTION**
 
-The generalized correction is integrated on `main`. On presentation geometry transitions, stale measured pretty heights are still invalidated, but the reader now preserves semantic viewport state instead of reusing the old raw scroll Y against newly reflowed document geometry.
+A2 materially improved semantic viewport preservation and is the accepted implementation foundation. Canonical sentence identity plus normalized within-sentence position is preferred when available; normalized same-block position is the fallback; a genuine pending TTS follow request has precedence. Binding media max-width/max-height behavior is now physically verified on the real Windows machine.
 
-When canonical pretty mapping is available, restoration is anchored by canonical sentence identity plus normalized within-sentence position. Otherwise it falls back to normalized position within the same pretty block. A genuine pending canonical TTS follow request has precedence over idle anchor restoration, preserving Goal 0012 follow ownership and natural post-follow render-window behavior.
+A2 did not pass final real-desktop closure because live geometry edits can still expose an unrelated document area transiently before returning, and can occasionally settle on the wrong semantic area. This directly violates Goal 0014's bounded visual displacement / semantic-location contract.
 
-The policy is centralized at the geometry-transition layer and covers horizontal/content-width changes, text metrics, spacing, media sizing, and compound geometry changes. Existing binding/non-binding media-size and aspect-ratio evidence remains intact.
+A3 must treat geometry editing as a multi-frame reflow transaction rather than repeated independent estimated restores:
 
-A2 focused and workspace tests, Windows build/QA preparation, renderer smoke, and GitHub Windows baseline run `34733109955` passed. One focused real-desktop pass remains for live semantic-location stability under representative geometry changes and active TTS.
+- capture and retain the last stable semantic viewport witness across a burst of slider/control changes;
+- do not recapture from unstable intermediate frames;
+- use estimates only for bounded virtualization / locating the target neighborhood, then reconcile against actual measured new geometry;
+- preserve an actually visible canonical sentence/segment witness when available, including the visible highlight as a one-shot edit anchor without inventing permanent auto-follow;
+- keep pending TTS follow precedence;
+- yield to explicit user wheel/drag input;
+- prevent both intermediate unrelated-area flashes and wrong final semantic anchoring.
+
+The A3 contract is `docs/work/ready/0014-reader-presentation-anchor-stability.md`.
 
 ## P2.10 — Goal 0010: Caliberate catalog covers + provider availability UX
 
