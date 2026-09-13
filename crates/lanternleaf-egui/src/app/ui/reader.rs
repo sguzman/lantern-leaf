@@ -27,12 +27,16 @@ const BLOCKQUOTE_INDENT: f32 = 14.0;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PrettyScrollAnchor {
     pub(crate) block_index: usize,
-    pub(crate) within_block: f32,
+    pub(crate) within_block_fraction: f32,
+    pub(crate) canonical_sentence_idx: Option<usize>,
+    pub(crate) within_sentence_fraction: Option<f32>,
 }
 
 fn capture_pretty_scroll_anchor(
     scroll_offset: f32,
     block_heights: &[f32],
+    blocks: &[PrettyBlock],
+    targets: &[Option<PrettySentenceTarget>],
 ) -> Option<PrettyScrollAnchor> {
     if block_heights.is_empty() {
         return None;
@@ -44,18 +48,107 @@ fn capture_pretty_scroll_anchor(
         .partition_point(|start| *start <= offset)
         .saturating_sub(1)
         .min(block_heights.len().saturating_sub(1));
+    let within_block_fraction =
+        (offset - prefix[block_index]) / block_heights[block_index].max(1.0);
+    let mut nearest_sentence = None;
+    let block_text_len = blocks
+        .get(block_index)
+        .map(block_text)
+        .map(|text| text.len());
+    if let Some(text_len) = block_text_len.filter(|len| *len > 0) {
+        let desired_text_offset = within_block_fraction.clamp(0.0, 1.0) * text_len as f32;
+        for (canonical_idx, target) in targets.iter().enumerate() {
+            let Some(target) = target.as_ref() else {
+                continue;
+            };
+            for segment in &target.segments {
+                if segment.block_index != block_index {
+                    continue;
+                }
+                let (Some(start), Some(end)) = (segment.text_start, segment.text_end) else {
+                    continue;
+                };
+                if start >= end {
+                    continue;
+                }
+                let distance = if desired_text_offset < start as f32 {
+                    start as f32 - desired_text_offset
+                } else if desired_text_offset > end as f32 {
+                    desired_text_offset - end as f32
+                } else {
+                    0.0
+                };
+                let sentence_fraction =
+                    ((desired_text_offset - start as f32) / (end - start) as f32).clamp(0.0, 1.0);
+                let replace = nearest_sentence
+                    .as_ref()
+                    .is_none_or(|(_, _, best_distance, _)| distance < *best_distance);
+                if replace {
+                    nearest_sentence =
+                        Some((canonical_idx, sentence_fraction, distance, block_index));
+                }
+            }
+        }
+    }
     Some(PrettyScrollAnchor {
         block_index,
-        within_block: (offset - prefix[block_index]).max(0.0),
+        within_block_fraction: within_block_fraction.clamp(0.0, 1.0),
+        canonical_sentence_idx: nearest_sentence.map(|(idx, _, _, _)| idx),
+        within_sentence_fraction: nearest_sentence.map(|(_, fraction, _, _)| fraction),
     })
 }
 
-fn restore_pretty_scroll_offset(anchor: PrettyScrollAnchor, block_heights: &[f32]) -> Option<f32> {
+fn restore_pretty_scroll_offset(
+    anchor: PrettyScrollAnchor,
+    block_heights: &[f32],
+    blocks: &[PrettyBlock],
+    targets: &[Option<PrettySentenceTarget>],
+) -> Option<f32> {
     if block_heights.is_empty() || anchor.block_index >= block_heights.len() {
         return None;
     }
     let prefix = prefix_sums(block_heights);
-    Some(prefix[anchor.block_index] + anchor.within_block.max(0.0))
+    let mut block_index = anchor.block_index;
+    let mut within_block_fraction = anchor.within_block_fraction;
+    if let Some(canonical_idx) = anchor.canonical_sentence_idx {
+        if let Some(target) = targets
+            .get(canonical_idx)
+            .and_then(|target| target.as_ref())
+        {
+            if let Some(segment) = target
+                .segments
+                .iter()
+                .find(|segment| {
+                    segment.block_index == anchor.block_index
+                        && segment.block_index < block_heights.len()
+                })
+                .or_else(|| {
+                    target
+                        .segments
+                        .iter()
+                        .find(|segment| segment.block_index < block_heights.len())
+                })
+            {
+                block_index = segment.block_index;
+                if let (Some(start), Some(end), Some(sentence_fraction)) = (
+                    segment.text_start,
+                    segment.text_end,
+                    anchor.within_sentence_fraction,
+                ) {
+                    if let Some(text_len) = blocks
+                        .get(block_index)
+                        .map(block_text)
+                        .map(|text| text.len())
+                    {
+                        let text_offset = start as f32 + (end - start) as f32 * sentence_fraction;
+                        within_block_fraction =
+                            (text_offset / text_len.max(1) as f32).clamp(0.0, 1.0);
+                    }
+                }
+            }
+        }
+    }
+    Some(prefix[block_index] + block_heights[block_index] * within_block_fraction.clamp(0.0, 1.0))
 }
 
 fn semantic_anchor_for_geometry_transition(
@@ -63,9 +156,11 @@ fn semantic_anchor_for_geometry_transition(
     follow_requested: bool,
     scroll_offset: f32,
     block_heights: &[f32],
+    blocks: &[PrettyBlock],
+    targets: &[Option<PrettySentenceTarget>],
 ) -> Option<PrettyScrollAnchor> {
     (geometry_changed && !follow_requested)
-        .then(|| capture_pretty_scroll_anchor(scroll_offset, block_heights))
+        .then(|| capture_pretty_scroll_anchor(scroll_offset, block_heights, blocks, targets))
         .flatten()
 }
 
@@ -297,6 +392,8 @@ impl LanternLeafApp {
                                     follow_requested,
                                     state.offset.y,
                                     &self.pretty_block_heights,
+                                    &self.pretty_page_cache_blocks,
+                                    &self.pretty_sentence_targets,
                                 )
                             });
                         self.pretty_block_heights.clear();
@@ -310,8 +407,14 @@ impl LanternLeafApp {
                         None
                     };
                     let estimates = self.pretty_block_heights_for(base_px, pretty_cfg);
-                    let restore_scroll_offset = restore_scroll_offset
-                        .and_then(|anchor| restore_pretty_scroll_offset(anchor, &estimates));
+                    let restore_scroll_offset = restore_scroll_offset.and_then(|anchor| {
+                        restore_pretty_scroll_offset(
+                            anchor,
+                            &estimates,
+                            &self.pretty_page_cache_blocks,
+                            &self.pretty_sentence_targets,
+                        )
+                    });
                     let mut pretty_scroll_area = ScrollArea::vertical().id_source("pretty_page");
                     if let Some(offset) = restore_scroll_offset {
                         pretty_scroll_area = pretty_scroll_area.vertical_scroll_offset(offset);
@@ -2346,14 +2449,92 @@ mod tests {
     fn semantic_pretty_anchor_preserves_block_and_relative_offset_across_reflow() {
         let before = [40.0, 72.0, 96.0, 54.0, 120.0];
         let after = [56.0, 104.0, 144.0, 68.0, 180.0];
-        let anchor = capture_pretty_scroll_anchor(40.0 + 72.0 + 19.0, &before)
-            .expect("a visible document should provide a semantic anchor");
+        let prefix_text = "prefix ".repeat(20);
+        let paragraph = format!("{prefix_text}target sentence!");
+        let blocks = (0..before.len())
+            .map(|index| {
+                test_paragraph(
+                    index,
+                    if index == 2 {
+                        paragraph.clone()
+                    } else {
+                        "short block".to_owned()
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        let targets = vec![Some(PrettySentenceTarget {
+            block_index: 2,
+            source_block_id: None,
+            local_sentence_index: 0,
+            text_start: Some(prefix_text.len()),
+            text_end: Some(paragraph.len()),
+            source: "test",
+            segments: vec![PrettySentenceSegment {
+                block_index: 2,
+                text_start: Some(prefix_text.len()),
+                text_end: Some(paragraph.len()),
+            }],
+        })];
+        let anchor =
+            capture_pretty_scroll_anchor(40.0 + 72.0 + 96.0 * 0.92, &before, &blocks, &targets)
+                .expect("a visible document should provide a semantic anchor");
         assert_eq!(anchor.block_index, 2);
-        assert_eq!(anchor.within_block, 19.0);
-        assert_eq!(
-            restore_pretty_scroll_offset(anchor, &after),
-            Some(56.0 + 104.0 + 19.0)
-        );
+        assert_eq!(anchor.canonical_sentence_idx, Some(0));
+        assert!(anchor.within_sentence_fraction.unwrap_or_default() >= 0.0);
+        let restored = restore_pretty_scroll_offset(anchor, &after, &blocks, &targets)
+            .expect("the canonical sentence should resolve after reflow");
+        let expected_fraction = (prefix_text.len() as f32
+            + (paragraph.len() - prefix_text.len()) as f32
+                * anchor.within_sentence_fraction.unwrap_or_default())
+            / paragraph.len() as f32;
+        assert!((restored - (56.0 + 104.0 + 144.0 * expected_fraction)).abs() < 0.01);
+    }
+
+    #[test]
+    fn semantic_anchor_tracks_canonical_sentences_at_multiple_nonuniform_positions() {
+        let old_heights = [84.0, 132.0, 68.0, 176.0];
+        let new_heights = [156.0, 72.0, 214.0, 104.0];
+        let blocks = (0..old_heights.len())
+            .map(|index| test_paragraph(index, "x".repeat(180)))
+            .collect::<Vec<_>>();
+        let targets = (0..old_heights.len())
+            .map(|block_index| {
+                Some(PrettySentenceTarget {
+                    block_index,
+                    source_block_id: None,
+                    local_sentence_index: 0,
+                    text_start: Some(100),
+                    text_end: Some(150),
+                    source: "stateful-test",
+                    segments: vec![PrettySentenceSegment {
+                        block_index,
+                        text_start: Some(100),
+                        text_end: Some(150),
+                    }],
+                })
+            })
+            .collect::<Vec<_>>();
+        let old_prefix = prefix_sums(&old_heights);
+        let new_prefix = prefix_sums(&new_heights);
+
+        for block_index in 0..old_heights.len() {
+            let old_offset = old_prefix[block_index] + old_heights[block_index] * 0.7;
+            let anchor = capture_pretty_scroll_anchor(old_offset, &old_heights, &blocks, &targets)
+                .expect("each visible position should produce an anchor");
+            assert_eq!(
+                anchor.canonical_sentence_idx,
+                Some(block_index),
+                "canonical identity must survive at block {block_index}"
+            );
+            let restored = restore_pretty_scroll_offset(anchor, &new_heights, &blocks, &targets)
+                .expect("each canonical anchor should restore after reflow");
+            let expected = new_prefix[block_index]
+                + new_heights[block_index]
+                    * (100.0 + 50.0 * anchor.within_sentence_fraction.unwrap_or_default())
+                    / 180.0;
+            assert!((restored - expected).abs() < 0.01);
+        }
     }
 
     #[test]
@@ -2366,17 +2547,20 @@ mod tests {
             ("compound geometry", [58.0, 108.0, 164.0]),
         ];
         let old = [40.0, 72.0, 96.0];
+        let blocks = (0..old.len())
+            .map(|index| test_paragraph(index, "non-uniform block content".to_owned()))
+            .collect::<Vec<_>>();
         for (label, new_heights) in cases {
-            let anchor = capture_pretty_scroll_anchor(40.0 + 72.0 + 11.0, &old)
+            let anchor = capture_pretty_scroll_anchor(40.0 + 72.0 + 11.0, &old, &blocks, &[])
                 .unwrap_or_else(|| panic!("{label}: expected an idle reading anchor"));
-            let restored = restore_pretty_scroll_offset(anchor, &new_heights)
+            let restored = restore_pretty_scroll_offset(anchor, &new_heights, &blocks, &[])
                 .unwrap_or_else(|| panic!("{label}: expected a reflow offset"));
             let new_prefix = prefix_sums(&new_heights);
             assert_eq!(anchor.block_index, 2, "{label}: block identity changed");
             assert_eq!(
                 restored,
-                new_prefix[2] + 11.0,
-                "{label}: relative offset changed"
+                new_prefix[2] + new_heights[2] * (11.0 / old[2]),
+                "{label}: normalized offset changed"
             );
         }
     }
@@ -2384,10 +2568,22 @@ mod tests {
     #[test]
     fn pending_tts_follow_takes_precedence_over_idle_anchor_restore() {
         let heights = [60.0, 80.0, 100.0];
-        assert!(capture_pretty_scroll_anchor(180.0, &heights).is_some());
-        assert!(semantic_anchor_for_geometry_transition(true, false, 180.0, &heights).is_some());
-        assert!(semantic_anchor_for_geometry_transition(true, true, 180.0, &heights).is_none());
-        assert!(semantic_anchor_for_geometry_transition(false, false, 180.0, &heights).is_none());
+        let blocks = (0..heights.len())
+            .map(|index| test_paragraph(index, "tts anchor".to_owned()))
+            .collect::<Vec<_>>();
+        assert!(capture_pretty_scroll_anchor(180.0, &heights, &blocks, &[]).is_some());
+        assert!(
+            semantic_anchor_for_geometry_transition(true, false, 180.0, &heights, &blocks, &[])
+                .is_some()
+        );
+        assert!(
+            semantic_anchor_for_geometry_transition(true, true, 180.0, &heights, &blocks, &[])
+                .is_none()
+        );
+        assert!(
+            semantic_anchor_for_geometry_transition(false, false, 180.0, &heights, &blocks, &[])
+                .is_none()
+        );
     }
 
     #[test]
