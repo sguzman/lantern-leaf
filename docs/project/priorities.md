@@ -55,23 +55,15 @@ Worker validation and GitHub Windows baseline run `34725734155` passed. The focu
 
 ## P2.9 — Goal 0014: reader presentation-geometry anchor stability
 
-**A3 READY — NEXT AUTHORIZED CODEX CORRECTION**
+**A3 DIRECTOR-ACCEPTED — FINAL REAL-DESKTOP SIGNOFF ACTIVE**
 
-A2 materially improved semantic viewport preservation and is the accepted implementation foundation. Canonical sentence identity plus normalized within-sentence position is preferred when available; normalized same-block position is the fallback; a genuine pending TTS follow request has precedence. Binding media max-width/max-height behavior is now physically verified on the real Windows machine.
+A2 established semantic anchoring across presentation reflow and physically verified the visual controls, including binding media max-width/max-height behavior. A3 now addresses the residual violent transient jump / occasional wrong final settle observed during live geometry editing.
 
-A2 did not pass final real-desktop closure because live geometry edits can still expose an unrelated document area transiently before returning, and can occasionally settle on the wrong semantic area. This directly violates Goal 0014's bounded visual displacement / semantic-location contract.
+The reader keeps one last-stable semantic viewport witness across a burst of geometry changes instead of recapturing from unstable intermediate frames. A visible canonical highlighted sentence may seed a one-shot edit anchor. Estimates keep bounded virtualization in the anchor neighborhood; measured geometry is used for final reconciliation. Pending TTS follow still has precedence, and explicit wheel/drag input cancels stale automatic restoration.
 
-A3 must treat geometry editing as a multi-frame reflow transaction rather than repeated independent estimated restores:
+Implementation `430e9c1` passed focused reader tests, full workspace check/test/build, Windows QA preparation, renderer smoke, and GitHub Windows baseline run `34768445726`.
 
-- capture and retain the last stable semantic viewport witness across a burst of slider/control changes;
-- do not recapture from unstable intermediate frames;
-- use estimates only for bounded virtualization / locating the target neighborhood, then reconcile against actual measured new geometry;
-- preserve an actually visible canonical sentence/segment witness when available, including the visible highlight as a one-shot edit anchor without inventing permanent auto-follow;
-- keep pending TTS follow precedence;
-- yield to explicit user wheel/drag input;
-- prevent both intermediate unrelated-area flashes and wrong final semantic anchoring.
-
-The A3 contract is `docs/work/ready/0014-reader-presentation-anchor-stability.md`.
+The only remaining gate is focused physical validation of multi-frame behavior: no distant-area flash/snap-back, no wrong final semantic settle, stable rapid-slider bursts, visible-highlight neighborhood continuity, active TTS precedence, and user-scroll cancellation.
 
 ## P2.10 — Goal 0010: Caliberate catalog covers + provider availability UX
 
