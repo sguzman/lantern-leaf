@@ -58,7 +58,7 @@ Goal 0012 has automated, director, Windows CI, and real-desktop acceptance for t
 
 Accepted behavior includes literal margins, geometry invalidation, scrollable settings, functional word/letter spacing, readable tables/TOCs, restrained blockquotes, explicit font fallback state, inline EPUB imagery, bounded off-render-thread pretty/image work, and correct canonical spoken highlighting/follow.
 
-A later physical pass isolated a separate viewport-anchor defect: canonical highlighting remained correct, but live presentation geometry changes could leave the visible scroll position attached to stale document-space coordinates after reflow. That is Goal 0014 and does not reopen Goal 0012.
+A later physical pass isolated a separate viewport-anchor/reflow defect. Goal 0014 owns that problem and does not reopen Goal 0012.
 
 ## Near-term shell / reader cleanup
 
@@ -70,13 +70,15 @@ The responsive starter-shell correction is accepted with worker/CI/director evid
 
 ### Goal 0014 — reader presentation-geometry anchor stability
 
-**STATUS: A2 DIRECTOR-ACCEPTED — FOCUSED REAL-DESKTOP SIGNOFF PENDING**
+**STATUS: A3 CORRECTION READY — NEXT AUTHORIZED MACRO-GOAL**
 
-The generalized semantic anchor correction is integrated on `main`. Before a presentation geometry transition invalidates measured pretty-block heights, the reader captures semantic viewport state. It restores against the reflowed geometry using canonical sentence identity plus normalized within-sentence position when available, or normalized same-block position as fallback, rather than blindly retaining the old raw scroll Y.
+A2 substantially fixed persistent semantic teleporting and established a generalized semantic anchor policy. Real-desktop QA additionally verified that binding media max-width/max-height controls visibly resize inline media.
 
-The policy is centralized across horizontal/content-width reflow, font/text metrics, spacing, media sizing, and compound presentation changes. During active TTS, a legitimate pending canonical follow target has precedence over idle anchor preservation, and natural post-follow render-window behavior remains unchanged.
+A2 did not pass final closure because presentation reflow can still visibly flash through a distant semantic area before returning, and can occasionally settle on the wrong area. These are still Goal 0014 failures.
 
-A2 focused/production-adjacent tests, full workspace validation, Windows build/QA preparation, renderer smoke, and GitHub Windows baseline run `34733109955` passed. One focused real-desktop pass remains to prove semantic location stability during live editing, including active TTS and binding media-size changes when a suitable inline image is available.
+A3 must make reflow transactional across frames and across rapid edit bursts. The stable semantic viewport witness from the last settled geometry should survive all intermediate geometry keys until the new geometry is actually measured/stable or the user explicitly scrolls. Estimates may guide bounded virtualization, but must not create visible unrelated-area excursions or become final semantic authority when they materially disagree with measured geometry. An actually visible canonical sentence/highlight may be used as a one-shot edit anchor without creating permanent follow behavior. Pending TTS follow remains higher priority; explicit user scrolling cancels stale correction.
+
+See `docs/work/ready/0014-reader-presentation-anchor-stability.md` and `docs/work/reviews/0014-a2-real-desktop-rejection.md`.
 
 ### Goal 0010 — Caliberate catalog covers + provider availability UX
 
