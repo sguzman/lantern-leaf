@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-12 after Goal 0012 final real-desktop acceptance and Goal 0013 promotion.
+Updated: 2026-09-12 after Goal 0013 A1 director acceptance for focused real-desktop signoff.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -71,11 +71,15 @@ One non-blocking residual observation is intentionally separate: live media max-
 
 ## Goal 0013 — starter shell responsive panel containment
 
-**READY — NEXT AUTHORIZED CODEX MACRO-GOAL**
+**A1 DIRECTOR-ACCEPTED — FOCUSED REAL-DESKTOP SIGNOFF PENDING**
 
-Physical QA still shows some Recents / Calibre / Browser Tabs starter-shell bleed at ordinary desktop width, though substantially less severe than the original failure. Goal 0013 owns responsive column containment, wrapped/stacked child layout, and a conservative one-column fallback when two readable columns do not fit.
+Implementation `58ae9de` replaces the overlap-prone unconditional starter layout with a responsive policy derived from actual center width: two columns at/above `1120px`, one-column fallback below it, width-bounded groups, wrapped action/control rows, and bounded long-path/URL presentation. Existing Calibre virtualization and off-render-thread work remain preserved.
 
-This remains separate from reader presentation/TTS semantics.
+The Goal 0013 worker branch terminalized with a duplicate stale `active/` lifecycle copy alongside `done/`; the director removed that bookkeeping artifact before integration. Production implementation and validation were unaffected.
+
+GitHub Windows baseline run `34725734155` passed. See `docs/work/reports/0013.md` and `docs/work/reviews/0013-a1-director-acceptance.md`.
+
+Because the original defect is visual/responsive and came from the real desktop, one focused physical pass remains: verify no Recents / Calibre / Browser Tabs overlap at the ordinary failing width, then resize narrower/wider to confirm stable one/two-column behavior, contained long rows, reachable diagnostics, and no horizontal application overflow.
 
 ## Goal 0014 — reader media-sizing anchor stability
 
@@ -107,6 +111,6 @@ Gate 3 native PDF visual stability remains future work and is not currently auth
 
 ## Workflow status
 
-**GOAL 0013 READY**
+**HUMAN QA GATE ACTIVE**
 
-Goal 0012 is closed. Goal 0013 is the single authorized next macro-goal. Goal 0010 and Goal 0014 remain queued; Goal 0011 remains deferred; PDF work remains future.
+Goal 0013 A1 is worker-terminal, CI-green, director-accepted, and ready for one focused desktop pass. Goal 0010 and Goal 0014 remain queued; Goal 0011 remains deferred; PDF work remains future.
