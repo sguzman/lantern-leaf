@@ -106,15 +106,23 @@ After Fit Width/Fit Page, `+/-` should step from the current effective fit perce
 
 ## P4 — Goal 0022: trustworthy native PDF embedded text + TTS
 
-**READY NEXT — CURRENT SUBSTANTIVE PRODUCT PRIORITY**
+**READY A3 — CURRENT SUBSTANTIVE PRODUCT PRIORITY**
 
-Add asynchronous page-aligned embedded-text extraction through the existing `PdfNativeService`, conservatively promote only trustworthy native text into canonical PDF session ownership, preserve native page identity, and enable Text-only/search/ordinary Windows TTS through the existing first-sample pipeline.
+A1 and A2 are rejected before human QA; neither is accepted for physical testing.
 
-Hard exclusions for this goal: Quack-check, Python, Docling, OCR, exact sentence overlays, and hostile-PDF recovery.
+A3 preserves the native-only embedded-text direction while closing the remaining production gaps:
+
+- trusted text must promote the real render-only PDF session into a truthful trusted-text/no-exact-geometry policy so Text-only, search, and ordinary Windows TTS actually become usable;
+- the egui adoption commit must stay bounded and must not build an ordinary document-scale `ReaderSnapshot` or own/drop duplicate full cache payloads;
+- both Current and queued visible/Nearby raster work must outrank background text extraction;
+- cooperative extraction must stop reopening/reparsing the PDF once per page while retaining frequent arbitration points.
+
+Hard exclusions remain: Quack-check, Python, Docling, OCR, exact sentence overlays, and hostile-PDF recovery.
 
 The visual reader must remain usable before, during, and after text enrichment failure.
 
-Authoritative contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
+Authoritative A3 contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
+A2 rejection: `docs/work/reviews/0022-a2-director-rejection.md`.
 Architecture boundary: `docs/architecture/pdf-text-recovery-boundary-2026-09.md`.
 
 ## P4.1 — Native PDF sentence geometry/highlight/follow
