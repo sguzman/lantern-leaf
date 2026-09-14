@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-14 after Goal 0016 A2 director acceptance and integration for focused real-desktop QA.
+Updated: 2026-09-14 after Goal 0016 real-desktop closure and Goal 0019 promotion.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -69,37 +69,39 @@ A lower-severity residual remains under severe cumulative text-metric edits such
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-Goal 0010 is closed.
-
 Caliberate exposes the explicit `/api/v1/books/{id}/cover` provider contract; LanternLeaf propagates `has_cover`, lazily fetches covers for visible/near-visible rows, keeps network/disk/decode work off the UI thread, distinguishes intentional cover states, and never materializes an EPUB merely to obtain a thumbnail.
 
-A6 introduced explicit book-identified `CalibreCoverCompleted` terminal outcomes. A7 replaced the remaining global completion watermark with per-book request ownership/freshness, so unrelated books may finish in arbitrary order, stale same-book completions cannot overwrite newer retries, and automatic plus manual thumbnail requests share the bounded/coalesced path.
+A7 uses per-book request ownership/freshness so unrelated covers may complete out of order, stale same-book completions cannot overwrite newer retries, and automatic/manual requests share the bounded/coalesced path.
 
-Real Windows closure verified real covers before first open, lazy cover population during scroll, extremely fast representative EPUB opens, and preservation of EPUB TTS / pretty-reader / visual-settings behavior. The physical pass also exposed two separate starter-state continuity defects now owned by Goal 0016. See `docs/work/reviews/0010-a7-real-desktop-acceptance.md`.
-
-The earlier `42866` open failure remains withdrawn as evidence of a LanternLeaf materialization defect because Caliberate was not running during that attempt.
+The earlier `42866` incident remains withdrawn as evidence of a LanternLeaf materialization defect because Caliberate was not running during that attempt.
 
 ## Goal 0016 — starter library live-state continuity
 
-**A2 DIRECTOR-ACCEPTED + INTEGRATED — FOCUSED REAL-DESKTOP QA ACTIVE**
+**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-Goal 0016 now has the intended progressive catalog and same-session Recents architecture plus the A2 ownership correction.
+Goal 0016 is closed. The real 105,570-book Caliberate library now becomes usable while the catalog is still loading: provider pages publish progressively, the starter shell shows truthful loaded/total progress, final reconciliation preserves live cover state, and successful source persistence refreshes Recents in the same process.
 
-Caliberate pages are published progressively into starter state while the full provider walk continues in the background. Partial/loading counts are explicit, search/sort truthfully identifies loaded-row scope while incomplete, stale reducer events are rejected, and full catalog/cache completion remains a background terminal step.
+Physical Windows closure also verified durable Recents after restart, immediate warm cached EPUB reopen, and preservation of EPUB TTS / visual settings. The first open after `-ResetQaState` was slower because the isolated QA materialization/document cache was deliberately cold; this is retained as performance evidence rather than a demonstrated normal-path regression.
 
-After successful `SourceOpen` persistence, LanternLeaf refreshes Recents through the existing background listing path so the current process can display the newly opened source without restart.
-
-A2 additionally preserves live lazy-cover state through metadata/final catalog reconciliation, keeps mid-refresh provider failure visibly failed/degraded instead of converting it to ordinary success through stale-cache fallback, and coalesces catalog refresh ownership so only one authoritative full catalog worker can run at a time.
-
-Implementation `602e8952d077796ba478bd28e0b0cfe2d1e6bb51` passed Windows baseline run `34832563563`, including both native-workspace and hosted-renderer-probe jobs. Goal terminal commit `ca94477c6280ae1e5c47a5b32d02947019a428c4` was fast-forward integrated to `main` before the director acceptance record.
-
-One focused physical Windows pass remains: early progressive rows/progress on a clean QA cache, cover continuity through full completion, immediate same-session Recents after open, durable Recents after restart, and representative EPUB/TTS regression. See `docs/work/reviews/0016-a2-director-acceptance.md`.
+See `docs/work/reviews/0016-a2-real-desktop-acceptance.md`.
 
 ## Goal 0015 — highlight viewport-band reflow polish
 
 **QUEUED — MINOR POLISH**
 
-Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow without permanent highlight pinning or fighting user scrolling. Goal 0016 physical closure takes precedence.
+Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow without permanent highlight pinning or fighting user scrolling. Media-related severe reflow remains part of this bounded polish track.
+
+## Goal 0017 — progressive cover backpressure/error-state polish
+
+**QUEUED — MINOR LIBRARY POLISH**
+
+During the full cold catalog walk, short cover timeouts can temporarily surface `Cover fetch/decode failed` and cause visible-row retry churn before covers later succeed. This goal owns provider-pressure-aware retry/backoff and readable theme-aware catalog error presentation, including removal of the hard-coded yellow-on-light-theme message.
+
+## Goal 0018 — Windows QA bootstrap idempotence
+
+**QUEUED — QA INFRASTRUCTURE**
+
+Repeated `qa.ps1` invocations in one PowerShell process can eventually make `VsDevCmd.bat` fail with `The input line is too long`. This goal owns making the repository Windows environment bootstrap idempotent instead of requiring a fresh shell as recovery.
 
 ## Windows Natural/HD voices
 
@@ -107,14 +109,24 @@ Preserve a stronger temporary viewport band for an already-visible canonical hig
 
 Preserve the existing ordinary Windows voice backend. Goal 0011 remains a dormant placeholder only.
 
-## PDF
+## Goal 0019 / Gate 3 — native PDF visual stability
 
-**CORE CONTRACTS EXIST; NATIVE VISUAL STABILITY AND PDF TTS/HIGHLIGHT REMAIN FUTURE GATES**
+**READY NEXT — ONE AUTHORIZED MACRO-GOAL**
 
-Current physical behavior is not accepted as a working PDF reader. Gate 3 is native PDF visual stability; Gate 4 is PDF text/TTS/highlight synchronization. They are not regressions from Goal 0010 and are not part of Goal 0016.
+Current physical PDF behavior is not accepted as a working reader. The repository has useful native Pdfium, viewport, cache, zoom, and diagnostic scaffolding, but the user-facing Reader surface still does not provide a real accepted native page view.
+
+Goal 0019 is now the one ready implementation goal. It must connect PDF page rastering to the native reader through a bounded off-render-thread worker, explicit stale-safe request ownership, real zoom-aware render keys, bounded texture/cache lifecycle, stable page navigation/resize/scroll behavior, and a user-facing native PDF canvas. It explicitly does not include PDF TTS/highlight synchronization.
+
+Contract: `docs/work/ready/0019-native-pdf-visual-stability.md`.
+
+## Gate 4 — PDF text/TTS/highlight synchronization
+
+**FUTURE CORE PRODUCT GATE**
+
+After Gate 3: canonical sentence/page mapping, geometry confidence/overlays, jump/follow behavior, OCR/degraded modes, first-sample playback integration, and representative regression corpus.
 
 ## Workflow status
 
-**HUMAN QA GATE ACTIVE — GOAL 0016 A2**
+**GOAL 0019 READY NEXT**
 
-Goal 0010 is closed. Goal 0016 A2 is director-accepted and integrated; no new Codex Goal is authorized right now. Goal 0015 remains queued minor polish; Goal 0011 remains deferred; PDF work remains later unless the director/user reprioritizes after Goal 0016 closure.
+Goal 0016 is closed. Goal 0019 is the only authorized ready macro-goal. Goals 0015, 0017, and 0018 remain queued; Goal 0011 remains deferred. No human PDF QA is authorized until Goal 0019 implementation passes director source/CI review and is integrated to `main`.
