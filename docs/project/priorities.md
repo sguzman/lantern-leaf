@@ -61,15 +61,15 @@ A minor residual under severe text-metric edits is split to Goal 0015 rather tha
 
 ## P2.10 — Goal 0010: Caliberate catalog covers + provider availability UX
 
-**A6 REJECTED BEFORE HUMAN QA — A7 CORRECTION IS THE ACTIVE PRIORITY**
+**A7 DIRECTOR-ACCEPTED + INTEGRATED — REAL-DESKTOP SIGNOFF ACTIVE**
 
-Preserve A6's explicit Caliberate cover contract, `has_cover` propagation, explicit book-identified terminal outcomes, bounded automatic visible-row scheduling, off-GUI-thread request/decode work, retry semantics, targeted sibling Caliberate tests, and passed Windows CI.
+The provider contract and lazy-cover architecture are now integrated in both repositories. Caliberate serves an explicit `/api/v1/books/{id}/cover` route, while LanternLeaf carries `has_cover`, schedules at most four visible-row requests, keeps request/disk/decode work off the GUI thread, and presents intentional loading/no-cover/provider-unavailable/fetch-error states.
 
-A7 must repair the remaining event-order race: concurrent cover effects run on independent worker threads, but the UI currently uses one global `last_calibre_cover_event_request_id` watermark. A higher-ID completion arriving first can cause a valid lower-ID completion for another book to be dropped, stranding that book in pending/loading state.
+A6 established book-identified terminal cover outcomes. A7 removes the remaining global event-order assumption and makes cover ownership per book/request, so unrelated books may finish out of order and stale same-book completions cannot clobber newer retries. Automatic and manual `Ensure thumbnail` dispatch now share the same bounded/coalesced path.
 
-Use per-book request ownership/freshness or an equivalent concurrency-safe model. Different books must complete in arbitrary order; stale older completions for the same book must not overwrite newer retry state; only the currently owned request may clear/replace that book's pending state. The manual `Ensure thumbnail` action must use the same bounded/coalesced ownership path rather than bypassing the four-request bound.
+Implementation `54e22c172745171b084221a6f80465e3f6ffe77d` passed Windows baseline run `34793890003`; both native-workspace and hosted-renderer-probe jobs succeeded. LanternLeaf and Caliberate branches were fast-forward integrated to their respective `main` branches before physical QA.
 
-Required tests must explicitly deliver two books' completions out of order and exercise a stale same-book completion after a newer retry. See `docs/work/reviews/0010-a6-director-rejection.md`.
+The only remaining gate is focused physical Windows validation: cover-before-open behavior, no permanent loading rows, intentional no-cover state, provider-down/restart recovery, bounded manual ensure, and preservation of representative Caliberate open/TTS behavior. See `docs/work/reviews/0010-a7-director-acceptance.md`.
 
 Do not resurrect the withdrawn fake materialization defect from the test where Caliberate itself was not running.
 
