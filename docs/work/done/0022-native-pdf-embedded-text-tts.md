@@ -1,227 +1,180 @@
-# 0022 — Native PDF embedded-text / TTS trustworthy path
+# 0022 — Native PDF embedded-text / TTS trustworthy path — A2
 
-## Current state
+## Status
 
-Goal 0019 established the native Pdfium visual foundation. Goal 0020 established the physically accepted continuous native viewport, practical 25–400% zoom, Fit Width/Fit Page/Reset, responsive current-page ownership, jump controls, and aggressive long-document scrolling without EPUB/TTS regression.
+**READY — A2 CORRECTION AFTER A1 DIRECTOR REJECTION**
 
-Goal 0021 is queued minor zoom-transition polish and does not block Gate 4.
+A1 is rejected before human QA. Read `docs/work/reviews/0022-a1-director-rejection.md` first.
 
-The next core problem is PDF text/TTS. The previous Quack-check-derived path is **not** allowed to become a source-open prerequisite again.
-
-Read first:
-
-- `docs/architecture/pdf-renderer-contract.md`
-- `docs/architecture/pdf-text-recovery-boundary-2026-09.md`
-- `docs/work/reviews/0020-a3-real-desktop-acceptance.md`
-- `docs/roadmaps/restart-master-roadmap-2026-09.md`
+Goal 0019/0020 remain physically accepted and authoritative. Goal 0022 must enrich that working continuous native PDF reader without ever making text work capable of degrading visual responsiveness or blocking the egui thread.
 
 ## Outcome
 
-For PDFs with trustworthy embedded text, LanternLeaf can asynchronously enrich the already-open native PDF session with page-aligned canonical text and use the existing reader/TTS pipeline without Python, Docling, OCR, or Quack-check.
+For PDFs with trustworthy embedded text, LanternLeaf asynchronously obtains page-aligned native text through the existing process-wide Pdfium owner, conservatively adopts it as canonical PDF text, enables Text-only/search/ordinary Windows TTS, and reuses a versioned durable cache.
 
-A user must be able to:
+Visual PDF browsing remains independently usable before, during, after, or despite text enrichment failure.
 
-1. open and browse the PDF immediately exactly as today;
-2. allow native text enrichment to complete in the background;
-3. use Text-only/search/TTS when the embedded text passes a conservative trust gate;
-4. keep native PDF page identity aligned with canonical sentences;
-5. continue browsing normally if text extraction fails or is rejected as untrustworthy.
+Exact sentence overlay geometry, hostile-PDF recovery, Quack-check, Docling, and OCR remain out of scope.
 
-This goal does **not** implement exact spoken overlay geometry yet. That follows after the native text/TTS ownership path is physically trustworthy.
-
-## Hard architecture rules
-
-### 1. Preserve the accepted visual reader unchanged in authority
+## Non-negotiable architecture
 
 - Native Rust + `eframe`/`egui` + bundled/native Pdfium only.
-- One process-wide `PdfNativeService` / one Pdfium owner.
-- Visual source open remains independent of text recovery.
-- No Python, Quack-check, Docling, OCR, or external recovery process is invoked by Goal 0022.
-- Text extraction failure must never transition an already-open PDF into source error.
-- No heavy/native work on the egui/render thread.
+- Exactly one process-wide `PdfNativeService` / one Pdfium owner.
+- No second Pdfium binding for text concurrency.
+- No Python, Quack-check, Docling, OCR, or `scripts/quack-check/*` in the Goal-0022 production path.
+- Visual source open never waits for text enrichment.
+- Current/visible raster responsiveness outranks background text extraction.
+- Heavy/blocking/document-scale work never executes on the egui/render thread.
+- Extraction/adoption/cache results are source/generation/revision stale-safe.
+- PDF canonical text preserves native PDF page identity; do not line-count-repaginate the transcript.
+- Existing backend-neutral/first-sample Windows TTS ownership remains authoritative.
 
-### 2. Native text extraction must go through the existing Pdfium owner
+## A2 correction 1 — cooperative text extraction under the single Pdfium owner
 
-Extend the shared native PDF service with a typed, bounded text-enrichment request/result path rather than constructing another Pdfium renderer/binding.
+A1 executes whole-document `extract_embedded_text()` as one uninterrupted operation on the only Pdfium worker. This can strand current/visible raster requests behind hundreds of text pages.
 
-The native result must be page-aligned and carry enough identity to reject stale results. At minimum:
+Replace that with a bounded/cooperative text job owned by the same native service.
 
-- source identity/path;
-- request/source generation or revision;
-- native page count;
-- one extracted text payload per native PDF page;
-- worker-thread evidence for tests/diagnostics;
-- explicit terminal success/failure.
+Required properties:
 
-Use Pdfium's native text facilities through the existing `pdfium-render` dependency. Do not shell out to Python for the trustworthy embedded-text path.
+1. Text extraction progresses page-by-page or in small bounded chunks.
+2. Between text units/chunks, the service returns to arbitration.
+3. Current/visible raster requests have higher priority than background text enrichment.
+4. Metadata/source-critical requests remain bounded and live.
+5. Text work resumes deterministically after higher-priority raster work.
+6. Cancellation/stale source changes safely abandon the old text job.
+7. A large cold PDF cannot monopolize the native service until all text pages finish.
+8. The final typed text result still contains source identity, source generation/revision, native page count, one text payload per native page, worker evidence, trust decision/degraded reason, and terminal success/failure.
 
-### 3. Conservative trust gate
+Do not solve this by creating another Pdfium instance or another owner thread that binds Pdfium independently.
 
-Do not equate “Pdfium returned some strings” with trustworthy canonical text.
+### Required arbitration regression
 
-Implement a small explicit native embedded-text quality assessment suitable for deciding whether this goal may enable canonical Text-only/search/TTS. It should be deterministic and conservative, based on signals available from the native page-aligned text result, such as:
+Add a deterministic service-level test with a deliberately multi-step/long text job:
 
-- non-empty/text-bearing page coverage;
-- text density / character counts;
-- replacement/control/garbage character rate;
-- pathological whitespace or duplicate-text indicators that are cheaply available;
-- obvious empty/image-only behavior.
+- service already initialized/idle;
+- start text enrichment;
+- prove text job is not yet complete;
+- submit a new `Current` raster request while enrichment is in progress;
+- current raster completes before the text job terminal result;
+- text job then resumes and completes;
+- same owner/thread identity remains true.
 
-The exact thresholds must be named/tested rather than hidden magic scattered through UI code.
+The existing two-page lifecycle probe is not sufficient by itself.
 
-This goal only needs to distinguish:
+## A2 correction 2 — no document-scale adoption or cache IO on egui
 
-- **trustworthy embedded text** -> adopt as canonical;
-- **not trustworthy / absent / unknown** -> remain visual-only and record a degraded reason for future recovery.
+A1 receives `PdfEmbeddedTextCompleted` on the app/UI path and then synchronously performs full-document sentence splitting, word/sentence counts, anchor-map building, full snapshot construction, a second full-document sentence split for cache hints, and synchronous cache persistence.
 
-Do not attempt to solve mixed/scanned/hostile PDF recovery here.
+That is forbidden.
 
-### 4. PDF canonical text must preserve native page identity
+Move document-scale preparation off-thread.
 
-When native embedded text is accepted, do not repaginate the transcript into arbitrary line-count reader pages.
+The worker/effect side must prepare an immutable typed adoption payload containing the information required to commit trusted PDF text without recomputing the whole document on the UI thread. At minimum this should cover, as appropriate to the existing session model:
 
-The canonical relationship must remain:
+- normalized page-aligned canonical page text;
+- canonical per-page sentences;
+- page sentence counts;
+- page word counts;
+- deterministic sentence -> native page provenance / cache hints;
+- any anchor/index structures needed by the session;
+- cache artifact payload and version/source identity metadata;
+- trust/degraded decision.
 
-`native PDF page N -> canonical accepted page text -> canonical sentences belonging to page N`
+The egui-thread completion step must be bounded:
 
-Add/adjust `ReaderSession` support so a PDF session can adopt page-aligned canonical text after visual open while preserving:
+1. validate current source + generation/revision;
+2. reject stale/untrusted/mismatched page-count payloads;
+3. atomically swap/apply already-prepared session text state;
+4. publish only the needed reader/runtime update;
+5. return promptly.
 
-- native `pdf_page_count`;
-- current native page;
-- native viewport position ownership;
-- bookmark page identity;
-- ordinary reader settings;
-- source identity;
-- existing continuous PDF visual state.
+It must not:
 
-The PDF text page/sentence domain must not diverge from native page indexes.
+- split every page into sentences;
+- join/rebuild the entire document more than unavoidable bounded assignment/copy cost;
+- rebuild document-wide indexes from raw text;
+- synchronously write cache files;
+- perform another full-document split solely for cache hints.
 
-### 5. Asynchronous session enrichment
+Durable cache persistence must run through an off-thread effect/worker path. Failure to persist text cache must not affect the active PDF session.
 
-Visual open currently creates a render-only PDF session with empty TTS text. Goal 0022 must add an explicit enrichment lifecycle rather than reopening the source synchronously.
+Add a production-path test or explicit thread diagnostic proving document-scale preparation and cache persistence do not execute on the egui thread.
 
-Required behavior:
+## Preserve accepted A1 direction
 
-- visual session becomes usable first;
-- native text work starts off-thread;
-- completion is delivered through a typed app/runtime event;
-- source/generation identity is checked before adoption;
-- switching/closing the PDF makes old enrichment harmless/stale;
-- accepted enrichment updates the session atomically enough that the UI never observes half-rebuilt sentence/page state;
-- failed/rejected enrichment leaves the existing visual session intact.
+A2 should retain the parts of A1 that are correct:
 
-Do not let a worker mutate the live session directly behind app/runtime ownership.
+- typed native embedded-text result and `AppEvent::PdfEmbeddedTextCompleted` boundary;
+- native Pdfium text extraction, not Python extraction;
+- conservative deterministic trust gate;
+- page-aligned canonical PDF session ownership;
+- Text-only/search/TTS using the normal reader pipeline;
+- existing first-sample speech ownership;
+- no fake sentence rectangles;
+- versioned cache reuse when source identity/revision/page count match;
+- corrupt/stale cache cannot break visual open;
+- stale source-A enrichment cannot mutate source B;
+- Goal 0019/0020 continuous rendering, zoom, viewport, scheduling, and residency behavior;
+- representative EPUB rendering/TTS behavior.
 
-### 6. Use the existing canonical TTS pipeline
+## Trust gate
 
-Once trustworthy text is adopted:
+Keep a deterministic conservative embedded-text trust assessment with named/tested thresholds or constants. At minimum reject absent/image-only text, clearly insufficient coverage, obvious replacement/control garbage, and obvious pathological duplicate/noise cases.
 
-- Text-only mode shows the accepted canonical PDF text;
-- search uses that canonical text;
-- sentence splitting/normalization uses the normal reader pipeline;
-- Windows TTS uses the existing backend-neutral/first-sample ownership path;
-- Play/Pause/seek/repeat semantics are not reimplemented specially for PDFs;
-- canonical highlighted sentence identity changes only on the existing first-sample boundary.
+This goal remains binary for adoption:
 
-If a trustworthy PDF has canonical text but no exact geometry yet, visual PDF sentence highlighting must remain explicitly unavailable rather than faked.
+- trustworthy embedded text -> canonical PDF text/TTS eligible;
+- otherwise -> visual-only with explicit degraded reason.
 
-### 7. Page-level playback relationship
+Do not attempt mixed/scanned/hostile recovery here.
 
-Because canonical PDF sentences are page-aligned, the session/runtime must be able to resolve a canonical sentence to its native PDF page deterministically.
+## PDF page-domain / TTS contract
 
-Goal 0022 should provide the stable sentence -> native page provenance needed by the next overlay goal.
+Accepted text must preserve:
 
-If existing active-TTS-page scheduling/follow machinery can safely use this provenance without inventing exact geometry, it may keep the spoken page warm or perform explicitly page-level behavior. Do not implement fake sentence rectangles.
+`native PDF page N -> canonical page text -> canonical sentences belonging to page N`
 
-### 8. Durable cache reuse
+Preserve native `pdf_page_count`, current native page, bookmarks, continuous viewport position, reader settings, and source identity.
 
-Reuse or replace the existing versioned PDF precompute/cache artifact shape where semantically appropriate (`PdfRenderPrecomputedState`, page texts, sentence-page hints, sync metadata).
+Text-only/search/Play/Pause/seek/repeat must use existing canonical ReaderSession/TTS machinery. No separate PDF TTS engine.
 
-Requirements:
+Exact visual spoken sentence highlighting is still a later goal.
 
-- cache is keyed by source identity/content plus an explicit native-text extraction revision;
-- cache reuse avoids rerunning native extraction on every reopen;
-- corrupt/version-stale artifacts are ignored/removed and rebuilt non-destructively;
-- loading a bad text cache cannot break visual PDF open;
-- do not persist ephemeral raster textures as part of this goal.
+## Cache contract
 
-## Quack-check explicit non-use
+Cache identity must include source/content identity and explicit native-text extraction revision. Reopen should reuse trusted page text without rerunning native extraction. Corrupt/version-stale artifacts must be ignored/removed/rebuilt non-destructively. Raster textures remain ephemeral and are not persisted here.
 
-Goal 0022 must not call:
-
-- `load_pdf_with_quack_check`;
-- `run_pdf_to_text*`;
-- `PythonEngine`;
-- Docling;
-- OCR scripts;
-- `scripts/quack-check/*` for production native-text enrichment.
-
-The old vendored code may remain in the repository for later recovery work, but it is not authoritative for this goal.
+Cache load/write must not block the egui thread.
 
 ## Required deterministic coverage
 
-Add production-path tests proving at minimum:
+At minimum prove:
 
-1. the process-wide native PDF service can return page-aligned embedded text from a real valid multi-page PDF fixture after the service has already been initialized/idle;
-2. native text extraction uses the same Pdfium owner rather than a second binding;
-3. text work is off the egui thread;
-4. a trustworthy embedded-text fixture passes the native trust gate;
-5. an empty/image-only/garbage fixture is rejected/degraded rather than promoted;
-6. visual source open completes independently of text-enrichment success/failure;
-7. accepted enrichment preserves native PDF page count/current page and maps canonical sentences to native pages;
-8. PDF text adoption does not repaginate into an unrelated line-count page domain;
-9. stale enrichment from source A cannot mutate source B after a rapid source switch;
-10. Text-only/search become meaningful only after accepted enrichment;
-11. PDF TTS uses the normal canonical TTS pipeline and existing first-sample ownership semantics;
-12. extraction failure leaves the PDF continuously browsable/renderable;
-13. cached native text is reused on reopen and stale/corrupt cache is safe;
-14. Goal 0019/0020 native rendering/continuous viewport/zoom regressions remain green;
-15. representative EPUB visual controls + Windows TTS remain green.
+- same process-wide Pdfium owner serves metadata, raster, and native embedded text;
+- cooperative text extraction cannot starve a new current raster request;
+- text/native heavy work stays off egui;
+- document-scale adoption preparation stays off egui;
+- cache persistence stays off egui;
+- trustworthy fixture passes trust gate;
+- empty/image-only/garbage/noise fixtures degrade;
+- visual open succeeds independently of enrichment outcome;
+- trusted adoption preserves native page count/current page;
+- canonical sentences map deterministically to native pages;
+- PDF text is not arbitrary line-count repaginated;
+- source-switch stale result is ignored;
+- Text-only/search become meaningful after accepted enrichment;
+- ordinary Windows TTS uses existing first-sample semantics;
+- extraction/cache failure leaves PDF visually browsable;
+- trusted cache is reused on reopen;
+- corrupt/stale cache is safe;
+- Goal 0019/0020 regressions remain green;
+- representative EPUB visual/TTS regressions remain green.
 
-## Hosted/Windows validation
+## Validation / handoff
 
-Run focused tests plus workspace check/build/test and repo-native Windows QA preparation.
+Run focused tests plus serialized workspace tests as appropriate, `cargo check --workspace`, `cargo build --workspace`, repo-native Windows QA preparation, `git diff --check`, hosted `native-workspace`, and hosted renderer/native-PDF capability coverage.
 
-Extend hosted Windows coverage enough to prove the native embedded-text Pdfium request path on Windows. Do not terminalize the repository goal until required hosted native jobs for the implementation lineage are green.
+Do not terminalize or signal Goal achieved until the hosted workflow for the substantive A2 implementation lineage is green.
 
-No Python/Docling installation should be required for Goal 0022 hosted acceptance.
-
-## Physical QA after director acceptance
-
-The director will request physical QA only after source/CI review.
-
-Expected focused pass:
-
-- open a real text-bearing PDF and confirm visual page appears immediately;
-- confirm PDF remains fully scrollable while/after text enrichment;
-- confirm Text-only contains plausible text when enrichment is accepted;
-- play Windows TTS and verify audible speech/Play/Pause/seek ownership;
-- verify current native page identity remains sensible;
-- switch PDF/source during/after enrichment and check stale safety;
-- open an EPUB and verify existing visual/TTS behavior remains normal.
-
-Exact PDF spoken sentence overlay is **not** an acceptance requirement for Goal 0022.
-
-## Explicit non-goals
-
-Do not implement:
-
-- Quack-check recovery;
-- Docling;
-- OCR;
-- mixed/scan hostile-PDF policy beyond conservative rejection;
-- sentence rectangle overlays;
-- PDF click-to-sentence reverse mapping;
-- final PDF auto-follow polish;
-- Goal 0021 zoom-transition polish;
-- Goals 0015/0017/0018;
-- Windows Natural/HD voices;
-- unrelated UI redesign.
-
-## Repository handoff
-
-- Repository goal: `0022-native-pdf-embedded-text-tts`.
-- This is the only ready substantive macro-goal after Goal 0020 closure.
-- Preserve Goal 0021 as queued minor polish.
-- Codex must sync director `main`, move this file `ready -> active`, re-arm the watcher, implement only this bounded native trustworthy-text path, validate, write `docs/work/reports/0022.md`, wait for hosted Windows success, move to `done/`, push before terminal signaling, and restore the shared checkout to `main`.
-- Do not request human QA. The director reviews first.
+Update `docs/work/reports/0022.md` with A2 evidence. Move ready -> active -> done normally, push before terminal signaling, restore shared checkout to `main`, and do not request human QA. The director reviews first.
