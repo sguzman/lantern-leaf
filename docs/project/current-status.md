@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-14 after Goal 0019 A3 real-desktop rejection and A4 reopening.
+Updated: 2026-09-14 after Goal 0019 A6 director rejection and A7 reopening.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -113,16 +113,16 @@ Preserve the existing ordinary Windows voice backend. Goal 0011 remains a dorman
 
 ## Goal 0019 / Gate 3 — native PDF visual stability
 
-**READY NEXT — REOPENED FOR A4 AFTER REAL-DESKTOP FAILURE**
+**READY NEXT — REOPENED FOR A7 BEFORE HUMAN QA**
 
-A1/A2/A3 produced a sound native Pdfium/egui renderer: bounded off-render-thread Pdfium work, stale-safe source/page/size identity, real presentation-scale zoom, current-priority scheduling, and deterministic current-page-pinned texture residency. A3 passed director source/CI review and was integrated to `main` for physical QA.
+A1-A3 established the native Pdfium/egui rendering surface, real presentation-scale zoom, current-priority scheduling, stale-safe source/page/size ownership, and deterministic current-page-pinned texture residency. A4 removed Quack-check/transcript recovery from the visual-open critical path. A5 added truthful native PDF page-domain ownership. A6 corrected the duplicate-Pdfium-owner topology by sharing one native service between metadata and raster work and added detached-effect panic terminalization.
 
-The first real Caliberate PDF open then failed **before Pdfium rendering**. Provider materialization succeeded, but the generic PDF source-ingestion path synchronously required a Quack-check transcript. The staged QA Quack-check `scripts_dir` resolved to a nonexistent `.qa/windows/scripts/quack-check` path, propagated `source_open_failed`, and transitioned the shell to `SourceError`.
+A6 is nevertheless rejected before another desktop pass because its worker wait loop can lose metadata liveness after the service has become idle: metadata is polled only outside an inner raster-scheduler wait loop, while that inner loop wakes/timeouts and re-waits without returning to metadata polling when no raster key exists. The normal production lifetime `start -> idle -> user opens PDF` can therefore strand source opening exactly as before even though native ownership is now singular.
 
-This is now treated as a Gate 3 architectural defect, not merely a QA path typo: native visual PDF opening must not depend on Quack-check/Python/Docling/OCR/transcript availability at all. Goal 0019 A4 must establish a visual-first PDF session so a readable local/materialized PDF can render immediately while text recovery is absent, degraded, deferred, or failed.
+A7 owns the narrow liveness correction: make idle metadata wakeups reliable, preserve one Pdfium owner, add explicit `start -> idle -> metadata -> raster -> idle -> metadata` regression coverage, and replace the current full-file PDF container precheck with bounded header/tail validation or the native parse path.
 
 Contract: `docs/work/ready/0019-native-pdf-visual-stability.md`.
-Review: `docs/work/reviews/0019-a3-real-desktop-rejection.md`.
+Review: `docs/work/reviews/0019-a6-director-rejection.md`.
 
 ## Gate 4 — PDF text/TTS/highlight synchronization
 
@@ -132,6 +132,6 @@ After Gate 3: integrate canonical sentence/page mapping, geometry confidence/ove
 
 ## Workflow status
 
-**GOAL 0019 A4 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
+**GOAL 0019 A7 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
 
-Goal 0019 is reopened after physical rejection. A4 is the only authorized ready macro-goal. Goals 0015, 0017, and 0018 remain queued; Goal 0011 remains deferred. Do not request more human PDF QA until A4 implementation passes director source/CI review and is integrated to `main`.
+Goal 0019 remains open. A7 is the only authorized ready macro-goal. Goals 0015, 0017, and 0018 remain queued; Goal 0011 remains deferred. Do not request another human PDF recheck until A7 passes director source/CI review and is integrated to `main`.
