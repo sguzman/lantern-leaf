@@ -58,37 +58,47 @@ A minor residual under severe text-metric edits is split to Goal 0015 rather tha
 
 The provider contract and lazy-cover architecture are integrated in both repositories. Caliberate serves `/api/v1/books/{id}/cover`; LanternLeaf carries `has_cover`, bounds/coalesces visible-row work, keeps request/disk/decode work off the GUI thread, and handles per-book completion ownership safely.
 
-Real-desktop closure verified covers before first open, continued lazy cover population while scrolling, extremely fast representative EPUB opens, and preservation of EPUB TTS / pretty-reader / visual-settings behavior. See `docs/work/reviews/0010-a7-real-desktop-acceptance.md`.
-
-Do not resurrect the withdrawn fake materialization defect from the test where Caliberate itself was not running.
+Real-desktop closure verified covers before first open, continued lazy cover population while scrolling, extremely fast representative EPUB opens, and preservation of EPUB TTS / pretty-reader / visual-settings behavior. Do not resurrect the withdrawn materialization defect from the test where Caliberate itself was not running.
 
 ## P2.11 — Goal 0016: starter library live-state continuity
 
-**A2 DIRECTOR-ACCEPTED + INTEGRATED — REAL-DESKTOP SIGNOFF ACTIVE**
+**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-The progressive catalog and same-session Recents repair is integrated on `main`. Caliberate pages publish incrementally while the full provider walk continues off-thread; the starter UI exposes partial/loading progress and loaded-row search/sort scope; successful source persistence triggers a background Recents refresh without requiring restart.
+The real 105,570-book Caliberate catalog now publishes progressively into usable starter state while its full walk continues off-thread, exposes truthful loaded/total progress, preserves live covers through final reconciliation, and refreshes Recents in the same process after successful source persistence.
 
-A2 closes the director-found ownership defects: live lazy covers survive later catalog reconciliation, provider failure with stale fallback remains visibly failed/degraded, and catalog refreshes are single-worker/coalesced so overlapping full walks and stale durable-cache races are prevented.
-
-Implementation `602e8952d077796ba478bd28e0b0cfe2d1e6bb51` passed Windows baseline run `34832563563` with native-workspace and hosted-renderer-probe success. The only remaining gate is focused physical Windows validation. See `docs/work/reviews/0016-a2-director-acceptance.md`.
+Physical closure verified durable Recents after restart, immediate warm EPUB reopen, and preserved EPUB TTS/visual behavior. See `docs/work/reviews/0016-a2-real-desktop-acceptance.md`.
 
 ## P2.12 — Goal 0015: highlight viewport-band reflow polish
 
 **QUEUED — MINOR POLISH**
 
-During severe letter-spacing/font-scale reflow, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. Preserve a temporary transaction-scoped viewport band when practical without permanent highlight pinning or fighting user scroll. This remains below Goal 0016 physical closure.
+During severe text-metric/media-related reflow, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. Preserve a temporary transaction-scoped viewport band without permanent highlight pinning or fighting user scroll.
 
-## P2.13 — Goal 0011: Windows Natural/HD voice capability
+## P2.13 — Goal 0017: progressive cover backpressure + error-state polish
+
+**QUEUED — MINOR POLISH**
+
+Normal provider pressure during a huge cold catalog walk should not present as repeated scary cover failures or immediate retry churn. Add sane transient backoff/retry semantics and theme-aware readable provider/catalog error presentation.
+
+## P2.14 — Goal 0018: Windows QA bootstrap idempotence
+
+**QUEUED — INFRASTRUCTURE**
+
+Repeated repo-native QA runs in one PowerShell process must not accumulate Visual Studio environment state until `VsDevCmd.bat` fails with `The input line is too long`.
+
+## P2.15 — Goal 0011: Windows Natural/HD voice capability
 
 **DEFERRED BY USER — DORMANT UNTIL EXPLICITLY RE-AUTHORIZED**
 
 Do not investigate, implement, or test Natural/Narrator/HD voices for now. Preserve the existing ordinary Windows voice backend and current Zira/per-book override behavior.
 
-## P3 — Native PDF visual stability
+## P3 — Goal 0019: native PDF visual stability
 
-**FUTURE CORE PRODUCT GATE**
+**READY NEXT — CURRENT SUBSTANTIVE PRODUCT PRIORITY**
 
-Current physical PDF viewing is not accepted. The next PDF phase must establish page raster/render ownership, texture/cache lifecycle, viewport scheduling, zoom/scroll stability, bounded memory/performance on representative PDFs, and visual behavior independent of TTS.
+Make PDF a real native Rust/egui reader surface. The gate requires visible native page rastering, an off-render-thread Pdfium worker, stale-safe request ownership, zoom-aware render/cache identity, bounded viewport/texture lifecycle, page navigation, and stable zoom/resize/scroll behavior on representative PDFs.
+
+Do not bundle TTS/highlight/OCR synchronization into this gate. The authoritative contract is `docs/work/ready/0019-native-pdf-visual-stability.md`.
 
 ## P4 — PDF text/TTS/highlight synchronization
 
@@ -100,4 +110,4 @@ DOCX/Word, further HTML edge cases, shared source/document boundaries, and broad
 
 ## P6 — Ergonomics, latency, packaging
 
-Startup/TTS latency, broader UI cleanup, large-document ergonomics, optional Piper model/voice management, library/import polish, release packaging, and measured dependency cleanup.
+Startup/TTS latency, measured cold-open performance, broader UI cleanup, large-document ergonomics, optional Piper model/voice management, library/import polish, release packaging, and dependency cleanup justified by measured problems.
