@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-14 after Goal 0020 A2 director rejection and A3 reopening.
+Updated: 2026-09-14 after Goal 0020 real-desktop acceptance and Gate-4 recovery-boundary audit.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -61,9 +61,7 @@ Implementation `58ae9de` uses actual center width, a deterministic `1120px` two-
 
 A3 removed the high-severity multi-frame reflow instability by retaining one last-stable semantic viewport witness across an edit burst, avoiding recapture from unstable intermediate geometry, keeping bounded virtualization in the anchor neighborhood, reconciling after measured geometry is available, preserving pending TTS-follow precedence, and yielding to explicit user wheel/drag input.
 
-Final physical Windows evidence: no more instant violent distant-area jerks; horizontal-margin changes behave beautifully; rapid presentation edits feel much calmer; canonical highlight ownership remains correct; and binding media max-width/max-height behavior is physically verified.
-
-A lower-severity residual remains under severe cumulative text-metric edits such as aggressive letter spacing and font scaling. This is queued separately as Goal 0015 and does not keep Goal 0014 open.
+A lower-severity residual remains under severe cumulative text-metric edits such as aggressive letter spacing and font scaling. This is queued separately as Goal 0015.
 
 ## Goal 0010 — Caliberate catalog covers / provider availability UX
 
@@ -71,82 +69,96 @@ A lower-severity residual remains under severe cumulative text-metric edits such
 
 Caliberate exposes the explicit `/api/v1/books/{id}/cover` provider contract; LanternLeaf propagates `has_cover`, lazily fetches covers for visible/near-visible rows, keeps network/disk/decode work off the UI thread, distinguishes intentional cover states, and never materializes an EPUB merely to obtain a thumbnail.
 
-A7 uses per-book request ownership/freshness so unrelated covers may complete out of order, stale same-book completions cannot overwrite newer retries, and automatic/manual requests share the bounded/coalesced path.
-
-The earlier `42866` incident remains withdrawn as evidence of a LanternLeaf materialization defect because Caliberate was not running during that attempt.
-
 ## Goal 0016 — starter library live-state continuity
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
 The real 105,570-book Caliberate library becomes usable while the catalog is still loading: provider pages publish progressively, the starter shell shows truthful loaded/total progress, final reconciliation preserves live cover state, and successful source persistence refreshes Recents in the same process.
 
-Physical Windows closure also verified durable Recents after restart, immediate warm cached EPUB reopen, and preservation of EPUB TTS / visual settings.
-
-See `docs/work/reviews/0016-a2-real-desktop-acceptance.md`.
-
 ## Goal 0015 — highlight viewport-band reflow polish
 
 **QUEUED — MINOR POLISH**
 
-Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow without permanent highlight pinning or fighting user scrolling. Media-related severe reflow remains part of this bounded polish track.
+Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow without permanent highlight pinning or fighting user scrolling.
 
 ## Goal 0017 — progressive cover backpressure / cached-hydration scaling
 
 **QUEUED — CONFIRMED LIBRARY SCALING POLISH**
 
-Cold progressive-load QA showed short cover timeouts/retry churn. A later warm cached run additionally proved multiple local thumbnail-hydration passes were scanning roughly the entire ~104,732-row cache, hitting ~4-second budgets and rewriting the giant catalog cache. Goal 0017 now owns both provider-pressure retry/backoff and elimination of repeated O(total-books) cached thumbnail rediscovery, plus readable theme-aware errors and bounded logging.
-
-The accepted direction remains lazy visible/near-visible ownership or one bounded/indexed cache association mechanism; warm startup must not scan ~105k rows merely to rediscover thumbnail files.
+Warm cached runs proved repeated roughly-O(total-books) thumbnail-hydration scans and giant catalog-cache rewrites. Goal 0017 owns bounded transient backoff/retry plus lazy/indexed cached-thumbnail association and bounded logging/cache rewrites.
 
 ## Goal 0018 — Windows QA bootstrap idempotence
 
 **QUEUED — QA INFRASTRUCTURE**
 
-Repeated `qa.ps1` invocations in one PowerShell process can eventually make `VsDevCmd.bat` fail with `The input line is too long`. This goal owns making the repository Windows environment bootstrap idempotent instead of requiring a fresh shell as recovery.
+Repeated `qa.ps1` invocations in one PowerShell process can eventually make `VsDevCmd.bat` fail with `The input line is too long`. Until fixed, use a fresh PowerShell for physical QA.
 
 ## Windows Natural/HD voices
 
 **DEFERRED BY USER — DO NOT WORK ON OR TEST UNTIL RE-AUTHORIZED**
 
-Preserve the existing ordinary Windows voice backend. Goal 0011 remains a dormant placeholder only.
+Preserve the existing ordinary Windows voice backend. Goal 0011 remains dormant.
 
 ## Goal 0019 / Gate 3 — native PDF visual stability
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-After seven implementation/review attempts, the native Pdfium/egui visual foundation is physically proven on Windows.
+The native Pdfium/egui visual foundation is physically proven on Windows. Accepted behavior includes visual-first PDF open independent of transcript/OCR prerequisites, one process-wide `PdfNativeService`, truthful native page-domain ownership, native raster presentation, stale-safe render identity, bounded residency, and all heavy Pdfium work off the egui thread.
 
-Accepted behavior includes: visual-first PDF open independent of Quack-check/transcript/OCR prerequisites; one authoritative shared `PdfNativeService` / one native Pdfium owner; truthful native page count and PDF page-domain navigation; actual native raster presentation; real presentation-scale zoom; newest-current scheduling; stale source/page/zoom rejection; deterministic current-page-pinned residency; bounded header/tail precheck; effect panic terminalization; and all heavy/native PDF work off the egui/render thread.
+## Goal 0020 / Gate 3.1 — continuous native PDF viewport and practical zoom
 
-The real Caliberate PDF `725-13e8b7a0.pdf` opened successfully and reported `Page 13 / 638`; Next and Previous navigation worked; aggressive ordinary PDF browsing remained usable; and representative EPUB behavior remained green.
+**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-Real-desktop acceptance: `docs/work/reviews/0019-a7-real-desktop-acceptance.md`.
+A3 is physically accepted on a real 638-page Caliberate PDF.
 
-## Goal 0020 — continuous native PDF viewport and practical zoom
+Verified behavior:
 
-**REOPENED FOR A3 — A2 REJECTED BEFORE HUMAN QA**
+- continuous wheel scrolling across page boundaries;
+- portions of adjacent pages visible simultaneously;
+- extremely responsive rapid long-document scrolling;
+- responsive viewport-derived `Page N / 638` ownership;
+- Previous/Next as continuous-stack jumps;
+- Fit Width, Fit Page, Reset/100%, and manual 25–400% zoom;
+- horizontal navigation at high zoom;
+- approximate semantic focal preservation during zoom;
+- no representative EPUB visual/TTS regression.
 
-A2 successfully repaired most A1 structural problems: the continuous viewport publishes actual visible pages to the planner; native page dimensions are collected off-thread; long-document geometry is cached/indexed; horizontal navigation exists; fit calculations are based on viewport/page geometry; semantic viewport witnesses preserve focal position; visible pages are protected in residency; and the required hosted Windows run passed both native jobs.
+Real-desktop acceptance: `docs/work/reviews/0020-a3-real-desktop-acceptance.md`.
 
-Director review nevertheless found a deterministic production render-spec defect:
+## Goal 0021 — fit-to-manual zoom transition polish
 
-- the canonical scheduler derives request width from `pdf_viewport_width * scale`, while the Reader derives texture lookup width from `PDF_BASE_PAGE_WIDTH * effective_zoom`; outside special cases such as Fit width these `PdfRenderKey`s differ, so successful worker rasters can be invisible to the presentation path;
-- changing zoom/reset/fit increments generation or invalidates textures, but `should_commit_viewport_update()` can reject the unchanged visible/overscan range as a repeat target, so stationary geometry changes may not schedule replacement rasters at all.
+**QUEUED — MINOR PDF UX POLISH**
 
-A3 must introduce one canonical render specification shared by planning/scheduling/cache/presentation and make render-spec/generation/zoom/fit/resize changes force bounded authoritative replanning even when the visible page set is unchanged.
-
-Contract: `docs/work/ready/0020-continuous-pdf-viewport-and-zoom.md`.
-Director rejection: `docs/work/reviews/0020-a2-director-rejection.md`.
+`+/-` entered after Fit Width/Fit Page currently resume the prior manual zoom ladder rather than stepping from the current effective fit percentage. Reset/100% plus manual `+/-` works. This does not keep Goal 0020 open.
 
 ## Gate 4 — PDF text/TTS/highlight synchronization
 
-**FUTURE CORE PRODUCT GATE — AFTER GOAL 0020**
+**ACTIVE NEXT CORE PRODUCT GATE — GOAL 0022 READY**
 
-After the continuous viewport is trustworthy: integrate canonical sentence/page mapping, geometry confidence/overlays, jump/follow behavior, OCR/degraded modes, first-sample playback integration, representative regression corpus, and the hostile-PDF recovery capabilities represented by Quack-check. Gate 4 recovery must remain subordinate to the visual reader rather than blocking it.
+The Gate-4 architecture has been narrowed after auditing the old Quack-check lineage.
+
+Quack-check is **not** trusted as baseline infrastructure and will not be allowed to block visual open again. The accepted recovery boundary is documented in `docs/architecture/pdf-text-recovery-boundary-2026-09.md`.
+
+The trust order is now:
+
+1. native visual Pdfium reader remains immediately usable;
+2. trustworthy embedded text is extracted asynchronously through the same process-wide Pdfium owner;
+3. only later, for degraded/mixed/scanned PDFs, a typed background recovery provider may reuse/rewrite Quack-check/Docling/OCR components.
+
+The standalone `sguzman/quack-check` repository is not a runtime dependency. LanternLeaf already contains an evolved local fork with cancellation and richer artifacts, but even that code remains quarantined from Goal 0022.
+
+### Goal 0022 — native PDF embedded-text/TTS trustworthy path
+
+**READY NEXT — ONLY AUTHORIZED SUBSTANTIVE MACRO-GOAL**
+
+Goal 0022 adds page-aligned native Pdfium text extraction through `PdfNativeService`, a conservative embedded-text trust gate, asynchronous session enrichment, native-page-aligned canonical sentence ownership, Text-only/search/Windows TTS through the existing first-sample pipeline, and versioned durable text precompute reuse.
+
+It explicitly excludes Quack-check, Python, Docling, OCR, and exact PDF sentence overlays.
+
+Contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
 
 ## Workflow status
 
-**GOAL 0020 A3 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
+**GOAL 0022 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
 
-Goal 0019 is closed. Goal 0020 remains the only ready repository goal, now as A3. Goals 0015, 0017, and 0018 remain queued; Goal 0011 remains deferred. Do not request human PDF QA or start Gate 4 until A3 passes director source/CI review.
+Goals 0015, 0017, 0018, and 0021 remain queued. Goal 0011 remains deferred. Exact native PDF spoken overlays/follow come after Goal 0022. Hostile-PDF Quack-check/Docling/OCR recovery comes only after the native trustworthy-text path is physically accepted.
