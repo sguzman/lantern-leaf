@@ -38,7 +38,7 @@ use crate::pdf::{
 };
 use crate::pdf_renderer::{NativeRenderEviction, NativeRenderSpan, RenderTarget};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::pdf_renderer::{PdfRenderKey, PdfRenderSpec, PdfRenderWorker};
+use crate::pdf_renderer::{PdfEmbeddedText, PdfRenderKey, PdfRenderSpec, PdfRenderWorker};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::pdf_renderer::PdfMetadata;
 use crate::pdf_subsystem::{
@@ -73,6 +73,8 @@ use lanternleaf_core::{
     normalizer, session,
     session::ReaderSettingsPatch,
 };
+
+const PDF_NATIVE_TEXT_CACHE_VERSION: u32 = 1;
 use serde::{Deserialize, Serialize};
 use tracing::{Level, info, trace, warn};
 
@@ -465,6 +467,8 @@ struct LanternLeafApp {
     pdf_pending_jump_page: Option<usize>,
     #[cfg(not(target_arch = "wasm32"))]
     pdf_metadata_rx: Option<mpsc::Receiver<Result<PdfMetadata, String>>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pdf_text_rx: Option<mpsc::Receiver<Result<PdfEmbeddedText, String>>>,
     #[cfg(not(target_arch = "wasm32"))]
     pdf_geometry_cache: Option<Arc<PdfViewportGeometry>>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -1060,6 +1064,7 @@ impl LanternLeafApp {
             pdf_page_aspects: HashMap::new(),
             pdf_pending_jump_page: None,
             pdf_metadata_rx: None,
+            pdf_text_rx: None,
             pdf_geometry_cache: None,
             pdf_geometry_cache_key: None,
             pdf_page_metadata_revision: 0,
@@ -1208,6 +1213,7 @@ impl LanternLeafApp {
             pdf_page_aspects: HashMap::new(),
             pdf_pending_jump_page: None,
             pdf_metadata_rx: None,
+            pdf_text_rx: None,
             pdf_geometry_cache: None,
             pdf_geometry_cache_key: None,
             pdf_page_metadata_revision: 0,
@@ -2881,6 +2887,11 @@ impl LanternLeafApp {
                         self.pdf_metadata_rx = Some(self.pdf_worker.request_metadata(
                             PathBuf::from(&snapshot.source_path),
                         ));
+                        self.pdf_text_rx = Some(self.pdf_worker.request_embedded_text(
+                            PathBuf::from(&snapshot.source_path),
+                            self.pdf_generation,
+                            self.pdf_page_metadata_revision,
+                        ));
                         self.pdf_geometry_cache = None;
                         self.pdf_geometry_cache_key = None;
                     }
@@ -2907,6 +2918,63 @@ impl LanternLeafApp {
                             self.pdf_metadata_rx = None;
                         }
                         Err(mpsc::TryRecvError::Disconnected) => self.pdf_metadata_rx = None,
+                        Err(mpsc::TryRecvError::Empty) => {}
+                    }
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(receiver) = self.pdf_text_rx.as_ref() {
+                    match receiver.try_recv() {
+                        Ok(Ok(result)) => {
+                            let current_generation = self.pdf_generation;
+                            let current_source = self.current_pdf_path.as_ref();
+                            if result.generation == current_generation
+                                && result.source == PathBuf::from(&snapshot.source_path)
+                                && result.trusted
+                            {
+                                let page_texts = result.page_texts;
+                                let adopted = if let Ok(mut session) = self.effect_session.lock() {
+                                    if let Some(session) = session.as_mut() {
+                                        let normalizer = lanternleaf_core::normalizer::TextNormalizer::load_default();
+                                        if let Err(error) = session.adopt_pdf_embedded_text(page_texts.clone(), &normalizer) {
+                                            warn!(%error, "Native PDF text adoption failed");
+                                            false
+                                        } else {
+                                            let panels = self.runtime.state_snapshot().session.session
+                                                .map(|state| state.panels).unwrap_or_default();
+                                            let snapshot = session.snapshot(panels, &normalizer);
+                                            self.runtime.apply_event(lanternleaf_app::pipeline::AppEvent::ReaderUpdated(
+                                                lanternleaf_app::contracts::ReaderStateEvent {
+                                                    request_id: self.runtime.next_request_id(),
+                                                    action: "pdf_embedded_text_adopted".to_string(),
+                                                    reader: snapshot,
+                                                }
+                                            ));
+                                            true
+                                        }
+                                    } else { false }
+                                } else { false };
+                                if adopted {
+                                    self.cache_service.persist_pdf_render_precomputed_state(
+                                        &PathBuf::from(&snapshot.source_path),
+                                        &cache::PdfRenderPrecomputedState {
+                                            version: PDF_NATIVE_TEXT_CACHE_VERSION,
+                                            page_texts,
+                                            sentence_page_hints: Vec::new(),
+                                            source: snapshot.source_path.clone(),
+                                        },
+                                    );
+                                    self.push_status("Native PDF embedded text accepted for text-only, search, and TTS".to_string());
+                                }
+                            } else if current_source.is_some() {
+                                trace!("Discarded stale or untrusted native PDF text result");
+                            }
+                            self.pdf_text_rx = None;
+                        }
+                        Ok(Err(error)) => {
+                            warn!(error = %error, "Native PDF embedded text unavailable");
+                            self.pdf_text_rx = None;
+                        }
+                        Err(mpsc::TryRecvError::Disconnected) => self.pdf_text_rx = None,
                         Err(mpsc::TryRecvError::Empty) => {}
                     }
                 }
@@ -3040,6 +3108,11 @@ impl LanternLeafApp {
             }
         }
         self.current_pdf_path = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.pdf_text_rx = None;
+            self.pdf_generation = self.pdf_generation.saturating_add(1);
+        }
         self.pdf_render_state.reset();
     }
 }

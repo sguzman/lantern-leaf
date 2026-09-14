@@ -418,6 +418,56 @@ impl ReaderSession {
         self.current_page = self.current_page.min(page_count - 1);
     }
 
+    /// Atomically adopts trusted native PDF page text without changing the native page domain.
+    /// The visual PDF surface remains the owner of geometry; this only enables canonical
+    /// text-only, search, and TTS behavior on the same page indices.
+    pub fn adopt_pdf_embedded_text(
+        &mut self,
+        page_texts: Vec<String>,
+        normalizer: &normalizer::TextNormalizer,
+    ) -> Result<(), String> {
+        if !self.is_pdf_source() {
+            return Err("embedded PDF text requires a PDF session".to_string());
+        }
+        let page_count = self.pdf_page_count.unwrap_or(page_texts.len().max(1));
+        if page_texts.len() != page_count {
+            return Err(format!(
+                "embedded text page count {} does not match native page count {page_count}",
+                page_texts.len()
+            ));
+        }
+        let page_texts: Vec<String> = page_texts
+            .into_iter()
+            .map(|page| page.replace("\r\n", "\n").replace('\r', "\n").trim().to_string())
+            .collect();
+        self.tts_text = page_texts.join("\n\n");
+        self.pages = page_texts.clone();
+        self.markdown_pages.clear();
+        self.raw_page_sentences = page_texts
+            .iter()
+            .map(|page| text_utils::split_sentences(page))
+            .collect();
+        self.page_sentence_counts = self.raw_page_sentences.iter().map(Vec::len).collect();
+        self.page_word_counts = self
+            .pages
+            .iter()
+            .map(|page| page.split_whitespace().count())
+            .collect();
+        self.sentence_anchor_maps = self
+            .raw_page_sentences
+            .iter()
+            .map(|sentences| (0..sentences.len()).map(Some).collect())
+            .collect();
+        self.current_page = self.current_page.min(page_count.saturating_sub(1));
+        self.highlighted_display_idx = Some(0).filter(|_| self.current_display_len() > 0);
+        self.highlighted_canonical_idx = self.highlighted_display_idx;
+        self.highlighted_audio_idx = None;
+        self.current_plan_page = None;
+        self.current_plan = None;
+        self.update_search_matches(normalizer);
+        Ok(())
+    }
+
     pub(crate) fn page_domain_len(&self) -> usize {
         if self.is_pdf_source() {
             self.pdf_page_count.unwrap_or(1).max(1)
@@ -3396,5 +3446,30 @@ mod tests {
         assert_eq!(session.highlighted_canonical_idx(), Some(3));
         assert_eq!(delta.playback.highlighted_canonical_idx, Some(3));
         assert_eq!(delta.playback.highlighted_sentence_idx, Some(1));
+    }
+
+    #[test]
+    fn native_pdf_text_adoption_preserves_native_page_domain_without_repagination() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = ReaderSession::from_pages_for_test(
+            PathBuf::from("/tmp/native-text.pdf"),
+            "native-text.pdf".to_string(),
+            vec![String::new()],
+            vec![Vec::new()],
+        );
+        session.set_pdf_page_count(2);
+        session.adopt_pdf_embedded_text(
+            vec![
+                "First native page. Search needle.".to_string(),
+                "Second native page for TTS.".to_string(),
+            ],
+            &normalizer,
+        ).expect("page-aligned native text should be adopted");
+        session.set_search_query("needle".to_string(), &normalizer);
+        let snapshot = session.snapshot(PanelState::default(), &normalizer);
+        assert_eq!(snapshot.total_pages, 2);
+        assert_eq!(snapshot.page_sentence_counts.len(), 2);
+        assert_eq!(snapshot.page_text, "First native page. Search needle.");
+        assert!(!snapshot.search_matches.is_empty());
     }
 }
