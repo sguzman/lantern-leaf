@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-14 after Goal 0016 A1 director review.
+Updated: 2026-09-14 after Goal 0016 A2 director acceptance and integration for focused real-desktop QA.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -81,23 +81,25 @@ The earlier `42866` open failure remains withdrawn as evidence of a LanternLeaf 
 
 ## Goal 0016 — starter library live-state continuity
 
-**A1 REJECTED BEFORE HUMAN QA — A2 CORRECTION READY**
+**A2 DIRECTOR-ACCEPTED + INTEGRATED — FOCUSED REAL-DESKTOP QA ACTIVE**
 
-A1 implemented the right overall direction: progressive 500-row Caliberate batches, partial/loading progress, stale-request reducer checks, and same-session Recents refresh after successful source persistence. Its branch and Windows CI completed successfully.
+Goal 0016 now has the intended progressive catalog and same-session Recents architecture plus the A2 ownership correction.
 
-Director review found three blocking ownership defects before physical QA:
+Caliberate pages are published progressively into starter state while the full provider walk continues in the background. Partial/loading counts are explicit, search/sort truthfully identifies loaded-row scope while incomplete, stale reducer events are rejected, and full catalog/cache completion remains a background terminal step.
 
-- final/duplicate catalog reconciliation can erase live `cover_thumbnail` state acquired by Goal 0010's asynchronous lazy-cover path;
-- progressive provider failure can be converted into apparent successful completion by the older stale-cache fallback path, hiding the refresh failure and replacing fresh partial state;
-- stale-request ownership stops at the reducer, so a second refresh can create another uncontrolled full catalog worker while the old worker continues provider traffic and can still race durable cache writes.
+After successful `SourceOpen` persistence, LanternLeaf refreshes Recents through the existing background listing path so the current process can display the newly opened source without restart.
 
-The A2 correction contract is appended to `docs/work/ready/0016-starter-library-live-state-continuity.md`; full rejection rationale is in `docs/work/reviews/0016-a1-director-rejection.md`. No human QA is authorized until A2 passes director review.
+A2 additionally preserves live lazy-cover state through metadata/final catalog reconciliation, keeps mid-refresh provider failure visibly failed/degraded instead of converting it to ordinary success through stale-cache fallback, and coalesces catalog refresh ownership so only one authoritative full catalog worker can run at a time.
+
+Implementation `602e8952d077796ba478bd28e0b0cfe2d1e6bb51` passed Windows baseline run `34832563563`, including both native-workspace and hosted-renderer-probe jobs. Goal terminal commit `ca94477c6280ae1e5c47a5b32d02947019a428c4` was fast-forward integrated to `main` before the director acceptance record.
+
+One focused physical Windows pass remains: early progressive rows/progress on a clean QA cache, cover continuity through full completion, immediate same-session Recents after open, durable Recents after restart, and representative EPUB/TTS regression. See `docs/work/reviews/0016-a2-director-acceptance.md`.
 
 ## Goal 0015 — highlight viewport-band reflow polish
 
 **QUEUED — MINOR POLISH**
 
-Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow without permanent highlight pinning or fighting user scrolling. Goal 0016 takes precedence because it is ordinary library/startup usability exposed by current physical QA.
+Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow without permanent highlight pinning or fighting user scrolling. Goal 0016 physical closure takes precedence.
 
 ## Windows Natural/HD voices
 
@@ -113,6 +115,6 @@ Current physical behavior is not accepted as a working PDF reader. Gate 3 is nat
 
 ## Workflow status
 
-**GOAL 0016 A2 CORRECTION READY**
+**HUMAN QA GATE ACTIVE — GOAL 0016 A2**
 
-Goal 0010 is closed. Goal 0016 remains the one ready implementation goal, now as A2 after director rejection of A1. Goal 0015 remains queued minor polish; Goal 0011 remains deferred; PDF work remains later unless the director/user reprioritizes after Goal 0016.
+Goal 0010 is closed. Goal 0016 A2 is director-accepted and integrated; no new Codex Goal is authorized right now. Goal 0015 remains queued minor polish; Goal 0011 remains deferred; PDF work remains later unless the director/user reprioritizes after Goal 0016 closure.
