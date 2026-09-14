@@ -361,10 +361,23 @@ impl LanternLeafApp {
                         session.pdf_search_allowed_for_preparation(),
                     )
                 })
-        })
+            })
             .unwrap_or_default();
         let cache_service = Arc::clone(&self.cache_service);
         let event_tx = self.effect_dispatcher.event_tx();
+        let panels = self
+            .runtime
+            .state_snapshot()
+            .session
+            .session
+            .map(|state| state.panels)
+            .unwrap_or_default();
+        let normalizer = self.normalizer.clone();
+        let snapshot_session = self
+            .effect_session
+            .lock()
+            .ok()
+            .and_then(|session| session.clone());
         std::thread::spawn(move || {
             let preparation_thread = format!("{:?}", std::thread::current().id());
             let prepared = match lanternleaf_core::session::ReaderSession::prepare_pdf_embedded_text(
@@ -400,6 +413,12 @@ impl LanternLeafApp {
             };
             // Durable cache IO is intentionally on this worker, never on egui.
             cache_service.persist_pdf_render_precomputed_state(&source_path, &cache_artifact);
+            let reader = snapshot_session.and_then(|mut session| {
+                session
+                    .apply_prepared_pdf_embedded_text(prepared.clone())
+                    .ok()
+                    .map(|_| session.snapshot(panels, &normalizer))
+            });
             let _ = event_tx.send(AppEvent::PdfEmbeddedTextPrepared(
                 PdfEmbeddedTextPreparedEvent {
                     request_id: event.request_id,
@@ -410,6 +429,7 @@ impl LanternLeafApp {
                     worker_thread: event.worker_thread,
                     preparation_thread,
                     prepared,
+                    reader,
                 },
             ));
         });
@@ -442,31 +462,21 @@ impl LanternLeafApp {
             return;
         }
         let prepared = std::mem::take(&mut event.prepared);
-        let normalizer = self.normalizer.clone();
+        let reader = event.reader.take();
         let mut adoption_error = None;
         let adopted = if let Ok(mut session) = self.effect_session.lock() {
             if let Some(session) = session.as_mut() {
                 match session.apply_prepared_pdf_embedded_text(prepared) {
-                    Ok(canonical_sentences) => {
-                        let panels = self
-                            .runtime
-                            .state_snapshot()
-                            .session
-                            .session
-                            .map(|state| state.panels)
-                            .unwrap_or_default();
-                        let snapshot = session.snapshot_with_prepared_canonical_sentences(
-                            panels,
-                            &normalizer,
-                            canonical_sentences,
-                        );
-                        self.runtime.apply_event(AppEvent::ReaderUpdated(
-                            lanternleaf_app::contracts::ReaderStateEvent {
-                                request_id: event.request_id,
-                                action: "pdf_embedded_text_adopted".to_string(),
-                                reader: snapshot,
-                            },
-                        ));
+                    Ok(_) => {
+                        if let Some(reader) = reader {
+                            self.runtime.apply_event(AppEvent::ReaderUpdated(
+                                lanternleaf_app::contracts::ReaderStateEvent {
+                                    request_id: event.request_id,
+                                    action: "pdf_embedded_text_adopted".to_string(),
+                                    reader,
+                                },
+                            ));
+                        }
                         true
                     }
                     Err(error) => {

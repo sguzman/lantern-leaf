@@ -142,9 +142,9 @@ impl NativePdfRenderer {
             .map(|page_index| {
                 Ok(pages
                     .get(
-                        page_index
-                            .try_into()
-                            .map_err(|_| NativePdfRendererError::PageIndexOutOfBounds(page_index))?,
+                        page_index.try_into().map_err(|_| {
+                            NativePdfRendererError::PageIndexOutOfBounds(page_index)
+                        })?,
                     )?
                     .text()?
                     .all())
@@ -971,15 +971,31 @@ impl PdfNativeService {
         source: PathBuf,
     ) -> mpsc::Receiver<Result<PdfMetadata, String>> {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
-        if self
-            .metadata_tx
-            .send(PdfMetadataRequest {
-                source,
-                reply: reply_tx,
-            })
-            .is_ok()
-        {
-            self.scheduler.1.notify_one();
+        match self.metadata_tx.try_send(PdfMetadataRequest {
+            source,
+            reply: reply_tx,
+        }) {
+            Ok(()) => self.scheduler.1.notify_one(),
+            Err(std::sync::mpsc::TrySendError::Full(mut request)) => {
+                let tx = self.metadata_tx.clone();
+                let scheduler = Arc::clone(&self.scheduler);
+                std::thread::spawn(move || {
+                    loop {
+                        match tx.try_send(request) {
+                            Ok(()) => {
+                                scheduler.1.notify_one();
+                                break;
+                            }
+                            Err(std::sync::mpsc::TrySendError::Full(next)) => {
+                                request = next;
+                                std::thread::sleep(std::time::Duration::from_millis(1));
+                            }
+                            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
+                        }
+                    }
+                });
+            }
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {}
         }
         reply_rx
     }
@@ -992,17 +1008,33 @@ impl PdfNativeService {
     ) -> mpsc::Receiver<Result<PdfEmbeddedText, String>> {
         self.text_generation.store(generation, Ordering::Release);
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
-        if self
-            .text_tx
-            .send(PdfTextRequest {
-                source,
-                generation,
-                revision,
-                reply: reply_tx,
-            })
-            .is_ok()
-        {
-            self.scheduler.1.notify_one();
+        match self.text_tx.try_send(PdfTextRequest {
+            source,
+            generation,
+            revision,
+            reply: reply_tx,
+        }) {
+            Ok(()) => self.scheduler.1.notify_one(),
+            Err(std::sync::mpsc::TrySendError::Full(mut request)) => {
+                let tx = self.text_tx.clone();
+                let scheduler = Arc::clone(&self.scheduler);
+                std::thread::spawn(move || {
+                    loop {
+                        match tx.try_send(request) {
+                            Ok(()) => {
+                                scheduler.1.notify_one();
+                                break;
+                            }
+                            Err(std::sync::mpsc::TrySendError::Full(next)) => {
+                                request = next;
+                                std::thread::sleep(std::time::Duration::from_millis(1));
+                            }
+                            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
+                        }
+                    }
+                });
+            }
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {}
         }
         reply_rx
     }

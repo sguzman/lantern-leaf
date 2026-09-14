@@ -128,6 +128,8 @@ impl ReaderSession {
             search_query: String::new(),
             search_matches: Vec::new(),
             selected_search_match: None,
+            pdf_sentence_page_hints: Vec::new(),
+            pdf_sentence_page_local_indices: Vec::new(),
             tts_state: TtsPlaybackState::Idle,
             current_plan_page: None,
             current_plan_display_start: 0,

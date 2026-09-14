@@ -472,6 +472,8 @@ struct LanternLeafApp {
     #[cfg(not(target_arch = "wasm32"))]
     pdf_text_rx: Option<mpsc::Receiver<Result<PdfEmbeddedText, String>>>,
     #[cfg(not(target_arch = "wasm32"))]
+    pdf_cache_rx: Option<mpsc::Receiver<Option<cache::PdfRenderPrecomputedState>>>,
+    #[cfg(not(target_arch = "wasm32"))]
     pdf_geometry_cache: Option<Arc<PdfViewportGeometry>>,
     #[cfg(not(target_arch = "wasm32"))]
     pdf_geometry_cache_key: Option<(u32, u32, usize, u64)>,
@@ -1068,6 +1070,7 @@ impl LanternLeafApp {
             pdf_pending_jump_page: None,
             pdf_metadata_rx: None,
             pdf_text_rx: None,
+            pdf_cache_rx: None,
             pdf_geometry_cache: None,
             pdf_geometry_cache_key: None,
             pdf_page_metadata_revision: 0,
@@ -1218,6 +1221,7 @@ impl LanternLeafApp {
             pdf_pending_jump_page: None,
             pdf_metadata_rx: None,
             pdf_text_rx: None,
+            pdf_cache_rx: None,
             pdf_geometry_cache: None,
             pdf_geometry_cache_key: None,
             pdf_page_metadata_revision: 0,
@@ -2891,18 +2895,32 @@ impl LanternLeafApp {
                                 .request_metadata(PathBuf::from(&snapshot.source_path)),
                         );
                         let source_identity = pdf_source_identity(&source_path);
-                        let cached_text = self
-                            .cache_service
-                            .load_pdf_render_precomputed_state(&source_path)
-                            .filter(|artifact| {
-                                artifact.version == PDF_NATIVE_TEXT_CACHE_VERSION
-                                    && artifact.extraction_revision
-                                        == PDF_NATIVE_TEXT_EXTRACTION_REVISION
-                                    && artifact.source == source_path.to_string_lossy()
-                                    && artifact.source_identity == source_identity
-                                    && artifact.page_texts.len() == snapshot.total_pages
-                            });
-                        if let Some(artifact) = cached_text {
+                        let (cache_tx, cache_rx) = mpsc::sync_channel(1);
+                        let cache_service = Arc::clone(&self.cache_service);
+                        let cache_path = source_path.clone();
+                        let expected_pages = snapshot.total_pages;
+                        std::thread::spawn(move || {
+                            let artifact = cache_service
+                                .load_pdf_render_precomputed_state(&cache_path)
+                                .filter(|artifact| {
+                                    artifact.version == PDF_NATIVE_TEXT_CACHE_VERSION
+                                        && artifact.extraction_revision
+                                            == PDF_NATIVE_TEXT_EXTRACTION_REVISION
+                                        && artifact.source == cache_path.to_string_lossy()
+                                        && artifact.source_identity == source_identity
+                                        && artifact.page_texts.len() == expected_pages
+                                });
+                            let _ = cache_tx.send(artifact);
+                        });
+                        self.pdf_cache_rx = Some(cache_rx);
+                        self.pdf_geometry_cache = None;
+                        self.pdf_geometry_cache_key = None;
+                    }
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(receiver) = self.pdf_cache_rx.as_ref() {
+                    match receiver.try_recv() {
+                        Ok(Some(artifact)) => {
                             let _ = self.effect_dispatcher.event_tx().send(
                                 lanternleaf_app::pipeline::AppEvent::PdfEmbeddedTextCompleted(
                                     lanternleaf_app::contracts::PdfEmbeddedTextEvent {
@@ -2912,22 +2930,24 @@ impl LanternLeafApp {
                                         revision: self.pdf_page_metadata_revision,
                                         page_count: artifact.page_texts.len(),
                                         page_texts: artifact.page_texts,
-                                        worker_thread: "cache".to_string(),
+                                        worker_thread: "cache-worker".to_string(),
                                         terminal: "success".to_string(),
                                         accepted: true,
                                         degraded_reason: None,
                                     },
                                 ),
                             );
-                        } else {
+                            self.pdf_cache_rx = None;
+                        }
+                        Ok(None) | Err(mpsc::TryRecvError::Disconnected) => {
+                            self.pdf_cache_rx = None;
                             self.pdf_text_rx = Some(self.pdf_worker.request_embedded_text(
                                 source_path.clone(),
                                 self.pdf_generation,
                                 self.pdf_page_metadata_revision,
                             ));
                         }
-                        self.pdf_geometry_cache = None;
-                        self.pdf_geometry_cache_key = None;
+                        Err(mpsc::TryRecvError::Empty) => {}
                     }
                 }
                 #[cfg(not(target_arch = "wasm32"))]

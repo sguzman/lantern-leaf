@@ -307,6 +307,8 @@ pub struct ReaderSession {
     search_query: String,
     search_matches: Vec<usize>,
     selected_search_match: Option<usize>,
+    pdf_sentence_page_hints: Vec<usize>,
+    pdf_sentence_page_local_indices: Vec<usize>,
     tts_state: TtsPlaybackState,
     current_plan_page: Option<usize>,
     current_plan_display_start: usize,
@@ -328,6 +330,7 @@ pub struct PreparedPdfEmbeddedText {
     pub page_word_counts: Vec<usize>,
     pub sentence_anchor_maps: Vec<Vec<Option<usize>>>,
     pub sentence_page_hints: Vec<usize>,
+    pub sentence_page_local_indices: Vec<usize>,
     pub search_matches: Vec<usize>,
 }
 
@@ -401,6 +404,8 @@ impl ReaderSession {
             search_query: String::new(),
             search_matches: Vec::new(),
             selected_search_match: None,
+            pdf_sentence_page_hints: Vec::new(),
+            pdf_sentence_page_local_indices: Vec::new(),
             tts_state: TtsPlaybackState::Paused,
             current_plan_page: None,
             current_plan_display_start: 0,
@@ -494,6 +499,10 @@ impl ReaderSession {
             .enumerate()
             .flat_map(|(page_idx, sentences)| std::iter::repeat_n(page_idx, sentences.len()))
             .collect::<Vec<_>>();
+        let sentence_page_local_indices = page_sentences
+            .iter()
+            .flat_map(|sentences| 0..sentences.len())
+            .collect::<Vec<_>>();
         let mut search_matches = Vec::new();
         let query = search_query.trim();
         if search_allowed && !query.is_empty() {
@@ -518,6 +527,7 @@ impl ReaderSession {
             page_word_counts,
             sentence_anchor_maps,
             sentence_page_hints,
+            sentence_page_local_indices,
             search_matches,
         })
     }
@@ -545,6 +555,8 @@ impl ReaderSession {
         self.page_sentence_counts = prepared.page_sentence_counts;
         self.page_word_counts = prepared.page_word_counts;
         self.sentence_anchor_maps = prepared.sentence_anchor_maps;
+        self.pdf_sentence_page_hints = prepared.sentence_page_hints;
+        self.pdf_sentence_page_local_indices = prepared.sentence_page_local_indices;
         self.current_page = self.current_page.min(page_count.saturating_sub(1));
         self.highlighted_display_idx = Some(0).filter(|_| self.current_display_len() > 0);
         self.highlighted_canonical_idx = self.highlighted_display_idx;
@@ -1385,39 +1397,26 @@ impl ReaderSession {
         panels: PanelState,
         normalizer: &normalizer::TextNormalizer,
     ) -> ReaderSnapshot {
-        self.snapshot_internal(panels, normalizer, None, true)
-    }
-
-    /// Publish a native-PDF enrichment snapshot using canonical sentences that
-    /// were prepared off-thread. The caller transfers ownership, so this path
-    /// does not flatten or clone the document on egui.
-    pub fn snapshot_with_prepared_canonical_sentences(
-        &mut self,
-        panels: PanelState,
-        normalizer: &normalizer::TextNormalizer,
-        canonical_sentences: Vec<String>,
-    ) -> ReaderSnapshot {
-        self.snapshot_internal(panels, normalizer, Some(canonical_sentences), false)
+        self.snapshot_internal(panels, normalizer)
     }
 
     fn snapshot_internal(
         &mut self,
         panels: PanelState,
         normalizer: &normalizer::TextNormalizer,
-        prepared_canonical_sentences: Option<Vec<String>>,
-        count_construction: bool,
     ) -> ReaderSnapshot {
-        if count_construction {
-            self.snapshot_constructions.fetch_add(1, Ordering::SeqCst);
-        }
+        self.snapshot_constructions.fetch_add(1, Ordering::SeqCst);
         let snapshot_started = Instant::now();
-        let sentences = self.current_sentences(normalizer);
-        let canonical_sentences = prepared_canonical_sentences.unwrap_or_else(|| {
-            self.raw_page_sentences
-                .iter()
-                .flat_map(|page| page.iter().cloned())
-                .collect()
-        });
+        let sentences = if self.is_pdf_source() && !self.raw_page_sentences.is_empty() {
+            self.raw_page_sentences.iter().flatten().cloned().collect()
+        } else {
+            self.current_sentences(normalizer)
+        };
+        let canonical_sentences = self
+            .raw_page_sentences
+            .iter()
+            .flat_map(|page| page.iter().cloned())
+            .collect();
         let sentence_anchor_map = self.current_sentence_anchor_map();
         let anchor_hits = sentence_anchor_map
             .iter()
@@ -1806,7 +1805,12 @@ impl ReaderSession {
             return;
         }
 
-        let sentences = self.current_sentences(normalizer);
+        let sentences: Vec<String> = if self.is_pdf_source() && !self.raw_page_sentences.is_empty()
+        {
+            self.raw_page_sentences.iter().flatten().cloned().collect()
+        } else {
+            self.current_sentences(normalizer)
+        };
         let regex = Regex::new(&query).ok();
         let query_lower = query.to_ascii_lowercase();
         for (idx, sentence) in sentences.iter().enumerate() {
@@ -1845,7 +1849,17 @@ impl ReaderSession {
         let Some(sentence_idx) = self.search_matches.get(selected_idx).copied() else {
             return;
         };
-        self.sentence_click(sentence_idx, normalizer);
+        if self.is_pdf_source() && sentence_idx < self.pdf_sentence_page_hints.len() {
+            self.current_page = self.pdf_sentence_page_hints[sentence_idx];
+            self.highlighted_display_idx = self
+                .pdf_sentence_page_local_indices
+                .get(sentence_idx)
+                .copied();
+            self.highlighted_canonical_idx = Some(sentence_idx);
+            self.reselect_search_match_for_current_highlight();
+        } else {
+            self.sentence_click(sentence_idx, normalizer);
+        }
     }
 
     fn stats(&mut self, _normalizer: &normalizer::TextNormalizer) -> ReaderStats {
@@ -2317,6 +2331,8 @@ mod tests {
             search_query: String::new(),
             search_matches: Vec::new(),
             selected_search_match: None,
+            pdf_sentence_page_hints: Vec::new(),
+            pdf_sentence_page_local_indices: Vec::new(),
             tts_state: TtsPlaybackState::Paused,
             current_plan_page: None,
             current_plan_display_start: 0,
@@ -2389,65 +2405,70 @@ mod tests {
         let path = unique_pdf_source_path();
         fs::write(&path, b"%PDF-1.7\nvisual-session-fixture").expect("write readable PDF");
         let normalizer = normalizer::TextNormalizer::default();
-        let mut session = load_session_for_source(
-            path.clone(),
-            &config::AppConfig::default(),
-            &normalizer,
-        )
-        .expect("render-only PDF session");
-        session.set_pdf_page_count(2);
+        let mut session =
+            load_session_for_source(path.clone(), &config::AppConfig::default(), &normalizer)
+                .expect("render-only PDF session");
+        session.set_pdf_page_count(3);
         let initial = session.snapshot(PanelState::default(), &normalizer);
         assert_eq!(
-            initial.pdf_runtime_policy.as_ref().map(|policy| policy.tts_allowed),
+            initial
+                .pdf_runtime_policy
+                .as_ref()
+                .map(|policy| policy.tts_allowed),
             Some(false)
         );
         assert_eq!(
-            initial.pdf_runtime_policy.as_ref().map(|policy| policy.search_policy),
+            initial
+                .pdf_runtime_policy
+                .as_ref()
+                .map(|policy| policy.search_policy),
             Some(crate::epub_loader::PdfSearchPolicy::Disabled)
         );
 
         let prepared = ReaderSession::prepare_pdf_embedded_text(
-            vec!["First native page.".to_string(), "Second native page.".to_string()],
+            vec![
+                "First native page.".to_string(),
+                "Unrelated middle page.".to_string(),
+                "Later native needle page.".to_string(),
+            ],
             "native",
             true,
         )
         .expect("prepared trusted text");
-        let canonical_sentences = session
+        session
             .apply_prepared_pdf_embedded_text(prepared)
             .expect("trusted text adoption");
-        let before_bounded_snapshot = session.snapshot_constructions.load(Ordering::SeqCst);
-        let adopted = session.snapshot_with_prepared_canonical_sentences(
-            PanelState::default(),
-            &normalizer,
-            canonical_sentences,
+        let adopted = session.snapshot(PanelState::default(), &normalizer);
+        let policy = adopted.pdf_runtime_policy.expect("promoted policy");
+        assert_eq!(
+            policy.text_only_policy,
+            crate::epub_loader::PdfTextOnlyPolicy::FullText
         );
         assert_eq!(
-            session.snapshot_constructions.load(Ordering::SeqCst),
-            before_bounded_snapshot,
-            "prepared PDF publication must not increment ordinary snapshot construction"
+            policy.search_policy,
+            crate::epub_loader::PdfSearchPolicy::FullText
         );
-        let policy = adopted.pdf_runtime_policy.expect("promoted policy");
-        assert_eq!(policy.text_only_policy, crate::epub_loader::PdfTextOnlyPolicy::FullText);
-        assert_eq!(policy.search_policy, crate::epub_loader::PdfSearchPolicy::FullText);
         assert!(policy.tts_allowed);
         assert!(!policy.pretty_sync_enabled);
         assert!(!policy.exact_sentence_sync);
-        assert_eq!(adopted.total_pages, 2);
-        assert_eq!(adopted.page_sentence_counts, vec![1, 1]);
+        assert_eq!(adopted.total_pages, 3);
+        assert_eq!(adopted.page_sentence_counts, vec![1, 1, 1]);
 
         session.toggle_text_only(&normalizer);
         assert!(session.text_only_mode);
         session.set_search_query("native".to_string(), &normalizer);
-        assert_eq!(session.search_matches, vec![0]);
+        assert_eq!(session.search_matches, vec![0, 2]);
+        session.search_next(&normalizer);
+        assert_eq!(
+            session.current_page, 2,
+            "search next must navigate to later-page provenance"
+        );
         session.tts_play(&normalizer);
         assert_eq!(session.tts_state, TtsPlaybackState::Playing);
 
-        let mut rejected = load_session_for_source(
-            path.clone(),
-            &config::AppConfig::default(),
-            &normalizer,
-        )
-        .expect("second render-only PDF session");
+        let mut rejected =
+            load_session_for_source(path.clone(), &config::AppConfig::default(), &normalizer)
+                .expect("second render-only PDF session");
         rejected.set_pdf_page_count(2);
         assert!(
             rejected

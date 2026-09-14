@@ -174,6 +174,9 @@ pub struct PdfEmbeddedTextPreparedEvent {
     pub worker_thread: String,
     pub preparation_thread: String,
     pub prepared: session::PreparedPdfEmbeddedText,
+    /// Built on the preparation worker. The egui commit only moves this
+    /// already-materialized snapshot into runtime; it must not construct one.
+    pub reader: Option<session::ReaderSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
