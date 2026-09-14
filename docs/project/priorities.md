@@ -16,14 +16,9 @@ Canonical reader/session semantics are backend-neutral; ordinary WinRT Windows v
 
 ## P2 — Non-PDF reader/TTS
 
-**GOALS 0008 + 0009 COMPLETE**
+**CURRENT TXT / MARKDOWN / HTML / EPUB PATH COMPLETE**
 
-- TXT/Markdown/HTML/EPUB ingestion/parity remains covered;
-- native pretty rendering is bounded and responsive;
-- pretty and text-only spoken-sentence highlight/follow are accepted on real EPUBs through Goal 0009;
-- ordinary Windows TTS no longer shows the prior duplicate-line refill bug;
-- app-level Zira preference and per-book voice overrides work;
-- TTS/audio normalization no longer owns text-only document presentation.
+The accepted non-PDF path includes ingestion/parity, responsive native pretty rendering, spoken-sentence highlight/follow, ordinary Windows TTS, layered voice configuration, presentation controls, inline imagery, and stable reflow anchoring.
 
 ## P2.5 — First-class Caliberate reader integration
 
@@ -35,7 +30,7 @@ Caliberate catalog/materialization/native EPUB/Windows TTS and synchronized pret
 
 **COMPLETE — AUTOMATED + REAL-DESKTOP ACCEPTED**
 
-A3 implementation `8975cfcb286508e19ac1a983b3e49d35b83d38cf` / Windows CI `34558938955` is final accepted evidence.
+Stable sustained playback, synchronized pretty/text-only highlighting, Zira app-default inheritance, per-book voice overrides, transactional Piper rejection/recovery, Close Book, and Safe Quit are accepted.
 
 ## P2.7 — Goal 0012: pretty presentation controls + inline images
 
@@ -53,33 +48,39 @@ Implementation `58ae9de` uses actual center width, a deterministic `1120px` two-
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-A2 established generalized semantic anchoring. A3 removed the prior violent multi-frame reflow excursions by retaining one stable viewport witness across edit bursts, using measured geometry for final reconciliation, keeping estimates only as bounded neighborhood guidance, preserving TTS-follow precedence, and yielding to explicit user scrolling.
-
-Real-desktop closure verifies calm horizontal-margin behavior, no more instant violent distant-area jerks, correct canonical highlight ownership, and physically working media max-width/max-height controls.
+A3 removed the prior violent multi-frame reflow excursions while preserving canonical highlight ownership, TTS-follow precedence, bounded virtualization, and explicit user-scroll authority.
 
 A minor residual under severe text-metric edits is split to Goal 0015 rather than keeping Goal 0014 open indefinitely.
 
 ## P2.10 — Goal 0010: Caliberate catalog covers + provider availability UX
 
-**A7 DIRECTOR-ACCEPTED + INTEGRATED — REAL-DESKTOP SIGNOFF ACTIVE**
+**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-The provider contract and lazy-cover architecture are now integrated in both repositories. Caliberate serves an explicit `/api/v1/books/{id}/cover` route, while LanternLeaf carries `has_cover`, schedules at most four visible-row requests, keeps request/disk/decode work off the GUI thread, and presents intentional loading/no-cover/provider-unavailable/fetch-error states.
+The provider contract and lazy-cover architecture are integrated in both repositories. Caliberate serves `/api/v1/books/{id}/cover`; LanternLeaf carries `has_cover`, bounds/coalesces visible-row work, keeps request/disk/decode work off the GUI thread, and handles per-book completion ownership safely.
 
-A6 established book-identified terminal cover outcomes. A7 removes the remaining global event-order assumption and makes cover ownership per book/request, so unrelated books may finish out of order and stale same-book completions cannot clobber newer retries. Automatic and manual `Ensure thumbnail` dispatch now share the same bounded/coalesced path.
-
-Implementation `54e22c172745171b084221a6f80465e3f6ffe77d` passed Windows baseline run `34793890003`; both native-workspace and hosted-renderer-probe jobs succeeded. LanternLeaf and Caliberate branches were fast-forward integrated to their respective `main` branches before physical QA.
-
-The only remaining gate is focused physical Windows validation: cover-before-open behavior, no permanent loading rows, intentional no-cover state, provider-down/restart recovery, bounded manual ensure, and preservation of representative Caliberate open/TTS behavior. See `docs/work/reviews/0010-a7-director-acceptance.md`.
+Real-desktop closure verified covers before first open, continued lazy cover population while scrolling, extremely fast representative EPUB opens, and preservation of EPUB TTS / pretty-reader / visual-settings behavior. See `docs/work/reviews/0010-a7-real-desktop-acceptance.md`.
 
 Do not resurrect the withdrawn fake materialization defect from the test where Caliberate itself was not running.
 
-## P2.11 — Goal 0015: highlight viewport-band reflow polish
+## P2.11 — Goal 0016: starter library live-state continuity
+
+**READY NEXT**
+
+This is the next ordinary-usability repair discovered by Goal 0010 physical QA.
+
+A cold/incompatible QA catalog cache currently leaves the starter shell looking empty while LanternLeaf fetches the real 105,570-book Caliberate catalog in the provider's supported 500-row pages. The provider is healthy and pages are arriving; LanternLeaf simply does not publish useful partial catalog state until the full walk finishes.
+
+Separately, opening a source persists its recent-source state correctly but does not refresh the in-memory Recents model. The entry appears after restart, proving the defect is same-session UI/state continuity rather than cache loss.
+
+Goal 0016 must add progressive/cache-first catalog presentation with truthful partial/loading state, stale-request rejection, usable rows after partial provider failure, and immediate same-session Recents refresh after successful opens. Heavy/blocking work remains off the render thread. Contract: `docs/work/ready/0016-starter-library-live-state-continuity.md`.
+
+## P2.12 — Goal 0015: highlight viewport-band reflow polish
 
 **QUEUED — MINOR POLISH**
 
-During severe letter-spacing/font-scale reflow, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. This is solvable viewport-coordination polish, not a canonical highlight correctness failure. Preserve a temporary transaction-scoped viewport band when practical without permanent highlight pinning or fighting user scroll.
+During severe letter-spacing/font-scale reflow, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. Preserve a temporary transaction-scoped viewport band when practical without permanent highlight pinning or fighting user scroll. This remains below Goal 0016.
 
-## P2.12 — Goal 0011: Windows Natural/HD voice capability
+## P2.13 — Goal 0011: Windows Natural/HD voice capability
 
 **DEFERRED BY USER — DORMANT UNTIL EXPLICITLY RE-AUTHORIZED**
 
@@ -87,14 +88,9 @@ Do not investigate, implement, or test Natural/Narrator/HD voices for now. Prese
 
 ## P3 — Native PDF visual stability
 
-**FUTURE CORE PRODUCT GATE; NOT CURRENTLY AUTHORIZED**
+**FUTURE CORE PRODUCT GATE**
 
-- page raster/render ownership;
-- texture/cache lifecycle;
-- viewport scheduling;
-- zoom/scroll stability;
-- bounded memory/performance on representative PDFs;
-- visual behavior independent of TTS.
+Current physical PDF viewing is not accepted. The next PDF phase must establish page raster/render ownership, texture/cache lifecycle, viewport scheduling, zoom/scroll stability, bounded memory/performance on representative PDFs, and visual behavior independent of TTS.
 
 ## P4 — PDF text/TTS/highlight synchronization
 
