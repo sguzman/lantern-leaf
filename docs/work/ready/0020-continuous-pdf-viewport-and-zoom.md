@@ -2,157 +2,144 @@
 
 ## Current state
 
-**REOPENED FOR A2 DIRECTOR CORRECTION — DO NOT REQUEST HUMAN QA YET**
+**REOPENED FOR A3 DIRECTOR CORRECTION — DO NOT REQUEST HUMAN QA YET**
 
-Goal 0019 / Gate 3 is physically accepted. Goal 0020 A1 introduced a continuous native page stack and broader manual zoom, but director review found that production viewport ownership, fit modes, zoom navigation/anchoring, geometry stability, long-document render-thread cost, and hosted validation do not yet satisfy the contract.
+Goal 0019 / Gate 3 remains physically accepted. Goal 0020 A1 established the continuous native page-stack direction. A2 substantially improved viewport ownership, stable native page metadata, cached geometry, horizontal navigation, fit calculations, focal anchoring, residency, and hosted validation.
 
-Read `docs/work/reviews/0020-a1-director-rejection.md` before implementation.
+Director review nevertheless found a deterministic production render-identity/lifecycle defect: the canonical scheduler and Reader presentation derive different raster widths/`PdfRenderKey`s, and zoom/fit generation changes are not guaranteed to force a new scheduler commit when visible page ranges stay unchanged.
 
-Continue the existing report lineage in `docs/work/reports/0020.md`.
+Read:
+
+- `docs/work/reviews/0020-a1-director-rejection.md`
+- `docs/work/reviews/0020-a2-director-rejection.md`
+- `docs/work/reports/0020.md`
+
+before implementation.
 
 ## Outcome remains unchanged
 
-Replace the temporary single-page PDF presentation with a smooth continuous-scrolling native PDF viewport.
+Deliver a smooth continuous-scrolling native PDF viewport with practical zoom, stable current-page identity, bounded/native rendering, explicit page jumps, horizontal access at high zoom, and stable semantic viewport position across zoom/resize.
 
-The user must be able to scroll naturally across page boundaries, stop with portions of adjacent pages visible, zoom without losing semantic viewport position, and retain explicit page identity/navigation. Rendering must remain native, bounded, immediate-mode, and responsive.
-
-This goal remains visual only. Do not expand into PDF TTS/highlight/OCR synchronization; Gate 4 follows after this viewport is trustworthy.
+This goal remains visual only. Do not implement PDF TTS/highlight/OCR/text-selection/Quack-check integration here.
 
 ## Architecture to preserve
 
-- Native Rust + `eframe`/`egui` + native/bundled Pdfium only. No WebView/pdf.js/browser DOM/Tauri production fallback.
-- Preserve the single authoritative `PdfNativeService` / single native Pdfium owner established in Goal 0019.
-- Keep Pdfium initialization, parse/open metadata, rasterization, bitmap conversion, and other heavy work off the egui/render thread.
-- Preserve source/generation/page/render-size stale identity and rejection.
-- Preserve bounded/current-priority worker scheduling and deterministic residency.
-- Preserve explicit native PDF page-domain ownership in `ReaderSession` and truthful page count/bookmark semantics.
-- Preserve visual-first PDF open independent of Quack-check/Python/Docling/OCR/transcript recovery.
-- Preserve A1's continuous-stack direction, broader manual zoom ladder, and pure deterministic viewport-geometry helpers where they remain valid.
+Preserve all accepted Goal 0019 and A1/A2 architecture:
 
-## A2 blocking correction
+- native Rust + `eframe`/`egui` + bundled/native Pdfium only;
+- one authoritative `PdfNativeService` / one native Pdfium owner;
+- all Pdfium/open/metadata/raster/decode/heavy PDF work off the egui/render thread;
+- visual-first PDF open independent of transcript/OCR recovery;
+- explicit native PDF page-domain ownership;
+- continuous immediate-mode page stack;
+- actual continuous visible pages published to the canonical viewport planner;
+- native page dimensions/aspect ratios obtained off-thread before layout depends on them;
+- cached/indexed long-document geometry with bounded/logarithmic ordinary visibility lookup;
+- horizontal + vertical egui scrolling;
+- semantic page/intra-page viewport witness capture/restore;
+- broad 25–400% manual zoom ladder plus Fit width, Fit page, and Reset/100%;
+- source/generation/page/render-spec stale safety;
+- deterministic visible-page residency protection;
+- hosted Windows validation before terminal signaling.
 
-### 1. One authoritative continuous viewport lifecycle
+## A3 blocking correction
 
-A1 still feeds `visible_page_indexes = vec![snapshot.current_page]` into the canonical PDF viewport planner, while the Reader independently computes a multi-page visible set inside `show_viewport()` and submits ad-hoc render requests.
+### 1. One canonical render specification
 
-A2 must remove this split ownership.
+Planning, scheduling, native raster requests, texture/cache identity, and Reader presentation must use the **same** production render specification.
 
-The actual continuous viewport must publish the authoritative visible-page set and bounded overscan set into the existing PDF viewport planning lifecycle. That same plan must drive:
+Do not independently calculate scheduler raster width from `pdf_viewport_width * scale` while the Reader independently calculates lookup width from `PDF_BASE_PAGE_WIDTH * effective_zoom`.
 
-- current/visible/near-visible render priority;
-- superseding stale queued raster work;
-- texture keep/pin/eviction decisions;
-- diagnostics/viewport ownership state.
+Introduce or reuse one canonical value/object for the effective raster/presentation specification, including at least what is necessary to derive the exact `PdfRenderKey`:
 
-All actually visible pages must be protected from residency eviction. Do not maintain a second independent UI-loop scheduling policy.
+- source;
+- generation/render-spec revision;
+- page index;
+- effective logical zoom/mode where needed;
+- final quantized raster width/height.
 
-### 2. Real production fit modes
+The authoritative scheduler and presentation lookup must agree byte-for-byte on key identity.
 
-A1 production currently hard-codes Fit width to `1.0` and Fit page to `0.72` even though a viewport/page-dimension-based fit helper exists.
+Manual 100%, manual high zoom, Fit width, and Fit page must all request and consume matching raster keys.
 
-A2 must make production Fit width and Fit page derive from the actual viewport dimensions and stable target-page geometry. They must respond correctly to resize/side-panel changes and mixed portrait/landscape pages.
+### 2. Render-spec changes must force authoritative replanning
 
-The toolbar must display truthful zoom state: manual percentage or clearly named fit mode plus effective percentage where useful.
+A stationary viewport must still rerender when its render specification changes.
 
-Reset/100% must remain distinct from Fit width/page.
+Viewport commit identity must therefore account for at least one explicit geometry/render-spec revision or equivalent identity covering:
 
-### 3. Practical horizontal navigation above 100%
+- `pdf_generation`;
+- manual zoom changes;
+- Reset/100%;
+- Fit width / Fit page mode changes;
+- effective fit scale changes after resize/side-panel changes;
+- quantized raster-size changes;
+- stable native page-metadata geometry revision when it affects layout/render spec.
 
-At manual zoom above the viewport width, the user must be able to reach the entire page horizontally while continuing to scroll vertically across pages.
+Do not allow `should_commit_viewport_update()` to suppress necessary work merely because visible and overscan page ranges are unchanged.
 
-Do not leave oversized content clipped inside a vertical-only scroll surface. Use immediate-mode egui scrolling/panning semantics; do not introduce a retained/browser surface.
+A render-spec change must supersede obsolete queued work and issue bounded new authoritative requests for the currently visible/near-visible pages.
 
-### 4. Semantic focal anchoring for zoom and resize
+### 3. Presentation during replacement
 
-Before a zoom-mode/manual-zoom/resize geometry transition, capture a semantic PDF viewport witness such as:
+The UI must remain immediate while replacement rasters are generated.
 
-- page identity;
-- intra-page vertical fraction (and horizontal fraction when relevant);
-- viewport anchor fraction.
+It is acceptable to temporarily scale a compatible old texture or show a bounded placeholder, but:
 
-After geometry changes, restore that witness within bounded tolerance. Zooming in the middle of page N must not throw the user to another distant page or page top.
+- the UI must not freeze;
+- stale generation/spec completions must not become authoritative;
+- stationary zoom/fit changes must converge automatically without requiring the user to scroll to wake the scheduler;
+- successfully completed authoritative renders must be discoverable by the exact presentation lookup key.
 
-Explicit page jumps retain priority over passive focal restoration.
+### 4. Preserve A2 continuous viewport behavior
 
-### 5. Stable page geometry independent of raster completion
+Do not regress:
 
-Do not derive layout-critical aspect ratio from a texture only after raster completion.
+- continuous crossing of page boundaries;
+- partial adjacent pages;
+- visible-page/overscan ownership;
+- current-page derivation;
+- explicit Next/Previous/SetPage jump semantics;
+- stable native metadata geometry;
+- mixed portrait/landscape aspect ratios;
+- long-document cached/indexed geometry;
+- horizontal high-zoom access;
+- focal witness restoration;
+- visible-page pinning/residency;
+- source switching stale safety;
+- Goal 0019 native service/page-domain behavior;
+- EPUB/TTS behavior.
 
-A2 must obtain stable page dimensions/aspect ratios from the existing off-thread native PDF owner/service or another bounded native metadata path. Texture arrival/resolution replacement must not change the page's logical slot dimensions.
-
-Mixed portrait/landscape/page-size documents must therefore have stable downstream offsets before/independent of raster completion.
-
-### 6. Bounded long-document geometry work
-
-Do not rebuild `0..total_pages` page-geometry vectors and all slot positions every egui frame.
-
-Cache/index document geometry and invalidate it only when source/native page metadata/zoom/layout geometry changes. Ordinary scrolling/repaint should be bounded or logarithmic with document length, not O(total-pages) per frame.
-
-A full prefix/index table may exist if built/rebuilt off the hot frame path; visibility lookup should avoid scanning every page on every repaint.
-
-### 7. Required hosted validation before terminal signaling
-
-A1 terminalized without the required hosted Windows workflow actually attached/passed.
-
-A2 must not move to terminal/done or signal Goal achieved until required hosted `native-workspace` and `hosted-renderer-probe` jobs have completed successfully for the implementation lineage.
-
-## Required presentation behavior
-
-### Continuous virtualized page stack
-
-Present pages vertically in document order inside one continuous scroll surface. More than one page may be partially visible. Crossing page boundaries must require only ordinary scrolling.
-
-Do not instantiate/render all pages of a large document. Visible pages are highest priority; bounded near-visible overscan may be prefetched; far pages must consume neither raster work nor texture residency.
-
-### Canonical current-page ownership
-
-`ReaderSession.current_page` remains meaningful and is derived deterministically from the viewport with hysteresis/stability near boundaries.
-
-Prev/Next/SetPage remain explicit jumps within the continuous document rather than page swaps.
-
-Bookmarks preserve native page identity and, where practical, a bounded intra-page viewport anchor.
-
-### Smooth geometry and resize
-
-Window resize, side-panel changes, placeholder-to-texture replacement, and resolution upgrades must not cause distant jumps.
-
-Portrait, landscape, and mixed-size pages must preserve aspect ratio and stable stack geometry.
-
-### Practical zoom
-
-Support at least Fit width, Fit page, Reset/100%, and a substantially wider bounded manual range than the old 75–175% scaffold.
-
-Logical zoom must respond immediately. Correct-resolution raster can arrive asynchronously without changing document identity or semantic viewport position.
-
-### Immediate-mode interaction quality
-
-Scrolling, horizontal panning when needed, zoom input, resize, and jumps must feel immediate while workers catch up. The UI thread must never wait synchronously for Pdfium.
-
-## Deterministic acceptance coverage
+## Required deterministic acceptance coverage
 
 Add production-path tests proving at minimum:
 
-1. actual continuous viewport visible pages feed the authoritative PDF plan/residency policy;
-2. a boundary position exposes portions of adjacent pages;
-3. visible textures remain pinned under over-capacity pressure;
-4. current-page derivation is stable under tiny boundary movement;
-5. Next/Previous/SetPage resolve to continuous-scroll jump targets;
-6. rapid viewport movement prioritizes newest visible pages and supersedes obsolete queued work;
-7. stable native page metadata supplies portrait/landscape/mixed page geometry before raster completion;
-8. long-document geometry/visibility lookup avoids O(total-pages) reconstruction/scanning on ordinary repaint;
-9. Fit width and Fit page use real viewport/page dimensions in the production path;
-10. manual zoom up to the chosen upper bound remains horizontally navigable;
-11. zoom/fit/resize preserve an intra-page semantic focal anchor within bounded tolerance;
-12. displayed zoom/mode state is truthful;
-13. source switching cannot display stale prior-document imagery;
-14. Goal 0019 native service/page-domain regressions remain green;
-15. representative EPUB/TTS behavior remains green.
+1. scheduler request keys exactly match Reader lookup/presentation keys at manual 100%;
+2. the same key agreement holds at high manual zoom;
+3. the same key agreement holds for Fit width;
+4. the same key agreement holds for Fit page;
+5. changing manual zoom while visible page ranges stay unchanged still commits/schedules the new render specification;
+6. Reset/100% while stationary schedules replacement rasters;
+7. Fit width / Fit page while stationary schedule replacement rasters;
+8. resize that changes effective fit scale schedules the new raster spec;
+9. a completed authoritative raster is found by the presentation lookup key;
+10. stationary zoom cannot leave the viewport permanently blank;
+11. rapid movement still prioritizes newest visible pages and supersedes stale queued work;
+12. visible pages remain pinned under residency pressure;
+13. source/generation/spec stale results remain rejected;
+14. continuous geometry/visibility/current-page/witness/mixed-page/long-document tests remain green;
+15. Goal 0019 native lifecycle/page-domain tests and representative EPUB/TTS regressions remain green.
+
+## Hosted validation
+
+Do not terminalize or signal Goal achieved until the required hosted Windows workflow has completed successfully for the A3 implementation lineage, including both:
+
+- `native-workspace`;
+- `hosted-renderer-probe`.
 
 ## Physical QA after director acceptance
 
-Use at least one long real PDF and, if available, a mixed/landscape document.
-
-Verify continuous page crossing, partial adjacent pages, rapid long-distance scrolling, page jumps, Fit width/Fit page/100%/broad manual zoom, horizontal access at high zoom, zoom/resize anchor stability, fast return to recently viewed pages, stale-safe source switching, and one representative EPUB/TTS regression.
+After A3 source/CI acceptance, physical QA should verify continuous scrolling, adjacent-page visibility, rapid navigation, Fit width/Fit page/100%, broad manual zoom, horizontal high-zoom access, focal stability, resize stability, cache responsiveness, stale-safe source switching, and representative EPUB/TTS behavior.
 
 ## Explicit non-goals
 
@@ -161,7 +148,7 @@ Do not implement PDF TTS playback correctness, sentence/text-layer geometry, spo
 ## Repository handoff
 
 - Repository goal: `0020-continuous-pdf-viewport-and-zoom`.
-- This is an A2 correction under the same repository goal ID.
+- This is A3 under the same repository goal ID.
 - Start/recreate the Codex branch from current director `main` following normal workflow.
-- Move this file `ready -> active`, re-arm the watcher, preserve accepted A1 work, implement A2, update `docs/work/reports/0020.md`, validate, wait for hosted Windows success, terminalize to `done/`, push before signaling, and restore the shared checkout to `main`.
+- Move this file `ready -> active`, re-arm the watcher, preserve accepted A1/A2 work, implement A3, update `docs/work/reports/0020.md`, validate, wait for hosted Windows success, terminalize to `done/`, push before signaling, and restore the shared checkout to `main`.
 - Do not request human QA. The director reviews first.
