@@ -42,77 +42,92 @@ Goal 0012 is closed with accepted presentation controls, inline imagery, geometr
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-Implementation `58ae9de` uses actual center width, a deterministic `1120px` two-column breakpoint, one-column fallback below it, bounded starter groups, wrapped controls, and bounded long-content presentation while preserving Calibre virtualization and off-render-thread work.
+Responsive two-column/one-column behavior and containment are accepted.
 
 ## P2.9 — Goal 0014: reader presentation-geometry anchor stability
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-A3 removed the prior violent multi-frame reflow excursions while preserving canonical highlight ownership, TTS-follow precedence, bounded virtualization, and explicit user-scroll authority.
-
-A minor residual under severe text-metric edits is split to Goal 0015 rather than keeping Goal 0014 open indefinitely.
+Violent multi-frame reflow excursions are fixed. Minor severe-reflow highlight-band polish remains Goal 0015.
 
 ## P2.10 — Goal 0010: Caliberate catalog covers + provider availability UX
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-The provider contract and lazy-cover architecture are integrated in both repositories. Caliberate serves `/api/v1/books/{id}/cover`; LanternLeaf carries `has_cover`, bounds/coalesces visible-row work, keeps request/disk/decode work off the GUI thread, and handles per-book completion ownership safely.
-
-Real-desktop closure verified covers before first open, continued lazy cover population while scrolling, extremely fast representative EPUB opens, and preservation of EPUB TTS / pretty-reader / visual-settings behavior. Do not resurrect the withdrawn materialization defect from the test where Caliberate itself was not running.
+The explicit provider contract and lazy-cover path are integrated and physically verified.
 
 ## P2.11 — Goal 0016: starter library live-state continuity
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-The real 105,570-book Caliberate catalog now publishes progressively into usable starter state while its full walk continues off-thread, exposes truthful loaded/total progress, preserves live covers through final reconciliation, and refreshes Recents in the same process after successful source persistence.
-
-Physical closure verified durable Recents after restart, immediate warm EPUB reopen, and preserved EPUB TTS/visual behavior. See `docs/work/reviews/0016-a2-real-desktop-acceptance.md`.
+The real 105,570-book catalog publishes progressively, preserves live cover state, and refreshes/persists Recents correctly.
 
 ## P2.12 — Goal 0015: highlight viewport-band reflow polish
 
 **QUEUED — MINOR POLISH**
 
-During severe text-metric/media-related reflow, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. Preserve a temporary transaction-scoped viewport band without permanent highlight pinning or fighting user scroll.
+Preserve a temporary viewport band for an already-visible canonical highlight during severe reflow without fighting user scroll.
 
 ## P2.13 — Goal 0017: progressive cover backpressure + cached-hydration scaling
 
 **QUEUED — MINOR POLISH**
 
-Normal provider pressure during a huge cold catalog walk should not present as repeated scary cover failures or immediate retry churn. Warm startup must also stop repeatedly scanning roughly the entire cached catalog merely to rediscover already-cached thumbnails. Add bounded transient backoff/retry, lazy or indexed cached-thumbnail association, theme-aware readable errors, and bounded logging/cache rewrites.
+Stop repeated roughly-O(total-books) cached-thumbnail rediscovery and improve transient provider pressure behavior/logging.
 
 ## P2.14 — Goal 0018: Windows QA bootstrap idempotence
 
 **QUEUED — INFRASTRUCTURE**
 
-Repeated repo-native QA runs in one PowerShell process must not accumulate Visual Studio environment state until `VsDevCmd.bat` fails with `The input line is too long`.
+Repeated repo-native QA runs in one PowerShell process must not accumulate Visual Studio environment state until `VsDevCmd.bat` fails.
 
 ## P2.15 — Goal 0011: Windows Natural/HD voice capability
 
 **DEFERRED BY USER — DORMANT UNTIL EXPLICITLY RE-AUTHORIZED**
 
-Do not investigate, implement, or test Natural/Narrator/HD voices for now. Preserve the existing ordinary Windows voice backend and current Zira/per-book override behavior.
+Do not investigate or test Natural/Narrator/HD voices for now.
 
 ## P3 — Goal 0019: native PDF visual stability
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-LanternLeaf now has a functioning native Pdfium/egui visual PDF reader. Physical Windows QA verified a real 638-page Caliberate PDF opening through the native Reader, truthful native page-domain ownership, working Next/Previous navigation, aggressive ordinary browsing, and no representative EPUB regression.
-
-The accepted foundation includes one authoritative `PdfNativeService` / one native Pdfium owner; visual-first open independent of Quack-check/transcript/OCR; all native/heavy PDF work off the egui thread; stale-safe source/page/zoom identity; current-priority rendering; bounded texture residency; real logical zoom; and terminal failure/panic behavior.
+LanternLeaf has a functioning native Pdfium/egui visual PDF reader with one authoritative process-wide Pdfium owner and visual open independent of text/OCR recovery.
 
 ## P3.1 — Goal 0020: continuous native PDF viewport + practical zoom
 
+**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
+
+Physical QA verified continuous adjacent-page scrolling, extremely responsive rapid movement, responsive page identity, continuous-stack Previous/Next jumps, Fit Width/Fit Page/Reset, manual 25–400% zoom, high-zoom horizontal access, approximate focal preservation, and no representative EPUB/TTS regression.
+
+## P3.2 — Goal 0021: fit-to-manual zoom transition polish
+
+**QUEUED — MINOR POLISH**
+
+After Fit Width/Fit Page, `+/-` should step from the current effective fit percentage rather than the remembered prior manual level.
+
+## P4 — Goal 0022: trustworthy native PDF embedded text + TTS
+
 **READY NEXT — CURRENT SUBSTANTIVE PRODUCT PRIORITY**
 
-Replace the temporary one-page-at-a-time PDF presentation with a continuous virtualized page stack while preserving explicit native page identity/navigation and the accepted Goal-0019 architecture.
+Add asynchronous page-aligned embedded-text extraction through the existing `PdfNativeService`, conservatively promote only trustworthy native text into canonical PDF session ownership, preserve native page identity, and enable Text-only/search/ordinary Windows TTS through the existing first-sample pipeline.
 
-Required UX includes continuous page-boundary scrolling, partial adjacent pages, bounded visible/overscan rendering, stable current-page derivation, Next/Previous as viewport jumps, Fit width, Fit page, Reset/100%, substantially broader bounded manual zoom, stable focal anchoring during zoom/resize, and immediate-mode responsiveness on long documents.
+Hard exclusions for this goal: Quack-check, Python, Docling, OCR, exact sentence overlays, and hostile-PDF recovery.
 
-Do not bundle PDF TTS/highlight/OCR synchronization into this goal. The authoritative contract is `docs/work/ready/0020-continuous-pdf-viewport-and-zoom.md`.
+The visual reader must remain usable before, during, and after text enrichment failure.
 
-## P4 — PDF text/TTS/highlight synchronization
+Authoritative contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
+Architecture boundary: `docs/architecture/pdf-text-recovery-boundary-2026-09.md`.
 
-After Goal 0020: canonical sentence/page mapping, geometry confidence/overlays, first-sample playback identity, auto-follow/jump behavior, OCR/degraded modes, Quack-check hostile-PDF recovery integration, and representative regression corpus.
+## P4.1 — Native PDF sentence geometry/highlight/follow
+
+**NEXT AFTER GOAL 0022**
+
+For accepted embedded-text PDFs, build native sentence -> page-relative geometry, spoken overlays, continuous-viewport auto-follow/jump semantics, and explicit confidence downgrade behavior without changing canonical text ownership.
+
+## P4.2 — Hostile/mixed PDF recovery
+
+**AFTER NATIVE TRUSTWORTHY PATH IS PHYSICALLY ACCEPTED**
+
+Only then harden a typed recovery-provider boundary for mixed/scanned/hostile PDFs. Quack-check/Docling/OCR may be reused or rewritten behind that boundary. They remain optional subordinate background work and can never block visual PDF open.
 
 ## P5 — Format expansion / ingestion hardening
 
