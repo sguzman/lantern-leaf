@@ -55,6 +55,18 @@ pub(super) fn load_books_with_cancel(
     force_refresh: bool,
     cancel: Option<&CancellationToken>,
 ) -> Result<Vec<CalibreBook>> {
+    load_books_with_progress(config, force_refresh, cancel, |_, _, _| {})
+}
+
+pub(super) fn load_books_with_progress<F>(
+    config: &CalibreConfig,
+    force_refresh: bool,
+    cancel: Option<&CancellationToken>,
+    mut on_batch: F,
+) -> Result<Vec<CalibreBook>>
+where
+    F: FnMut(Vec<CalibreBook>, usize, Option<usize>),
+{
     ensure_not_cancelled(cancel, "calibre_load_start")?;
     if !config.enabled {
         warn!("Calibre integration is disabled in config; returning empty catalogue");
@@ -88,6 +100,7 @@ pub(super) fn load_books_with_cancel(
             if changed {
                 let _ = write_cache(config, &signature, &cached);
             }
+            on_batch(cached.clone(), cached.len(), Some(cached.len()));
             info!(
                 book_count = cached.len(),
                 elapsed_ms = started.elapsed().as_millis(),
@@ -98,7 +111,7 @@ pub(super) fn load_books_with_cancel(
         info!("Calibre cache missing/incompatible; fetching from source via HTTP API");
     }
 
-    let mut books = match fetch_books(config, cancel) {
+    let mut books = match fetch_books_with_progress(config, cancel, &mut on_batch) {
         Ok(books) => books,
         Err(err) => {
             ensure_not_cancelled(cancel, "after_fetch_books_failed")?;
@@ -119,6 +132,7 @@ pub(super) fn load_books_with_cancel(
                 if changed {
                     let _ = write_cache(config, &signature, &cached);
                 }
+                on_batch(cached.clone(), cached.len(), Some(cached.len()));
                 info!(
                     book_count = cached.len(),
                     elapsed_ms = started.elapsed().as_millis(),
@@ -159,9 +173,27 @@ fn fetch_books(
     config: &CalibreConfig,
     cancel: Option<&CancellationToken>,
 ) -> Result<Vec<CalibreBook>> {
+    fetch_books_with_progress(config, cancel, &mut |_, _, _| {})
+}
+
+fn fetch_books_with_progress<F>(
+    config: &CalibreConfig,
+    cancel: Option<&CancellationToken>,
+    on_batch: &mut F,
+) -> Result<Vec<CalibreBook>>
+where
+    F: FnMut(Vec<CalibreBook>, usize, Option<usize>),
+{
     match config.provider {
-        CalibreProvider::Caliberate => super::caliberate::fetch_books(config, cancel),
-        CalibreProvider::Calibre => fetch_legacy_books(config, cancel),
+        CalibreProvider::Caliberate => {
+            super::caliberate::fetch_books_with_progress(config, cancel, on_batch)
+        }
+        CalibreProvider::Calibre => {
+            let books = fetch_legacy_books(config, cancel)?;
+            let count = books.len();
+            on_batch(books.clone(), count, Some(count));
+            Ok(books)
+        }
     }
 }
 

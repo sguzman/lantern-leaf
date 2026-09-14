@@ -221,7 +221,20 @@ impl LanternLeafApp {
                 }
                 ui.checkbox(&mut self.starter_calibre_force_refresh, "Force refresh");
                 if model.loading_calibre || model.operations.calibre_load {
-                    ui.label("Loading…");
+                    if let Some(total) = model.calibre_catalog_total {
+                        ui.label(format!(
+                            "Loading catalog… {} / {}",
+                            model.calibre_catalog_loaded_count, total
+                        ));
+                    } else {
+                        ui.label(format!(
+                            "Loading catalog… {} loaded",
+                            model.calibre_catalog_loaded_count
+                        ));
+                    }
+                }
+                if let Some(error) = model.calibre_catalog_error {
+                    ui.colored_label(egui::Color32::YELLOW, format!("Catalog refresh: {error}"));
                 }
                 if model.operations.source_open {
                     ui.label("Opening book…");
@@ -248,6 +261,13 @@ impl LanternLeafApp {
             if model.calibre_books.is_empty() && !model.loading_calibre {
                 ui.label("No Calibre books loaded.");
                 return;
+            }
+            if model.calibre_books.is_empty() && model.loading_calibre {
+                ui.label("Waiting for the first catalog page…");
+                return;
+            }
+            if !model.calibre_catalog_complete && !model.calibre_books.is_empty() {
+                ui.label("Partial catalog: search and sort currently cover loaded rows.");
             }
             for event in model.calibre_cover_events {
                 if !self

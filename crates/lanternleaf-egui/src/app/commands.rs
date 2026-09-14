@@ -20,6 +20,17 @@ pub(crate) fn starter_startup_commands() -> Vec<AppCommand> {
     ]
 }
 
+fn refresh_recents_after_persistence(event: &AppEvent) -> bool {
+    matches!(
+        event,
+        AppEvent::PersistenceFlushed {
+            trigger: PersistenceTrigger::SourceOpen,
+            outcome: PersistenceOutcome::Completed,
+            ..
+        }
+    )
+}
+
 impl LanternLeafApp {
     pub(crate) fn execute_startup_commands(&mut self) {
         for command in starter_startup_commands() {
@@ -212,6 +223,10 @@ impl LanternLeafApp {
         for event in self.effect_dispatcher.drain_events() {
             trace!(event = ?event, "Applying effect event");
             match &event {
+                _ if refresh_recents_after_persistence(&event) => {
+                    trace!("Refreshing starter Recents after successful source persistence");
+                    self.execute_command(AppCommand::RefreshRecents { limit: Some(30) });
+                }
                 AppEvent::PersistenceFlushed {
                     trigger: PersistenceTrigger::SessionClose,
                     outcome: PersistenceOutcome::Completed | PersistenceOutcome::SkippedNoSession,
@@ -315,5 +330,30 @@ mod startup_tests {
                 force_refresh: false
             }
         )));
+    }
+
+    #[test]
+    fn recents_refresh_is_triggered_only_after_successful_source_persistence() {
+        assert!(refresh_recents_after_persistence(
+            &AppEvent::PersistenceFlushed {
+                request_id: 7,
+                trigger: PersistenceTrigger::SourceOpen,
+                outcome: PersistenceOutcome::Completed,
+            }
+        ));
+        assert!(!refresh_recents_after_persistence(
+            &AppEvent::PersistenceFlushed {
+                request_id: 7,
+                trigger: PersistenceTrigger::SourceOpen,
+                outcome: PersistenceOutcome::Failed,
+            }
+        ));
+        assert!(!refresh_recents_after_persistence(
+            &AppEvent::PersistenceFlushed {
+                request_id: 7,
+                trigger: PersistenceTrigger::SessionClose,
+                outcome: PersistenceOutcome::Completed,
+            }
+        ));
     }
 }

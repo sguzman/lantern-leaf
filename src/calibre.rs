@@ -296,6 +296,18 @@ pub fn load_books_with_cancel(
     catalog::load_books_with_cancel(config, force_refresh, cancel)
 }
 
+pub fn load_books_with_progress<F>(
+    config: &CalibreConfig,
+    force_refresh: bool,
+    cancel: Option<&crate::cancellation::CancellationToken>,
+    on_batch: F,
+) -> Result<Vec<CalibreBook>>
+where
+    F: FnMut(Vec<CalibreBook>, usize, Option<usize>),
+{
+    catalog::load_books_with_progress(config, force_refresh, cancel, on_batch)
+}
+
 pub fn materialize_book_path(config: &CalibreConfig, book: &CalibreBook) -> Result<PathBuf> {
     catalog::materialize_book_path(config, book)
 }

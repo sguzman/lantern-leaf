@@ -110,6 +110,8 @@ pub struct CalibreLoadEvent {
     pub request_id: u64,
     pub phase: String,
     pub count: Option<usize>,
+    #[ts(type = "number | null")]
+    pub total: Option<usize>,
     pub message: Option<String>,
 }
 

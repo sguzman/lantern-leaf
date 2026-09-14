@@ -150,12 +150,17 @@ pub struct TransientControls {
 pub struct StarterState {
     pub recents: Vec<RecentBook>,
     pub calibre_books: Arc<Vec<CalibreBookDto>>,
+    pub calibre_catalog_index: Arc<HashMap<u64, usize>>,
     pub browser_tabs_health: Option<BrowserTabsHealth>,
     pub browser_tabs_windows: Vec<BrowserTabsWindow>,
     pub browser_tabs_tabs: Vec<BrowserTabsTab>,
     pub loading_recents: bool,
     pub loading_calibre: bool,
     pub loading_browser_tabs: bool,
+    pub calibre_catalog_complete: bool,
+    pub calibre_catalog_loaded_count: usize,
+    pub calibre_catalog_total: Option<usize>,
+    pub calibre_catalog_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -401,7 +406,53 @@ impl AppState {
     }
 
     pub fn set_starter_calibre_books(&mut self, calibre_books: Vec<CalibreBookDto>) {
+        self.starter.calibre_catalog_index = Arc::new(
+            calibre_books
+                .iter()
+                .enumerate()
+                .map(|(index, book)| (book.id, index))
+                .collect(),
+        );
         self.starter.calibre_books = Arc::new(calibre_books);
+    }
+
+    pub fn merge_starter_calibre_batch(&mut self, batch: Vec<CalibreBookDto>) {
+        let books = Arc::make_mut(&mut self.starter.calibre_books);
+        let index = Arc::make_mut(&mut self.starter.calibre_catalog_index);
+        for book in batch {
+            if let Some(&book_index) = index.get(&book.id) {
+                books[book_index] = book;
+            } else {
+                let book_index = books.len();
+                index.insert(book.id, book_index);
+                books.push(book);
+            }
+        }
+    }
+
+    pub fn set_calibre_catalog_complete(
+        &mut self,
+        _request_id: u64,
+        complete: bool,
+        loaded_count: Option<usize>,
+        total: Option<usize>,
+    ) {
+        self.starter.calibre_catalog_complete = complete;
+        if let Some(count) = loaded_count {
+            self.starter.calibre_catalog_loaded_count = count;
+        }
+        if total.is_some() {
+            self.starter.calibre_catalog_total = total;
+        }
+        if complete {
+            self.starter.calibre_catalog_error = None;
+            self.starter.calibre_catalog_loaded_count = self.starter.calibre_books.len();
+            self.starter.calibre_catalog_total = Some(self.starter.calibre_books.len());
+        }
+    }
+
+    pub fn set_calibre_catalog_error(&mut self, message: Option<String>) {
+        self.starter.calibre_catalog_error = message;
     }
 
     pub fn set_starter_browser_tabs_health(&mut self, health: Option<BrowserTabsHealth>) {

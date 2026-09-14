@@ -56,6 +56,17 @@ pub(super) fn fetch_books(
     config: &CalibreConfig,
     cancel: Option<&CancellationToken>,
 ) -> Result<Vec<CalibreBook>> {
+    fetch_books_with_progress(config, cancel, &mut |_, _, _| {})
+}
+
+pub(super) fn fetch_books_with_progress<F>(
+    config: &CalibreConfig,
+    cancel: Option<&CancellationToken>,
+    on_batch: &mut F,
+) -> Result<Vec<CalibreBook>>
+where
+    F: FnMut(Vec<CalibreBook>, usize, Option<usize>),
+{
     let base_url = super::server_base_url(config)
         .ok_or_else(|| anyhow!("Caliberate library_url is missing or invalid"))?;
     let client = build_http_client(config)?;
@@ -96,12 +107,15 @@ pub(super) fn fetch_books(
             ));
         }
         let page_count = page.items.len();
+        let mut batch = Vec::with_capacity(page_count);
         for row in page.items {
             ensure_not_cancelled(cancel, "caliberate_row_mapping")?;
             if let Some(book) = map_book(row, &allowed) {
+                batch.push(book.clone());
                 books.push(book);
             }
         }
+        on_batch(batch, books.len(), Some(page.total));
         info!(
             provider = "caliberate",
             offset,
@@ -492,8 +506,17 @@ mod tests {
         config.library_url = Some(format!("http://{}", address));
         config.api_key = Some("secret-token".to_string());
         config.allowed_extensions = vec!["epub".to_string(), "txt".to_string()];
-        let books = fetch_books(&config, None).unwrap();
+        let mut batches = Vec::new();
+        let books = fetch_books_with_progress(&config, None, &mut |batch, loaded, total| {
+            batches.push((batch, loaded, total));
+        })
+        .unwrap();
         assert_eq!(books.len(), 2);
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].0.len(), 1);
+        assert_eq!(batches[0].1, 1);
+        assert_eq!(batches[0].2, Some(2));
+        assert_eq!(batches[1].1, 2);
         assert_eq!(books[0].title, "Alpha");
         assert_eq!(books[1].extension, "txt");
 

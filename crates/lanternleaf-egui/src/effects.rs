@@ -197,7 +197,7 @@ fn execute_effect(
         }
         RuntimeEffect::LoadCalibreCachedBooks => handle_calibre_cached_books(&context, request_id),
         RuntimeEffect::LoadCalibreBooks { force_refresh } => {
-            handle_calibre_books(&context, request_id, force_refresh)
+            handle_calibre_books(&context, request_id, force_refresh, &event_tx)
         }
         RuntimeEffect::OpenCalibreBook { book } => {
             handle_calibre_open_book(&context, request_id, book, &event_tx)
@@ -584,26 +584,51 @@ fn handle_calibre_books(
     context: &EffectContext,
     request_id: u64,
     force_refresh: bool,
+    event_tx: &mpsc::Sender<AppEvent>,
 ) -> Result<Vec<AppEvent>, BridgeError> {
-    let mut events = vec![AppEvent::CalibreLoadProgress(CalibreLoadEvent {
+    let _ = event_tx.send(AppEvent::CalibreLoadProgress(CalibreLoadEvent {
         request_id,
         phase: "started".to_string(),
-        count: None,
+        count: Some(0),
+        total: None,
         message: None,
-    })];
-    let books = calibre::load_books_with_cancel(&context.calibre_config, force_refresh, None)
-        .map_err(|err| bridge_error("calibre_load_failed", err.to_string()))?;
+    }));
+    let mut emit_batch =
+        |books: Vec<calibre::CalibreBook>, loaded_count: usize, total: Option<usize>| {
+            let mapped = books.into_iter().map(map_calibre_book).collect();
+            let _ = event_tx.send(AppEvent::CalibreBooksBatch {
+                request_id,
+                books: mapped,
+                loaded_count,
+                total,
+            });
+            let _ = event_tx.send(AppEvent::CalibreLoadProgress(CalibreLoadEvent {
+                request_id,
+                phase: "partial".to_string(),
+                count: Some(loaded_count),
+                total,
+                message: total.map(|total| format!("Loaded {loaded_count} of {total} books")),
+            }));
+        };
+    let books = calibre::load_books_with_progress(
+        &context.calibre_config,
+        force_refresh,
+        None,
+        &mut emit_batch,
+    )
+    .map_err(|err| bridge_error("calibre_load_failed", err.to_string()))?;
     let mapped: Vec<CalibreBookDto> = books.into_iter().map(map_calibre_book).collect();
     let count = mapped.len();
-    events.push(AppEvent::CalibreBooksLoaded {
+    let mut events = vec![AppEvent::CalibreBooksLoaded {
         request_id,
         books: mapped,
         from_cache: false,
-    });
+    }];
     events.push(AppEvent::CalibreLoadProgress(CalibreLoadEvent {
         request_id,
         phase: "finished".to_string(),
         count: Some(count),
+        total: Some(count),
         message: None,
     }));
     Ok(events)
@@ -1258,6 +1283,7 @@ fn emit_failure_progress(effect: &RuntimeEffect, request_id: u64, tx: &mpsc::Sen
                 request_id,
                 phase: "failed".to_string(),
                 count: None,
+                total: None,
                 message: Some("Calibre load failed".to_string()),
             }));
         }

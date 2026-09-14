@@ -392,6 +392,12 @@ pub enum AppEvent {
         books: Vec<CalibreBookDto>,
         from_cache: bool,
     },
+    CalibreBooksBatch {
+        request_id: u64,
+        books: Vec<CalibreBookDto>,
+        loaded_count: usize,
+        total: Option<usize>,
+    },
     BrowserTabsHealthLoaded {
         request_id: u64,
         health: BrowserTabsHealth,
@@ -659,6 +665,13 @@ pub fn plan_command(state: &AppState, request_id: u64, command: AppCommand) -> D
             (
                 vec![
                     AppEvent::LoadingCalibreChanged(true),
+                    AppEvent::CalibreLoadProgress(CalibreLoadEvent {
+                        request_id,
+                        phase: "started".to_string(),
+                        count: Some(0),
+                        total: None,
+                        message: None,
+                    }),
                     AppEvent::OperationChanged {
                         scope: OperationScope::CalibreLoad,
                         active: true,
@@ -863,6 +876,10 @@ pub fn apply_event(state: &mut AppState, event: AppEvent) {
             books,
             from_cache,
         } => {
+            if request_id < state.runtime_jobs.last_calibre_event_request_id {
+                warn!(request_id, "Ignoring stale Caliberate catalog completion");
+                return;
+            }
             debug!(
                 request_id,
                 count = books.len(),
@@ -870,10 +887,28 @@ pub fn apply_event(state: &mut AppState, event: AppEvent) {
                 "Calibre books loaded"
             );
             state.set_starter_calibre_books(books);
+            state.set_calibre_catalog_complete(request_id, true, None, None);
             if !from_cache {
                 state.set_loading_calibre(false);
                 clear_scope(state, OperationScope::CalibreLoad);
             }
+        }
+        AppEvent::CalibreBooksBatch {
+            request_id,
+            books,
+            loaded_count,
+            total,
+        } => {
+            if request_id < state.runtime_jobs.last_calibre_event_request_id {
+                warn!(request_id, "Ignoring stale Caliberate catalog batch");
+                return;
+            }
+            state.merge_starter_calibre_batch(books);
+            state.set_calibre_catalog_complete(request_id, false, Some(loaded_count), total);
+            state.apply_runtime_job_patch(RuntimeJobPatch {
+                last_calibre_event_request_id: Some(request_id),
+                ..RuntimeJobPatch::default()
+            });
         }
         AppEvent::BrowserTabsHealthLoaded { request_id, health } => {
             debug!(
@@ -924,6 +959,12 @@ pub fn apply_event(state: &mut AppState, event: AppEvent) {
             };
             if let Some(available) = calibre_available {
                 state.set_calibre_available(Some(available));
+            }
+            if event.phase == "started" {
+                state.set_calibre_catalog_error(None);
+                state.set_calibre_catalog_complete(request_id, false, Some(0), event.total);
+            } else if event.phase == "failed" || event.phase == "cancelled" {
+                state.set_calibre_catalog_error(event.message.clone());
             }
             state.apply_runtime_job_patch(RuntimeJobPatch {
                 calibre_load_event: Some(event),
@@ -1768,6 +1809,7 @@ mod tests {
                 request_id: 4,
                 phase: "failed".to_string(),
                 count: None,
+                total: None,
                 message: None,
             }),
         );
@@ -1861,6 +1903,117 @@ mod tests {
             Some("newer.jpg")
         );
         assert_eq!(state.runtime_jobs.calibre_cover_events.len(), 1);
+    }
+
+    #[test]
+    fn progressive_catalog_batches_merge_deduplicate_and_reject_stale_requests() {
+        let mut state = AppState::default();
+        let book = |id: u64, title: &str| CalibreBookDto {
+            id,
+            title: title.to_string(),
+            extension: "epub".to_string(),
+            authors: "Author".to_string(),
+            year: None,
+            file_size_bytes: None,
+            source_path: None,
+            cover_thumbnail: None,
+            has_cover: false,
+        };
+        apply_event(
+            &mut state,
+            AppEvent::CalibreLoadProgress(CalibreLoadEvent {
+                request_id: 20,
+                phase: "started".to_string(),
+                count: Some(0),
+                total: Some(3),
+                message: None,
+            }),
+        );
+        apply_event(
+            &mut state,
+            AppEvent::CalibreBooksBatch {
+                request_id: 20,
+                books: vec![book(1, "One"), book(2, "Two")],
+                loaded_count: 2,
+                total: Some(3),
+            },
+        );
+        assert_eq!(state.starter.calibre_books.len(), 2);
+        apply_event(
+            &mut state,
+            AppEvent::CalibreBooksBatch {
+                request_id: 19,
+                books: vec![book(9, "Stale")],
+                loaded_count: 1,
+                total: Some(1),
+            },
+        );
+        assert_eq!(state.starter.calibre_books.len(), 2);
+        apply_event(
+            &mut state,
+            AppEvent::CalibreBooksBatch {
+                request_id: 20,
+                books: vec![book(2, "Two updated"), book(3, "Three")],
+                loaded_count: 3,
+                total: Some(3),
+            },
+        );
+        assert_eq!(state.starter.calibre_books.len(), 3);
+        assert_eq!(state.starter.calibre_books[1].title, "Two updated");
+        assert_eq!(state.starter.calibre_catalog_loaded_count, 3);
+        assert_eq!(state.starter.calibre_catalog_total, Some(3));
+        assert!(!state.starter.calibre_catalog_complete);
+        apply_event(
+            &mut state,
+            AppEvent::CalibreBooksLoaded {
+                request_id: 20,
+                books: vec![book(1, "One"), book(2, "Two updated"), book(3, "Three")],
+                from_cache: false,
+            },
+        );
+        assert!(state.starter.calibre_catalog_complete);
+        assert_eq!(state.starter.calibre_catalog_total, Some(3));
+    }
+
+    #[test]
+    fn partial_catalog_failure_preserves_rows_and_reports_provider_error() {
+        let mut state = AppState::default();
+        let book = CalibreBookDto {
+            id: 1,
+            title: "Usable".to_string(),
+            extension: "epub".to_string(),
+            authors: "Author".to_string(),
+            year: None,
+            file_size_bytes: None,
+            source_path: None,
+            cover_thumbnail: None,
+            has_cover: false,
+        };
+        apply_event(
+            &mut state,
+            AppEvent::CalibreBooksBatch {
+                request_id: 30,
+                books: vec![book],
+                loaded_count: 1,
+                total: Some(10),
+            },
+        );
+        apply_event(
+            &mut state,
+            AppEvent::CalibreLoadProgress(CalibreLoadEvent {
+                request_id: 30,
+                phase: "failed".to_string(),
+                count: Some(1),
+                total: Some(10),
+                message: Some("provider unavailable".to_string()),
+            }),
+        );
+        assert_eq!(state.starter.calibre_books.len(), 1);
+        assert_eq!(
+            state.starter.calibre_catalog_error.as_deref(),
+            Some("provider unavailable")
+        );
+        assert!(!state.starter.loading_calibre);
     }
 
     #[test]
