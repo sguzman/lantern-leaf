@@ -321,8 +321,48 @@ pub(crate) struct PdfRenderKey {
     pub height: u32,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PdfRenderSpec {
+    pub source: PathBuf,
+    pub generation: u64,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PdfRenderSpec {
+    pub(crate) fn from_effective_zoom(
+        source: PathBuf,
+        generation: u64,
+        effective_zoom: f32,
+    ) -> Self {
+        Self {
+            source,
+            generation,
+            width: quantized_render_width(crate::pdf_viewport::PDF_BASE_PAGE_WIDTH, effective_zoom),
+            height: PDF_RENDER_MAX_HEIGHT,
+        }
+    }
+
+    pub(crate) fn key_for(&self, page_index: usize) -> PdfRenderKey {
+        PdfRenderKey {
+            source: self.source.clone(),
+            generation: self.generation,
+            page_index,
+            width: self.width,
+            height: self.height,
+        }
+    }
+}
+
 pub(crate) fn accepts_render_result(key: &PdfRenderKey, source: &Path, generation: u64) -> bool {
     key.generation == generation && key.source == source
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn accepts_render_result_for_spec(key: &PdfRenderKey, spec: &PdfRenderSpec) -> bool {
+    key == &spec.key_for(key.page_index)
 }
 
 pub(crate) fn bounded_render_pages(
@@ -838,6 +878,42 @@ mod tests {
     }
 
     #[test]
+    fn canonical_render_spec_matches_scheduler_and_presentation_keys() {
+        let source = PathBuf::from("book.pdf");
+        let modes = [
+            crate::pdf_subsystem::PdfZoomState::manual(1.0),
+            crate::pdf_subsystem::PdfZoomState::manual(3.0),
+            crate::pdf_subsystem::PdfZoomState {
+                mode: crate::pdf_subsystem::PdfZoomMode::FitWidth,
+                manual_level: 1.0,
+            },
+            crate::pdf_subsystem::PdfZoomState {
+                mode: crate::pdf_subsystem::PdfZoomMode::FitPage,
+                manual_level: 1.0,
+            },
+        ];
+        for state in modes {
+            let effective = state.effective_level(1200.0, 700.0, 816.0, 1154.0);
+            let spec = PdfRenderSpec::from_effective_zoom(source.clone(), 9, effective);
+            let scheduled = spec.key_for(7);
+            let presentation = spec.key_for(7);
+            assert_eq!(scheduled, presentation);
+            assert_eq!(scheduled.width, quantized_render_width(816.0, effective));
+            assert_eq!(scheduled.height, PDF_RENDER_MAX_HEIGHT);
+        }
+    }
+
+    #[test]
+    fn completed_authoritative_raster_is_discoverable_by_presentation_key() {
+        let spec = PdfRenderSpec::from_effective_zoom(PathBuf::from("book.pdf"), 12, 2.0);
+        let completed = spec.key_for(11);
+        let mut textures = HashMap::new();
+        textures.insert(completed.clone(), 1u8);
+        assert!(textures.contains_key(&spec.key_for(11)));
+        assert!(!textures.contains_key(&spec.key_for(12)));
+    }
+
+    #[test]
     fn stale_source_and_generation_results_are_rejected() {
         assert!(accepts_render_result(
             &key(3, 0, 800),
@@ -854,6 +930,9 @@ mod tests {
             Path::new("other.pdf"),
             3
         ));
+        let spec = PdfRenderSpec::from_effective_zoom(PathBuf::from("book.pdf"), 3, 1.0);
+        assert!(accepts_render_result_for_spec(&spec.key_for(0), &spec));
+        assert!(!accepts_render_result_for_spec(&key(3, 0, 800), &spec));
     }
 
     #[test]

@@ -16,6 +16,7 @@ pub enum PdfViewportUpdateTrigger {
     Scroll,
     Jump,
     Tts,
+    RenderSpec,
     Refresh,
 }
 

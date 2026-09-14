@@ -391,11 +391,10 @@ impl LanternLeafApp {
     #[cfg(not(target_arch = "wasm32"))]
     fn render_pdf_surface(&mut self, ui: &mut Ui, snapshot: &ReaderSnapshot) {
         for result in self.pdf_worker.drain() {
-            if !crate::pdf_renderer::accepts_render_result(
-                &result.key,
-                std::path::Path::new(&snapshot.source_path),
-                self.pdf_generation,
-            ) {
+            let Some(spec) = self.pdf_render_spec.as_ref() else {
+                continue;
+            };
+            if !crate::pdf_renderer::accepts_render_result_for_spec(&result.key, spec) {
                 continue;
             }
             match result.image {
@@ -531,11 +530,15 @@ impl LanternLeafApp {
                 crate::pdf_subsystem::PdfZoomMode::FitWidth => format!("Fit width ({:.0}%)", zoom * 100.0),
                 crate::pdf_subsystem::PdfZoomMode::FitPage => format!("Fit page ({:.0}%)", zoom * 100.0),
             });
-            let width = crate::pdf_renderer::quantized_render_width(
-                crate::pdf_viewport::PDF_BASE_PAGE_WIDTH,
+            let source: std::path::PathBuf = snapshot.source_path.clone().into();
+            let render_spec = crate::pdf_renderer::PdfRenderSpec::from_effective_zoom(
+                source.clone(),
+                self.pdf_generation,
                 zoom,
             );
-            self.pdf_viewport_width = viewport_width;
+            if self.pdf_render_spec.as_ref() != Some(&render_spec) {
+                self.pdf_render_spec = Some(render_spec.clone());
+            }
             let geometry_key = (
                 (viewport_width * 10.0).round() as u32,
                 (zoom * 1000.0).round() as u32,
@@ -561,15 +564,7 @@ impl LanternLeafApp {
                 self.pdf_geometry_cache_key = Some(geometry_key);
             }
             let geometry = self.pdf_geometry_cache.as_ref().expect("PDF geometry cache").clone();
-            let height = crate::pdf_renderer::PDF_RENDER_MAX_HEIGHT;
-            let source: std::path::PathBuf = snapshot.source_path.clone().into();
-            let current_key = crate::pdf_renderer::PdfRenderKey {
-                source: source.clone(),
-                generation: self.pdf_generation,
-                page_index: snapshot.current_page,
-                width,
-                height,
-            };
+            let current_key = render_spec.key_for(snapshot.current_page);
             let mut planned_keep_pages = self
                 .pdf_render_state
                 .plan
@@ -619,10 +614,7 @@ impl LanternLeafApp {
                 for page_index in visible {
                     let Some(slot) = geometry.slots().get(page_index).copied() else { continue };
                     if slot.top > cursor { ui.add_space(slot.top - cursor); }
-                    let key = crate::pdf_renderer::PdfRenderKey {
-                        source: source.clone(), generation: self.pdf_generation,
-                        page_index, width, height,
-                    };
+                    let key = render_spec.key_for(page_index);
                     let _response = if let Some(texture) = self.pdf_textures.get(&key) {
                         ui.add(Image::new(texture).fit_to_exact_size(eframe::egui::vec2(slot.width, slot.height)))
                     } else if let Some(error) = self.pdf_render_errors.get(&key) {

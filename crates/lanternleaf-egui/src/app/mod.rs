@@ -38,7 +38,7 @@ use crate::pdf::{
 };
 use crate::pdf_renderer::{NativeRenderEviction, NativeRenderSpan, RenderTarget};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::pdf_renderer::{PdfRenderKey, PdfRenderWorker};
+use crate::pdf_renderer::{PdfRenderKey, PdfRenderSpec, PdfRenderWorker};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::pdf_renderer::PdfMetadata;
 use crate::pdf_subsystem::{
@@ -454,6 +454,8 @@ struct LanternLeafApp {
     #[cfg(not(target_arch = "wasm32"))]
     pdf_generation: u64,
     #[cfg(not(target_arch = "wasm32"))]
+    pdf_render_spec: Option<PdfRenderSpec>,
+    #[cfg(not(target_arch = "wasm32"))]
     pdf_texture_last_touched: HashMap<PdfRenderKey, u64>,
     #[cfg(not(target_arch = "wasm32"))]
     pdf_texture_touch_counter: u64,
@@ -467,8 +469,6 @@ struct LanternLeafApp {
     pdf_geometry_cache: Option<Arc<PdfViewportGeometry>>,
     #[cfg(not(target_arch = "wasm32"))]
     pdf_geometry_cache_key: Option<(u32, u32, usize, u64)>,
-    #[cfg(not(target_arch = "wasm32"))]
-    pdf_viewport_width: f32,
     #[cfg(not(target_arch = "wasm32"))]
     pdf_page_metadata_revision: u64,
     #[cfg(not(target_arch = "wasm32"))]
@@ -1051,6 +1051,8 @@ impl LanternLeafApp {
             #[cfg(not(target_arch = "wasm32"))]
             pdf_generation: 0,
             #[cfg(not(target_arch = "wasm32"))]
+            pdf_render_spec: None,
+            #[cfg(not(target_arch = "wasm32"))]
             pdf_texture_last_touched: HashMap::new(),
             #[cfg(not(target_arch = "wasm32"))]
             pdf_texture_touch_counter: 0,
@@ -1060,7 +1062,6 @@ impl LanternLeafApp {
             pdf_metadata_rx: None,
             pdf_geometry_cache: None,
             pdf_geometry_cache_key: None,
-            pdf_viewport_width: 800.0,
             pdf_page_metadata_revision: 0,
             pdf_pending_witness: None,
             current_pdf_path: None,
@@ -1198,6 +1199,8 @@ impl LanternLeafApp {
             #[cfg(not(target_arch = "wasm32"))]
             pdf_generation: 0,
             #[cfg(not(target_arch = "wasm32"))]
+            pdf_render_spec: None,
+            #[cfg(not(target_arch = "wasm32"))]
             pdf_texture_last_touched: HashMap::new(),
             #[cfg(not(target_arch = "wasm32"))]
             pdf_texture_touch_counter: 0,
@@ -1207,7 +1210,6 @@ impl LanternLeafApp {
             pdf_metadata_rx: None,
             pdf_geometry_cache: None,
             pdf_geometry_cache_key: None,
-            pdf_viewport_width: 800.0,
             pdf_page_metadata_revision: 0,
             pdf_pending_witness: None,
             current_pdf_path: None,
@@ -2797,6 +2799,9 @@ impl LanternLeafApp {
         if self.pdf_render_state.last_viewport_update.is_none() {
             return PdfViewportUpdateTrigger::Init;
         }
+        if self.pdf_render_state.last_render_spec != self.pdf_render_spec {
+            return PdfViewportUpdateTrigger::RenderSpec;
+        }
         let prev_visible = self
             .pdf_render_state
             .visible_page_indexes
@@ -2829,17 +2834,11 @@ impl LanternLeafApp {
     #[cfg(not(target_arch = "wasm32"))]
     fn request_authoritative_pdf_renders(
         &mut self,
-        source: &Path,
         plan: &PdfViewportRenderPlan,
     ) {
-        let scale = match self.pdf_render_state.zoom_mode {
-            PdfZoomMode::Manual => self.pdf_render_state.zoom_level,
-            PdfZoomMode::FitWidth | PdfZoomMode::FitPage => 1.0,
+        let Some(spec) = self.pdf_render_spec.clone() else {
+            return;
         };
-        let width = crate::pdf_renderer::quantized_render_width(
-            self.pdf_viewport_width.max(320.0),
-            scale,
-        );
         let anchor = self
             .pdf_render_state
             .visible_page_indexes
@@ -2854,13 +2853,7 @@ impl LanternLeafApp {
             .collect::<Vec<_>>();
         for (position, page_index) in pages.into_iter().take(12).enumerate() {
             self.pdf_worker.request(
-                PdfRenderKey {
-                    source: source.to_path_buf(),
-                    generation: self.pdf_generation,
-                    page_index,
-                    width,
-                    height: crate::pdf_renderer::PDF_RENDER_MAX_HEIGHT,
-                },
+                spec.key_for(page_index),
                 if position == 0 {
                     crate::pdf_renderer::PdfRequestPriority::Current
                 } else {
@@ -2879,6 +2872,7 @@ impl LanternLeafApp {
                     #[cfg(not(target_arch = "wasm32"))]
                     {
                         self.pdf_generation = self.pdf_generation.saturating_add(1);
+                        self.pdf_render_spec = None;
                         self.pdf_textures.clear();
                         self.pdf_render_errors.clear();
                         self.pdf_texture_last_touched.clear();
@@ -2952,6 +2946,7 @@ impl LanternLeafApp {
                     visible_range,
                     overscan_range,
                     trigger,
+                    self.pdf_render_spec.as_ref(),
                 ) {
                     return;
                 }
@@ -3036,10 +3031,11 @@ impl LanternLeafApp {
                 self.pdf_render_state.last_viewport_range = visible_range;
                 self.pdf_render_state.last_overscan_range = overscan_range;
                 self.pdf_render_state.last_viewport_trigger = Some(trigger);
+                self.pdf_render_state.last_render_spec = self.pdf_render_spec.clone();
                 self.pdf_render_state.last_viewport_update = Some(Instant::now());
                 self.pdf_render_state.last_updated = Some(Instant::now());
                 #[cfg(not(target_arch = "wasm32"))]
-                self.request_authoritative_pdf_renders(&source_path, &plan);
+                self.request_authoritative_pdf_renders(&plan);
                 return;
             }
         }
@@ -4146,7 +4142,31 @@ mod tests {
         assert!(!state.should_commit_viewport_update(
             state.last_viewport_range,
             state.last_overscan_range,
-            PdfViewportUpdateTrigger::Scroll
+            PdfViewportUpdateTrigger::Scroll,
+            None
+        ));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn stationary_render_spec_change_forces_authoritative_replan() {
+        let mut state = PdfRenderState::default();
+        let first = PdfRenderSpec::from_effective_zoom(PathBuf::from("book.pdf"), 4, 1.0);
+        let replacement = PdfRenderSpec::from_effective_zoom(PathBuf::from("book.pdf"), 5, 2.0);
+        state.last_viewport_range = Some(PdfViewportRange { start: 2, end: 3 });
+        state.last_overscan_range = Some(PdfViewportRange { start: 1, end: 4 });
+        state.last_render_spec = Some(first.clone());
+        assert!(!state.should_commit_viewport_update(
+            state.last_viewport_range,
+            state.last_overscan_range,
+            PdfViewportUpdateTrigger::Refresh,
+            Some(&first),
+        ));
+        assert!(state.should_commit_viewport_update(
+            state.last_viewport_range,
+            state.last_overscan_range,
+            PdfViewportUpdateTrigger::RenderSpec,
+            Some(&replacement),
         ));
     }
 
@@ -5382,6 +5402,8 @@ struct PdfRenderState {
     last_viewport_range: Option<PdfViewportRange>,
     last_overscan_range: Option<PdfViewportRange>,
     last_viewport_trigger: Option<PdfViewportUpdateTrigger>,
+    #[cfg(not(target_arch = "wasm32"))]
+    last_render_spec: Option<PdfRenderSpec>,
     last_viewport_update: Option<Instant>,
     last_updated: Option<Instant>,
     rendered_canvas_pages: usize,
@@ -5426,6 +5448,8 @@ impl Default for PdfRenderState {
             last_viewport_range: None,
             last_overscan_range: None,
             last_viewport_trigger: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            last_render_spec: None,
             last_viewport_update: None,
             last_updated: None,
             rendered_canvas_pages: 0,
@@ -5470,6 +5494,10 @@ impl PdfRenderState {
         self.last_viewport_range = None;
         self.last_overscan_range = None;
         self.last_viewport_trigger = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.last_render_spec = None;
+        }
         self.last_viewport_update = None;
         self.last_updated = None;
         self.rendered_canvas_pages = 0;
@@ -5557,10 +5585,13 @@ impl PdfRenderState {
         visible_range: Option<PdfViewportRange>,
         overscan_range: Option<PdfViewportRange>,
         trigger: PdfViewportUpdateTrigger,
+        render_spec: Option<&PdfRenderSpec>,
     ) -> bool {
         let same_target =
             visible_range == self.last_viewport_range && overscan_range == self.last_overscan_range;
-        let forced = matches!(trigger, PdfViewportUpdateTrigger::Jump);
+        let same_render_spec = self.last_render_spec.as_ref() == render_spec;
+        let forced = matches!(trigger, PdfViewportUpdateTrigger::Jump | PdfViewportUpdateTrigger::RenderSpec)
+            || !same_render_spec;
         if same_target && !forced {
             let span = tracing::span!(
                 Level::TRACE,
