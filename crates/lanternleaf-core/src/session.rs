@@ -297,6 +297,8 @@ pub struct ReaderSession {
     sentence_anchor_maps: Vec<Vec<Option<usize>>>,
     page_word_counts: Vec<usize>,
     page_sentence_counts: Vec<usize>,
+    /// Native PDF page count; PDF navigation must not use empty transcript pagination.
+    pdf_page_count: Option<usize>,
     pub current_page: usize,
     highlighted_display_idx: Option<usize>,
     highlighted_canonical_idx: Option<usize>,
@@ -374,6 +376,7 @@ impl ReaderSession {
             sentence_anchor_maps: Vec::new(),
             page_word_counts,
             page_sentence_counts,
+            pdf_page_count: None,
             current_page: 0,
             highlighted_display_idx: Some(0),
             highlighted_canonical_idx: Some(0),
@@ -403,6 +406,23 @@ impl ReaderSession {
             tts,
             stats,
             settings: self.settings_view(),
+        }
+    }
+
+    pub fn set_pdf_page_count(&mut self, page_count: usize) {
+        if !self.is_pdf_source() {
+            return;
+        }
+        let page_count = page_count.max(1);
+        self.pdf_page_count = Some(page_count);
+        self.current_page = self.current_page.min(page_count - 1);
+    }
+
+    pub(crate) fn page_domain_len(&self) -> usize {
+        if self.is_pdf_source() {
+            self.pdf_page_count.unwrap_or(1).max(1)
+        } else {
+            self.pages.len().max(1)
         }
     }
 
@@ -1114,7 +1134,7 @@ fn pdf_ocr_alignment_summary_from_artifact(
 }
 
 impl ReaderSession {
-    fn is_pdf_source(&self) -> bool {
+    pub(crate) fn is_pdf_source(&self) -> bool {
         self.source_path
             .extension()
             .and_then(|ext| ext.to_str())
@@ -1287,7 +1307,11 @@ impl ReaderSession {
             source_path: self.source_path_str(),
             source_name: self.source_name.clone(),
             current_page: self.current_page,
-            total_pages: self.pages.len(),
+            total_pages: if self.is_pdf_source() {
+                self.pdf_page_count.unwrap_or(0)
+            } else {
+                self.pages.len()
+            },
             text_only_mode: self.text_only_mode,
             has_structured_markdown: self.has_structured_markdown,
             pretty_kind,
@@ -1697,7 +1721,7 @@ impl ReaderSession {
 
         ReaderStats {
             page_index: self.current_page + 1,
-            total_pages: self.pages.len(),
+            total_pages: self.page_domain_len(),
             tts_progress_pct,
             global_progress_pct: global_word_progress * 100.0,
             page_time_remaining_secs,
@@ -2102,6 +2126,7 @@ mod tests {
             sentence_anchor_maps: Vec::new(),
             page_word_counts,
             page_sentence_counts,
+            pdf_page_count: None,
             current_page: 0,
             highlighted_display_idx: Some(0),
             highlighted_canonical_idx: Some(0),
@@ -2155,7 +2180,20 @@ mod tests {
         let snapshot = session.snapshot(PanelState::default(), &normalizer);
         assert_eq!(snapshot.pretty_kind, PrettyKind::Pdf);
         assert_eq!(snapshot.current_page, 0);
-        assert_eq!(snapshot.total_pages, 1);
+        session.set_pdf_page_count(3);
+        assert_eq!(
+            session
+                .snapshot(PanelState::default(), &normalizer)
+                .total_pages,
+            3
+        );
+        session.next_page(&normalizer);
+        session.next_page(&normalizer);
+        session.next_page(&normalizer);
+        assert_eq!(session.current_page, 2);
+        session.prev_page(&normalizer);
+        session.set_page(99, &normalizer);
+        assert_eq!(session.current_page, 2);
         assert_eq!(
             snapshot.pdf_sync_strategy,
             Some(crate::epub_loader::PdfSyncStrategy::RenderOnly)

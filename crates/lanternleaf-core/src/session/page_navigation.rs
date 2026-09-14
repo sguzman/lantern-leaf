@@ -2,7 +2,7 @@ use super::*;
 
 impl ReaderSession {
     pub fn next_page(&mut self, normalizer: &normalizer::TextNormalizer) {
-        if self.current_page + 1 >= self.pages.len() {
+        if self.current_page + 1 >= self.page_domain_len() {
             return;
         }
         self.current_page += 1;
@@ -54,11 +54,7 @@ impl ReaderSession {
     }
 
     pub fn set_page(&mut self, page: usize, normalizer: &normalizer::TextNormalizer) {
-        if self.pages.is_empty() {
-            self.current_page = 0;
-            return;
-        }
-        self.current_page = page.min(self.pages.len().saturating_sub(1));
+        self.current_page = page.min(self.page_domain_len().saturating_sub(1));
         self.highlighted_display_idx = Some(0).filter(|_| self.current_display_len() > 0);
         self.highlighted_audio_idx = None;
         self.current_plan_page = None;
@@ -165,7 +161,11 @@ impl ReaderSession {
             .collect();
         self.refresh_pdf_ocr_alignment_artifact();
 
-        self.current_page = self.current_page.min(self.pages.len().saturating_sub(1));
+        if !self.is_pdf_source() || self.pdf_page_count.is_some() {
+            self.current_page = self
+                .current_page
+                .min(self.page_domain_len().saturating_sub(1));
+        }
         self.current_plan_page = None;
         self.current_plan = None;
 
@@ -256,17 +256,26 @@ impl ReaderSession {
         bookmark: &crate::cache::Bookmark,
         normalizer: &normalizer::TextNormalizer,
     ) {
-        if self.page_sentence_counts.is_empty() {
+        if self.page_sentence_counts.is_empty() && !self.is_pdf_source() {
             self.current_page = 0;
             self.highlighted_display_idx = None;
             self.highlighted_audio_idx = None;
             return;
         }
 
-        let clamped_page = bookmark
-            .page
-            .min(self.page_sentence_counts.len().saturating_sub(1));
+        let clamped_page = bookmark.page.min(if self.is_pdf_source() {
+            self.pdf_page_count
+                .map_or(bookmark.page, |count| count.saturating_sub(1))
+        } else {
+            self.page_sentence_counts.len().saturating_sub(1)
+        });
         self.current_page = clamped_page;
+
+        if self.is_pdf_source() && self.page_sentence_counts.is_empty() {
+            self.highlighted_display_idx = None;
+            self.highlighted_audio_idx = None;
+            return;
+        }
 
         self.highlighted_display_idx = if let Some(global_idx) = self
             .global_idx_for_bookmark(bookmark)

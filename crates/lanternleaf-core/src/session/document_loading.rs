@@ -119,6 +119,7 @@ impl ReaderSession {
             sentence_anchor_maps: Vec::new(),
             page_word_counts: Vec::new(),
             page_sentence_counts: Vec::new(),
+            pdf_page_count: None,
             current_page: 0,
             highlighted_display_idx: None,
             highlighted_canonical_idx: None,

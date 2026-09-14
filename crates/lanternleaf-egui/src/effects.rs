@@ -1040,13 +1040,24 @@ fn open_source_from_path(
     }
 
     let config = load_config(context)?;
-    let reader = session::load_session_for_source_with_cancel(
+    let native_pdf_page_count = if source_is_pdf {
+        Some(
+            crate::pdf_renderer::probe_pdf_page_count(&source_path)
+                .map_err(|err| bridge_error("source_open_failed", err))?,
+        )
+    } else {
+        None
+    };
+    let mut reader = session::load_session_for_source_with_cancel(
         source_path.clone(),
         &config,
         &context.normalizer,
         None,
     )
     .map_err(|err| bridge_error("source_open_failed", err))?;
+    if let Some(page_count) = native_pdf_page_count {
+        reader.set_pdf_page_count(page_count);
+    }
     let panels = panels_from_config(&reader.config);
     if let Ok(mut guard) = context.session.lock() {
         *guard = Some(reader);

@@ -101,6 +101,15 @@ impl NativePdfRenderer {
         self.render_for_target(source_path, page_index, RenderTarget::TextLayer)
     }
 
+    pub(crate) fn page_count(&self, source_path: &Path) -> Result<usize, NativePdfRendererError> {
+        let document = self.pdfium.load_pdf_from_file(source_path, None)?;
+        let count = document.pages().len() as usize;
+        if count == 0 {
+            return Err(NativePdfRendererError::PageIndexOutOfBounds(0));
+        }
+        Ok(count)
+    }
+
     fn render_for_target(
         &mut self,
         source_path: &Path,
@@ -196,6 +205,14 @@ impl NativePdfRenderer {
     pub fn drain_eviction_events(&mut self) -> Vec<NativeRenderEviction> {
         std::mem::take(&mut self.eviction_events)
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn probe_pdf_page_count(source_path: &Path) -> Result<usize, String> {
+    let renderer = NativePdfRenderer::new().map_err(|err| format!("{err:?}"))?;
+    renderer
+        .page_count(source_path)
+        .map_err(|err| format!("{err:?}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -572,6 +589,38 @@ impl PdfRenderWorker {
 mod tests {
     use super::*;
 
+    fn two_page_pdf_bytes() -> Vec<u8> {
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 5 0 R >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 5 0 R >>",
+            "<< /Length 0 >>\nstream\n\nendstream",
+        ];
+        let mut bytes = b"%PDF-1.4\n".to_vec();
+        let mut offsets = vec![0usize];
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(bytes.len());
+            bytes
+                .extend_from_slice(format!("{} 0 obj\n{}\nendobj\n", index + 1, object).as_bytes());
+        }
+        let xref_offset = bytes.len();
+        bytes.extend_from_slice(format!("xref\n0 {}\n", offsets.len()).as_bytes());
+        bytes.extend_from_slice(b"0000000000 65535 f \n");
+        for offset in offsets.iter().skip(1) {
+            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+                offsets.len(),
+                xref_offset
+            )
+            .as_bytes(),
+        );
+        bytes
+    }
+
     fn key(generation: u64, page_index: usize, width: u32) -> PdfRenderKey {
         PdfRenderKey {
             source: PathBuf::from("book.pdf"),
@@ -706,6 +755,22 @@ mod tests {
         scheduler.finish(&failed);
         assert_eq!(scheduler.pending_len(), 0);
         assert!(scheduler.submit(failed, PdfRequestPriority::Current));
+    }
+
+    #[test]
+    fn native_metadata_counts_real_pages_and_rejects_header_only_input() {
+        let root =
+            std::env::temp_dir().join(format!("lanternleaf-pdf-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("probe temp directory");
+        let valid = root.join("two-pages.pdf");
+        let invalid = root.join("header-only.pdf");
+        std::fs::write(&valid, two_page_pdf_bytes()).expect("valid PDF");
+        std::fs::write(&invalid, b"%PDF-1.7\n").expect("header-only PDF");
+
+        assert_eq!(probe_pdf_page_count(&valid).expect("native page count"), 2);
+        assert!(probe_pdf_page_count(&invalid).is_err());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }
 
