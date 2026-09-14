@@ -72,9 +72,7 @@ The responsive starter-shell correction is accepted with worker/CI/director evid
 
 A3 made semantic anchoring stable across multiple frames and rapid edit bursts by retaining the last settled semantic witness, avoiding recapture from unstable intermediate geometry, keeping bounded virtualization near the target neighborhood, reconciling with measured geometry, preserving TTS-follow precedence, and yielding to explicit user scrolling.
 
-Final real-desktop QA reports no more instant violent distant-area jerks; horizontal-margin changes behave beautifully; general presentation changes are substantially calmer; canonical highlight identity remains correct; and binding media max-width/max-height behavior is physically verified.
-
-A lower-severity residual under severe letter-spacing/font-scaling edits is queued separately as Goal 0015 rather than keeping Goal 0014 open indefinitely.
+A lower-severity residual under severe letter-spacing/font-scaling/media edits is queued separately as Goal 0015 rather than keeping Goal 0014 open indefinitely.
 
 ### Goal 0010 — Caliberate catalog covers + provider availability UX
 
@@ -82,29 +80,33 @@ A lower-severity residual under severe letter-spacing/font-scaling edits is queu
 
 The explicit Caliberate cover contract and lazy catalog-cover path are integrated in both repositories. LanternLeaf carries `has_cover`, requests only visible/near-visible covers, bounds/coalesces in-flight work, keeps network/disk/decode work off the render thread, and presents intentional cover/provider states. Caliberate serves `/api/v1/books/{id}/cover` without requiring full-book materialization.
 
-A6 added explicit book-identified terminal cover outcomes. A7 removed the last global completion-order assumption and made ownership/freshness per book/request.
-
-Real-desktop closure verifies real covers before first open, continued lazy cover population while scrolling, extremely fast representative EPUB opens, and preservation of the accepted EPUB TTS / pretty-reader / visual-settings path. See `docs/work/reviews/0010-a7-real-desktop-acceptance.md`.
+A7 removed the last global completion-order assumption and made ownership/freshness per book/request. Real-desktop closure verifies real covers before first open, continued lazy cover population while scrolling, fast warm representative EPUB opens, and preservation of the accepted EPUB TTS / pretty-reader / visual-settings path.
 
 ### Goal 0016 — starter library live-state continuity
 
-**STATUS: A2 DIRECTOR-ACCEPTED + INTEGRATED — FOCUSED REAL-DESKTOP QA PENDING**
+**STATUS: COMPLETE — GOAL CLOSED**
 
-Progressive Caliberate catalog publication and same-session Recents refresh are now integrated on `main`.
+The real 105,570-book Caliberate catalog now publishes progressively while the full provider walk continues off-thread. The starter surface exposes useful loaded/total progress, keeps partial rows usable, preserves live lazy-cover state through final reconciliation, and refreshes Recents during the same process after successful source persistence.
 
-The catalog worker publishes bounded provider pages while the full walk continues off-thread. The starter surface exposes partial/loading progress and loaded-row search/sort scope, then reconciles to the stable full catalog and durable cache only on successful completion. Successful SourceOpen persistence now triggers the existing background Recents listing path so a newly opened source can appear in the current process.
-
-A2 hardens the implementation by preserving live lazy-cover state through later metadata/final reconciliation, retaining a visibly failed/degraded state when a progressive provider refresh fails despite stale fallback data, and coalescing catalog-load ownership so only one authoritative full walk can run and commit durable cache state at a time.
-
-Implementation `602e8952d077796ba478bd28e0b0cfe2d1e6bb51` passed Windows baseline run `34832563563` with both native-workspace and hosted-renderer-probe success. Goal terminal commit `ca94477c6280ae1e5c47a5b32d02947019a428c4` is integrated to `main`.
-
-One focused human pass remains: verify early rows/progress from a clean QA catalog cache, cover continuity through full completion, immediate same-session Recents after opening a representative EPUB, Recents durability after restart, and preservation of representative EPUB/TTS behavior. See `docs/work/reviews/0016-a2-director-acceptance.md`.
+Real-desktop closure verified progressive rows, durable Recents across restart, immediate warm cached EPUB reopen, and preserved EPUB TTS/visual settings. See `docs/work/reviews/0016-a2-real-desktop-acceptance.md`.
 
 ### Goal 0015 — highlight viewport-band reflow polish
 
 **STATUS: QUEUED — MINOR POLISH**
 
-Under severe text-metric changes, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. Future polish should preserve a temporary transaction-scoped viewport band without permanent highlight pinning or fighting user scroll. It remains below Goal 0016 physical closure.
+Under severe text-metric/media changes, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. Future polish should preserve a temporary transaction-scoped viewport band without permanent highlight pinning or fighting user scroll.
+
+### Goal 0017 — progressive cover backpressure/error-state polish
+
+**STATUS: QUEUED — MINOR POLISH**
+
+Cold full-catalog provider pressure can cause short cover requests to timeout, display `Cover fetch/decode failed`, and retry more aggressively than desirable before succeeding after pressure subsides. Add sane transient backoff/coalescing and readable theme-aware catalog/provider error presentation.
+
+### Goal 0018 — Windows QA bootstrap idempotence
+
+**STATUS: QUEUED — INFRASTRUCTURE**
+
+Repeated `qa.ps1` execution in one PowerShell process must not accumulate Visual Studio environment state until `VsDevCmd.bat` fails with `The input line is too long`.
 
 ### Goal 0011 — Windows Natural/HD voices
 
@@ -114,18 +116,28 @@ Do not investigate or test until explicitly re-authorized. Preserve the ordinary
 
 ## Gate 3 — Native PDF visual stability
 
-**STATUS: FUTURE CORE PRODUCT GATE**
+**STATUS: READY — GOAL 0019**
 
-Current physical PDF behavior is not accepted as a working reader. After Goal 0016 physical closure, Gate 3 remains the substantive PDF product gate unless priorities are explicitly changed:
+Goal 0019 is the current substantive product gate.
 
-- page raster/rendering;
-- texture/cache lifecycle;
-- viewport scheduling;
-- zoom/scroll stability;
-- bounded memory/performance;
-- reliable visual behavior independent of TTS.
+The repository already has native Pdfium raster scaffolding, PDF viewport/eviction policy helpers, zoom policy types, and PDF diagnostics, but physical PDF reading is not accepted because the user-facing Reader surface does not yet provide a stable production native page canvas.
+
+Goal 0019 must establish:
+
+- page raster/render ownership on a bounded worker, never the egui/render thread;
+- stale-safe source/page/zoom request identity and coalescing;
+- zoom-aware native render/cache keys rather than stretching one low-resolution raster;
+- bounded in-flight work, CPU image/texture residency, overscan, and eviction;
+- correct current-page native visual presentation;
+- previous/next navigation, zoom, resize, and scroll stability;
+- recoverable native rendering errors;
+- no WebView/pdf.js/Tauri production fallback.
+
+PDF TTS/highlight/OCR synchronization is explicitly deferred to Gate 4. Authoritative contract: `docs/work/ready/0019-native-pdf-visual-stability.md`.
 
 ## Gate 4 — PDF text, TTS, and highlight synchronization
+
+**STATUS: FUTURE CORE PRODUCT GATE**
 
 After Gate 3: canonical sentence/page mapping, geometry confidence, overlays, first-sample audio-boundary identity, jump/follow behavior, OCR/degraded modes, and representative regression corpus.
 
@@ -135,7 +147,7 @@ DOCX/Word, further HTML edge cases, common source/document boundaries, and broad
 
 ## Gate 6 — Ergonomics, performance, packaging
 
-Startup/TTS latency, broader UI cleanup, large-document ergonomics, optional Piper model/voice management, library/import polish, release packaging, and dependency cleanup justified by measured problems.
+Startup/TTS latency, measured cold-open performance, broader UI cleanup, large-document ergonomics, optional Piper model/voice management, library/import polish, release packaging, and dependency cleanup justified by measured problems.
 
 ## Director rule
 
