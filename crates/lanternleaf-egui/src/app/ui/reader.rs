@@ -417,11 +417,6 @@ impl LanternLeafApp {
                 }
             }
         }
-        while self.pdf_textures.len() > 8 {
-            if let Some(key) = self.pdf_textures.keys().next().cloned() {
-                self.pdf_textures.remove(&key);
-            }
-        }
         while self.pdf_render_errors.len() > 8 {
             if let Some(key) = self.pdf_render_errors.keys().next().cloned() {
                 self.pdf_render_errors.remove(&key);
@@ -527,25 +522,14 @@ impl LanternLeafApp {
                 .as_ref()
                 .map(|plan| plan.canvas_page_indexes.clone())
                 .unwrap_or_default();
-            let resident_entries = self
-                .pdf_textures
-                .keys()
-                .cloned()
-                .map(|key| crate::pdf_renderer::PdfResidentEntry {
-                    pinned: key == current_key,
-                    keep: key.source == current_key.source
-                        && key.generation == current_key.generation
-                        && key.width == current_key.width
-                        && planned_keep_pages.contains(&key.page_index),
-                    last_touched: self
-                        .pdf_texture_last_touched
-                        .get(&key)
-                        .copied()
-                        .unwrap_or_default(),
-                    key,
-                })
-                .collect();
-            for key in crate::pdf_renderer::choose_resident_texture_evictions(resident_entries, 8) {
+            let evicted_keys = crate::pdf_renderer::resident_texture_evictions_for_surface(
+                self.pdf_textures.keys().cloned(),
+                &self.pdf_texture_last_touched,
+                &current_key,
+                &planned_keep_pages,
+                8,
+            );
+            for key in evicted_keys {
                 self.pdf_textures.remove(&key);
                 self.pdf_texture_last_touched.remove(&key);
             }

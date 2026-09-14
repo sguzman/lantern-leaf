@@ -377,6 +377,29 @@ pub(crate) fn choose_resident_texture_evictions(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn resident_texture_evictions_for_surface(
+    resident_keys: impl IntoIterator<Item = PdfRenderKey>,
+    touches: &HashMap<PdfRenderKey, u64>,
+    current_key: &PdfRenderKey,
+    keep_pages: &[usize],
+    capacity: usize,
+) -> Vec<PdfRenderKey> {
+    let entries = resident_keys
+        .into_iter()
+        .map(|key| PdfResidentEntry {
+            pinned: key == *current_key,
+            keep: key.source == current_key.source
+                && key.generation == current_key.generation
+                && key.width == current_key.width
+                && keep_pages.contains(&key.page_index),
+            last_touched: touches.get(&key).copied().unwrap_or_default(),
+            key,
+        })
+        .collect();
+    choose_resident_texture_evictions(entries, capacity)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum PdfRequestPriority {
     Nearby,
@@ -630,6 +653,29 @@ mod tests {
             .collect();
         let evicted = choose_resident_texture_evictions(entries, 2);
         assert_eq!(evicted, vec![key(1, 0, 800), key(1, 3, 800)]);
+    }
+
+    #[test]
+    fn production_surface_residency_path_keeps_current_over_capacity() {
+        let current = key(7, 7, 832);
+        let mut resident = HashMap::new();
+        for page in 0..12 {
+            resident.insert(key(7, page, 832), page as u64);
+        }
+        let evicted = resident_texture_evictions_for_surface(
+            resident.keys().cloned(),
+            &resident,
+            &current,
+            &[current.page_index],
+            8,
+        );
+        for key in &evicted {
+            resident.remove(key);
+        }
+        assert!(resident.len() <= 8);
+        assert!(resident.contains_key(&current));
+        assert!(evicted.iter().all(|key| key != &current));
+        assert!(evicted.iter().any(|key| key.page_index == 0));
     }
 
     #[test]
