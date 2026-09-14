@@ -338,6 +338,7 @@ fn event_name(event: &AppEvent) -> &'static str {
         AppEvent::TtsStateUpdated(_) => "TtsStateUpdated",
         AppEvent::PdfTranscriptionProgress(_) => "PdfTranscriptionProgress",
         AppEvent::PdfEmbeddedTextCompleted(_) => "PdfEmbeddedTextCompleted",
+        AppEvent::PdfEmbeddedTextPrepared(_) => "PdfEmbeddedTextPrepared",
         AppEvent::LogLevelUpdated(_) => "LogLevelUpdated",
         AppEvent::NotificationRaised { .. } => "NotificationRaised",
         AppEvent::NotificationDismissed { .. } => "NotificationDismissed",

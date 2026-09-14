@@ -3131,6 +3131,7 @@ impl LanternLeafApp {
         self.current_pdf_path = None;
         #[cfg(not(target_arch = "wasm32"))]
         {
+            self.pdf_worker.cancel_embedded_text();
             self.pdf_text_rx = None;
             self.pdf_generation = self.pdf_generation.saturating_add(1);
         }

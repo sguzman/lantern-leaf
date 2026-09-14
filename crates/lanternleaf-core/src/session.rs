@@ -315,6 +315,21 @@ pub struct ReaderSession {
     snapshot_constructions: Arc<AtomicUsize>,
 }
 
+/// Immutable document-scale work prepared away from the egui thread before a
+/// native PDF session is updated.  The UI commit only swaps these already-built
+/// vectors into the live session.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PreparedPdfEmbeddedText {
+    pub pages: Vec<String>,
+    pub tts_text: String,
+    pub page_sentences: Vec<Vec<String>>,
+    pub page_sentence_counts: Vec<usize>,
+    pub page_word_counts: Vec<usize>,
+    pub sentence_anchor_maps: Vec<Vec<Option<usize>>>,
+    pub sentence_page_hints: Vec<usize>,
+    pub search_matches: Vec<usize>,
+}
+
 impl ReaderSession {
     pub fn structured_document(&self) -> Option<&crate::epub_loader::StructuredDocument> {
         self.structured_document.as_deref()
@@ -424,7 +439,7 @@ impl ReaderSession {
     pub fn adopt_pdf_embedded_text(
         &mut self,
         page_texts: Vec<String>,
-        normalizer: &normalizer::TextNormalizer,
+        _normalizer: &normalizer::TextNormalizer,
     ) -> Result<(), String> {
         if !self.is_pdf_source() {
             return Err("embedded PDF text requires a PDF session".to_string());
@@ -436,6 +451,21 @@ impl ReaderSession {
                 page_texts.len()
             ));
         }
+        let prepared = Self::prepare_pdf_embedded_text(
+            page_texts,
+            &self.search_query,
+            self.pdf_search_allowed(),
+        )?;
+        self.apply_prepared_pdf_embedded_text(prepared)
+    }
+
+    /// Build the complete canonical PDF text payload without touching a live
+    /// session. Callers should run this on the effect/native worker thread.
+    pub fn prepare_pdf_embedded_text(
+        page_texts: Vec<String>,
+        search_query: &str,
+        search_allowed: bool,
+    ) -> Result<PreparedPdfEmbeddedText, String> {
         let page_texts: Vec<String> = page_texts
             .into_iter()
             .map(|page| {
@@ -445,31 +475,81 @@ impl ReaderSession {
                     .to_string()
             })
             .collect();
-        self.tts_text = page_texts.join("\n\n");
-        self.pages = page_texts.clone();
-        self.markdown_pages.clear();
-        self.raw_page_sentences = page_texts
+        let page_sentences: Vec<Vec<String>> = page_texts
             .iter()
             .map(|page| text_utils::split_sentences(page))
             .collect();
-        self.page_sentence_counts = self.raw_page_sentences.iter().map(Vec::len).collect();
-        self.page_word_counts = self
-            .pages
+        let page_sentence_counts = page_sentences.iter().map(Vec::len).collect::<Vec<_>>();
+        let page_word_counts = page_texts
             .iter()
             .map(|page| page.split_whitespace().count())
             .collect();
-        self.sentence_anchor_maps = self
-            .raw_page_sentences
+        let sentence_anchor_maps = page_sentences
             .iter()
             .map(|sentences| (0..sentences.len()).map(Some).collect())
             .collect();
+        let sentence_page_hints = page_sentences
+            .iter()
+            .enumerate()
+            .flat_map(|(page_idx, sentences)| std::iter::repeat_n(page_idx, sentences.len()))
+            .collect::<Vec<_>>();
+        let mut search_matches = Vec::new();
+        let query = search_query.trim();
+        if search_allowed && !query.is_empty() {
+            let regex = Regex::new(query).ok();
+            let query_lower = query.to_ascii_lowercase();
+            for (idx, sentence) in page_sentences.iter().flatten().enumerate() {
+                let matched = regex
+                    .as_ref()
+                    .map(|regex| regex.is_match(sentence))
+                    .unwrap_or_else(|| sentence.to_ascii_lowercase().contains(&query_lower));
+                if matched {
+                    search_matches.push(idx);
+                }
+            }
+        }
+        Ok(PreparedPdfEmbeddedText {
+            tts_text: page_texts.join("\n\n"),
+            pages: page_texts,
+            page_sentences,
+            page_sentence_counts,
+            page_word_counts,
+            sentence_anchor_maps,
+            sentence_page_hints,
+            search_matches,
+        })
+    }
+
+    /// Bounded live-session commit for a payload prepared by a worker.
+    pub fn apply_prepared_pdf_embedded_text(
+        &mut self,
+        prepared: PreparedPdfEmbeddedText,
+    ) -> Result<(), String> {
+        if !self.is_pdf_source() {
+            return Err("embedded PDF text requires a PDF session".to_string());
+        }
+        let page_count = self.pdf_page_count.unwrap_or(prepared.pages.len().max(1));
+        if prepared.pages.len() != page_count {
+            return Err(format!(
+                "embedded text page count {} does not match native page count {page_count}",
+                prepared.pages.len()
+            ));
+        }
+        self.tts_text = prepared.tts_text;
+        self.pages = prepared.pages;
+        self.markdown_pages.clear();
+        self.raw_page_sentences = prepared.page_sentences;
+        self.page_sentence_counts = prepared.page_sentence_counts;
+        self.page_word_counts = prepared.page_word_counts;
+        self.sentence_anchor_maps = prepared.sentence_anchor_maps;
         self.current_page = self.current_page.min(page_count.saturating_sub(1));
         self.highlighted_display_idx = Some(0).filter(|_| self.current_display_len() > 0);
         self.highlighted_canonical_idx = self.highlighted_display_idx;
         self.highlighted_audio_idx = None;
         self.current_plan_page = None;
         self.current_plan = None;
-        self.update_search_matches(normalizer);
+        self.search_matches = prepared.search_matches;
+        self.selected_search_match = (!self.search_matches.is_empty()).then_some(0);
         Ok(())
     }
 
@@ -1218,6 +1298,14 @@ impl ReaderSession {
                 .map(|value| value.search_policy),
             Some(crate::epub_loader::PdfSearchPolicy::Disabled)
         )
+    }
+
+    pub fn pdf_search_allowed_for_preparation(&self) -> bool {
+        self.pdf_search_allowed()
+    }
+
+    pub fn search_query_for_preparation(&self) -> &str {
+        &self.search_query
     }
 
     fn pdf_tts_allowed(&self) -> bool {
@@ -3478,5 +3566,28 @@ mod tests {
         assert_eq!(snapshot.page_sentence_counts.len(), 2);
         assert_eq!(snapshot.page_text, "First native page. Search needle.");
         assert!(!snapshot.search_matches.is_empty());
+    }
+
+    #[test]
+    fn native_pdf_preparation_builds_page_provenance_off_caller_thread() {
+        let caller = std::thread::current().id();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let prepared = ReaderSession::prepare_pdf_embedded_text(
+                vec![
+                    "First native page. Search needle.".to_string(),
+                    "Second native page for TTS.".to_string(),
+                ],
+                "needle",
+                true,
+            )
+            .expect("native text preparation");
+            tx.send((std::thread::current().id(), prepared)).unwrap();
+        });
+        let (worker, prepared) = rx.recv().expect("prepared native text payload");
+        assert_ne!(worker, caller);
+        assert_eq!(prepared.page_sentence_counts, vec![2, 1]);
+        assert_eq!(prepared.sentence_page_hints, vec![0, 0, 1]);
+        assert_eq!(prepared.search_matches, vec![1]);
     }
 }

@@ -1,8 +1,9 @@
 use crate::contracts::{
     BootstrapState, BridgeError, BrowserTabsHealth, BrowserTabsTab, BrowserTabsWindow,
     CalibreBookDto, CalibreCoverEvent, CalibreLoadEvent, LogLevelEvent, OpenSourceResult,
-    PdfEmbeddedTextEvent, PdfTranscriptionEvent, ReaderPlaybackStateEvent, ReaderStateEvent,
-    RecentBook, SessionState, SessionStateEvent, SourceOpenEvent, TtsStateEvent, UiMode,
+    PdfEmbeddedTextEvent, PdfEmbeddedTextPreparedEvent, PdfTranscriptionEvent,
+    ReaderPlaybackStateEvent, ReaderStateEvent, RecentBook, SessionState, SessionStateEvent,
+    SourceOpenEvent, TtsStateEvent, UiMode,
 };
 use crate::logging::{command_span, event_span};
 use crate::state::{
@@ -415,6 +416,7 @@ pub enum AppEvent {
     TtsStateUpdated(TtsStateEvent),
     PdfTranscriptionProgress(PdfTranscriptionEvent),
     PdfEmbeddedTextCompleted(PdfEmbeddedTextEvent),
+    PdfEmbeddedTextPrepared(PdfEmbeddedTextPreparedEvent),
     LogLevelUpdated(LogLevelEvent),
     NotificationRaised {
         request_id: u64,
@@ -1028,7 +1030,7 @@ pub fn apply_event(state: &mut AppState, event: AppEvent) {
                 clear_scope(state, OperationScope::ReaderCommand);
             }
         }
-        AppEvent::PdfEmbeddedTextCompleted(_) => {}
+        AppEvent::PdfEmbeddedTextCompleted(_) | AppEvent::PdfEmbeddedTextPrepared(_) => {}
         AppEvent::LogLevelUpdated(event) => {
             if event.request_id < state.runtime_jobs.last_log_level_event_request_id {
                 warn!(
