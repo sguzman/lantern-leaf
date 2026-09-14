@@ -96,11 +96,11 @@ Real-desktop closure verified progressive rows, durable Recents across restart, 
 
 Under severe text-metric/media changes, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. Future polish should preserve a temporary transaction-scoped viewport band without permanent highlight pinning or fighting user scroll.
 
-### Goal 0017 — progressive cover backpressure/error-state polish
+### Goal 0017 — progressive cover backpressure / cached-hydration scaling
 
-**STATUS: QUEUED — MINOR POLISH**
+**STATUS: QUEUED — CONFIRMED POLISH**
 
-Cold full-catalog provider pressure can cause short cover requests to timeout, display `Cover fetch/decode failed`, and retry more aggressively than desirable before succeeding after pressure subsides. Add sane transient backoff/coalescing and readable theme-aware catalog/provider error presentation.
+Cold full-catalog provider pressure can cause short cover requests to timeout and retry too aggressively. Warm cached QA also exposed repeated roughly-O(total-books) thumbnail-hydration scans and giant catalog-cache rewrites. Future work should add sane transient backoff/coalescing, theme-aware error presentation, and a lazy/indexed cached-thumbnail association path that does not rescan ~105k rows on warm startup.
 
 ### Goal 0018 — Windows QA bootstrap idempotence
 
@@ -116,30 +116,51 @@ Do not investigate or test until explicitly re-authorized. Preserve the ordinary
 
 ## Gate 3 — Native PDF visual stability
 
-**STATUS: READY — GOAL 0019**
+**STATUS: COMPLETE — GOAL 0019 CLOSED**
 
-Goal 0019 is the current substantive product gate.
+Goal 0019 is accepted with automated, director, hosted-Windows, and real-desktop evidence.
 
-The repository already has native Pdfium raster scaffolding, PDF viewport/eviction policy helpers, zoom policy types, and PDF diagnostics, but physical PDF reading is not accepted because the user-facing Reader surface does not yet provide a stable production native page canvas.
+The accepted native foundation includes:
 
-Goal 0019 must establish:
+- native Rust/egui/Pdfium presentation with no WebView/pdf.js/Tauri production fallback;
+- one authoritative process-wide `PdfNativeService` / one native Pdfium owner;
+- all Pdfium open/metadata/raster/bitmap work off the egui thread;
+- visual-first PDF open independent of Quack-check/Python/Docling/OCR/transcript recovery;
+- truthful native page-domain ownership and page count;
+- working Next/Previous navigation;
+- stale-safe source/page/zoom identity, current-priority scheduling, and bounded current-page-pinned texture residency;
+- real logical zoom and recoverable/terminal failure behavior.
 
-- page raster/render ownership on a bounded worker, never the egui/render thread;
-- stale-safe source/page/zoom request identity and coalescing;
-- zoom-aware native render/cache keys rather than stretching one low-resolution raster;
-- bounded in-flight work, CPU image/texture residency, overscan, and eviction;
-- correct current-page native visual presentation;
-- previous/next navigation, zoom, resize, and scroll stability;
-- recoverable native rendering errors;
-- no WebView/pdf.js/Tauri production fallback.
+Real-desktop QA verified a representative Caliberate PDF at `Page 13 / 638`, working page navigation, aggressive ordinary browsing, and no representative EPUB regression.
 
-PDF TTS/highlight/OCR synchronization is explicitly deferred to Gate 4. Authoritative contract: `docs/work/ready/0019-native-pdf-visual-stability.md`.
+The temporary production presentation remains single-page/paginated; that is intentionally promoted into Goal 0020 rather than keeping Gate 3 open.
+
+## Gate 3.1 — Continuous native PDF viewport + practical zoom
+
+**STATUS: READY — GOAL 0020 CURRENT SUBSTANTIVE PRODUCT GATE**
+
+Replace the temporary single-page surface with a continuous virtualized page stack while preserving the accepted Goal-0019 native architecture.
+
+Goal 0020 must establish:
+
+- continuous wheel/trackpad scrolling across page boundaries;
+- partial adjacent pages visible simultaneously;
+- bounded visible/overscan page planning rather than rendering the whole document;
+- deterministic viewport-derived canonical current-page ownership;
+- Next/Previous/SetPage as jumps into the continuous stack;
+- stable page geometry for portrait, landscape, mixed-size pages, resize, and asynchronous raster replacement;
+- Fit width, Fit page, Reset/100%, and substantially broader bounded manual zoom;
+- zoom that preserves a logical intra-page focal anchor as closely as practical;
+- newest-visible render priority, bounded residency, and no synchronous Pdfium waits on interaction;
+- source/zoom stale safety and representative EPUB regression protection.
+
+Authoritative contract: `docs/work/ready/0020-continuous-pdf-viewport-and-zoom.md`.
 
 ## Gate 4 — PDF text, TTS, and highlight synchronization
 
-**STATUS: FUTURE CORE PRODUCT GATE**
+**STATUS: FUTURE CORE PRODUCT GATE — AFTER GOAL 0020**
 
-After Gate 3: canonical sentence/page mapping, geometry confidence, overlays, first-sample audio-boundary identity, jump/follow behavior, OCR/degraded modes, and representative regression corpus.
+After the continuous viewport is accepted: canonical sentence/page mapping, geometry confidence, text-layer/overlay ownership, first-sample audio-boundary identity, spoken highlighting, jump/auto-follow behavior, OCR/degraded modes, representative regression corpus, and integration of Quack-check-style hostile-PDF recovery as a subordinate background capability.
 
 ## Gate 5 — Format expansion and ingestion cleanup
 
