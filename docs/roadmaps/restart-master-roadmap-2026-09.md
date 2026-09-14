@@ -70,7 +70,7 @@ The responsive starter-shell correction is accepted with worker/CI/director evid
 
 **STATUS: COMPLETE**
 
-A2 established semantic viewport anchors across presentation reflow. A3 made the correction stable across multiple frames and rapid edit bursts by retaining the last settled semantic witness, avoiding recapture from unstable intermediate geometry, keeping bounded virtualization near the target neighborhood, reconciling with measured geometry, preserving pending TTS-follow precedence, and yielding to explicit user scrolling.
+A3 made semantic anchoring stable across multiple frames and rapid edit bursts by retaining the last settled semantic witness, avoiding recapture from unstable intermediate geometry, keeping bounded virtualization near the target neighborhood, reconciling with measured geometry, preserving TTS-follow precedence, and yielding to explicit user scrolling.
 
 Final real-desktop QA reports no more instant violent distant-area jerks; horizontal-margin changes behave beautifully; general presentation changes are substantially calmer; canonical highlight identity remains correct; and binding media max-width/max-height behavior is physically verified.
 
@@ -78,21 +78,31 @@ A lower-severity residual under severe letter-spacing/font-scaling edits is queu
 
 ### Goal 0010 — Caliberate catalog covers + provider availability UX
 
-**STATUS: A7 DIRECTOR-ACCEPTED + INTEGRATED — FOCUSED REAL-DESKTOP QA PENDING**
+**STATUS: COMPLETE — GOAL CLOSED**
 
-The explicit Caliberate cover contract and lazy catalog path are now integrated in both repositories. LanternLeaf carries `has_cover`, requests only visible/near-visible covers, bounds in-flight work to four, keeps network/disk/decode work off the render thread, and presents intentional loading/no-cover/provider-unavailable/fetch-error states. Caliberate serves `/api/v1/books/{id}/cover` without requiring full-book materialization.
+The explicit Caliberate cover contract and lazy catalog-cover path are integrated in both repositories. LanternLeaf carries `has_cover`, requests only visible/near-visible covers, bounds/coalesces in-flight work, keeps network/disk/decode work off the render thread, and presents intentional cover/provider states. Caliberate serves `/api/v1/books/{id}/cover` without requiring full-book materialization.
 
-A6 added explicit book-identified terminal cover outcomes. A7 removes the last global completion-order assumption: ownership/freshness is per book and request ID, so independent books may finish in arbitrary order while stale same-book completions cannot overwrite newer retry state. Manual and automatic ensure paths now share the bounded/coalesced scheduler.
+A6 added explicit book-identified terminal cover outcomes. A7 removed the last global completion-order assumption and made ownership/freshness per book/request.
 
-LanternLeaf implementation `54e22c172745171b084221a6f80465e3f6ffe77d` passed Windows baseline run `34793890003`, including native-workspace and hosted-renderer-probe jobs. The LanternLeaf and Caliberate worker lineages have been fast-forward integrated to `main`.
+Real-desktop closure verifies real covers before first open, continued lazy cover population while scrolling, extremely fast representative EPUB opens, and preservation of the accepted EPUB TTS / pretty-reader / visual-settings path. See `docs/work/reviews/0010-a7-real-desktop-acceptance.md`.
 
-One focused human pass remains: verify covers before first open, no rows stuck forever on loading, intentional missing-cover state, provider-down/restart recovery without restarting LanternLeaf, bounded manual ensure, and preservation of representative Caliberate open/TTS behavior. See `docs/work/reviews/0010-a7-director-acceptance.md`.
+### Goal 0016 — starter library live-state continuity
+
+**STATUS: READY NEXT**
+
+Goal 0010 physical QA exposed two ordinary starter-state continuity defects.
+
+First, a cold/incompatible catalog cache leaves the starter shell looking empty while LanternLeaf walks the real 105,570-book Caliberate catalog in the provider's supported 500-row pages. Caliberate is healthy and pages arrive continuously; the defect is that LanternLeaf waits for the whole fetch before publishing useful catalog state.
+
+Second, successfully opening a source persists its recent-source state correctly but does not update the in-memory Recents model in the same process. Restarting LanternLeaf reveals the expected recent entries, proving persistence is intact.
+
+Goal 0016 must add progressive/cache-first catalog publication with truthful partial/progress state, stale-request rejection, useful partial-provider-failure behavior, and immediate same-session Recents refresh after successful opens. Heavy/blocking work remains off the egui/render thread. See `docs/work/ready/0016-starter-library-live-state-continuity.md`.
 
 ### Goal 0015 — highlight viewport-band reflow polish
 
 **STATUS: QUEUED — MINOR POLISH**
 
-Under severe text-metric changes, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. Future polish should preserve a temporary transaction-scoped viewport band without permanent highlight pinning or fighting user scroll.
+Under severe text-metric changes, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. Future polish should preserve a temporary transaction-scoped viewport band without permanent highlight pinning or fighting user scroll. It remains below Goal 0016.
 
 ### Goal 0011 — Windows Natural/HD voices
 
@@ -102,9 +112,9 @@ Do not investigate or test until explicitly re-authorized. Preserve the ordinary
 
 ## Gate 3 — Native PDF visual stability
 
-**STATUS: FUTURE CORE PRODUCT GATE; NOT CURRENTLY AUTHORIZED**
+**STATUS: FUTURE CORE PRODUCT GATE**
 
-After the current near-term native cleanup sequence:
+Current physical PDF behavior is not accepted as a working reader. After the current starter-library continuity repair, Gate 3 remains the substantive PDF product gate unless priorities are explicitly changed:
 
 - page raster/rendering;
 - texture/cache lifecycle;
