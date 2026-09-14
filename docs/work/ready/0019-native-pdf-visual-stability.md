@@ -166,6 +166,17 @@ Do **not** expand this goal into:
 
 Existing PDF extraction/classification/OCR artifacts may remain present and diagnostic, but this goal must not make visual rendering contingent on solving their synchronization semantics.
 
+## Director correction A2
+
+A1 is rejected before human QA. Read `docs/work/reviews/0019-a1-director-rejection.md` and preserve all accepted A1 native-worker/stale-result work while correcting the following blocking defects:
+
+1. real user-facing zoom: zoom must change the page's presented logical size rather than merely rendering a larger bitmap and shrinking it back to viewport width;
+2. deterministic resident texture eviction: the current/visible page must be pinned and irrelevant pages evicted before current/nearby pages;
+3. newest current-page/source/zoom work must supersede or bypass obsolete FIFO render work sufficiently that stale overscan cannot sit ahead of the visible page;
+4. add the missing deterministic acceptance coverage for landscape/aspect ratio, navigation ownership, render-failure terminalization, current-page preservation under resident-cache pressure, and stale-queue/current-priority behavior.
+
+Do not request human QA during A2. Re-run focused/workspace/Windows gates and hosted renderer probe before terminalizing.
+
 ## Repository handoff
 
 - Repository goal: `0019-native-pdf-visual-stability`
