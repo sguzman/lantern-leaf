@@ -1,25 +1,26 @@
-# 0022 — Native PDF embedded-text / TTS trustworthy path — A3
+# 0022 — Native PDF embedded-text / TTS trustworthy path — A4
 
 ## Status
 
-**READY — A3 CORRECTION AFTER A2 DIRECTOR REJECTION**
+**READY — A4 CORRECTION AFTER A3 DIRECTOR REJECTION**
 
 Read first:
 
 - `docs/work/reviews/0022-a1-director-rejection.md`
 - `docs/work/reviews/0022-a2-director-rejection.md`
+- `docs/work/reviews/0022-a3-director-rejection.md`
 - `docs/architecture/pdf-text-recovery-boundary-2026-09.md`
 - `docs/work/reviews/0020-a3-real-desktop-acceptance.md`
 
-Goal 0019/0020 remain physically accepted and authoritative. Goal 0022 must enrich that working continuous native PDF reader without weakening visual responsiveness or the hard no-heavy-work-on-egui rule.
+Goal 0019/0020 remain physically accepted and authoritative. Goal 0022 must enrich the working continuous native PDF reader without weakening visual responsiveness or the hard no-heavy/blocking-work-on-egui rule.
 
 ## Outcome
 
-For PDFs with trustworthy embedded text, LanternLeaf asynchronously obtains page-aligned native text through the existing process-wide Pdfium owner, promotes the session into an explicit trusted-text/no-geometry policy, enables Text-only/search/ordinary Windows TTS, preserves native page identity, and reuses a durable versioned text cache.
+For PDFs with trustworthy embedded text, LanternLeaf asynchronously obtains or reuses page-aligned native text, promotes the canonical session into trusted Text-only/search/TTS capability while exact visual sentence geometry remains disabled, preserves native page identity, and keeps all cache/native/document-scale work off the render thread.
 
-Visual PDF browsing remains independently usable before, during, after, or despite text enrichment failure.
+Visual PDF browsing remains independently usable before, during, after, or despite enrichment/cache failure.
 
-Exact visual spoken overlays, hostile/mixed recovery, Quack-check, Python, Docling, and OCR remain out of scope.
+Exact spoken overlays, hostile/mixed recovery, Quack-check, Python, Docling, and OCR remain out of scope.
 
 ## Non-negotiable architecture
 
@@ -27,196 +28,145 @@ Exact visual spoken overlays, hostile/mixed recovery, Quack-check, Python, Docli
 - Exactly one process-wide `PdfNativeService` / one Pdfium owner.
 - No second Pdfium binding for text concurrency.
 - No Python, Quack-check, Docling, OCR, or `scripts/quack-check/*` in the Goal-0022 production path.
-- Visual source open never waits for text enrichment.
+- Visual source open never waits for text enrichment or text-cache IO.
 - Current and already-visible raster responsiveness outrank background text extraction.
 - Heavy/blocking/document-scale work never executes on the egui/render thread.
+- UI-facing native/cache request submission must itself be nonblocking.
 - Extraction/adoption/cache results are source/generation/revision stale-safe.
 - PDF canonical text preserves native PDF page identity; do not line-count-repaginate it.
 - Existing backend-neutral / first-sample Windows TTS ownership remains authoritative.
 
-## Preserve accepted A1/A2 direction
+## Preserve accepted A1/A2/A3 direction
 
-Preserve the good work already on the Goal-0022 branch:
+Preserve:
 
-- typed `PdfEmbeddedTextCompleted` / prepared-result boundaries;
-- native Pdfium embedded-text extraction rather than Python extraction;
+- typed native embedded-text and prepared-result event boundaries;
 - one process-wide native Pdfium worker;
-- cooperative/resumable background text job;
+- cooperative/resumable native text extraction;
 - source-generation cancellation;
 - deterministic conservative trust gate;
 - page-aligned prepared canonical text and sentence provenance;
+- trusted-text runtime policy promotion to Text-only/search/TTS with exact visual sync disabled;
 - off-thread document-scale sentence/count/anchor preparation;
-- off-thread durable text-cache persistence;
-- versioned native-text cache reuse;
+- off-thread cache persistence;
+- Current and Nearby raster preemption;
+- bounded eight-page native text chunks or an equivalent proven bounded strategy;
+- versioned native-text cache identity;
 - Goal 0019/0020 visual/viewport/zoom behavior;
 - representative EPUB visual/TTS behavior.
 
-## A3 correction 1 — trusted text must actually promote production PDF capabilities
+## A4 correction 1 — move native-text cache load/parse completely off egui
 
-The production visual-first PDF session begins with:
+A3 still calls `load_pdf_render_precomputed_state()` synchronously from `update_pdf_render_state()` on PDF source change.
 
-- `PdfGeometryMode::RenderOnlyNoSync`;
-- `PdfSyncStrategy::RenderOnly`;
-- Text-only disabled;
-- search disabled;
-- `tts_allowed = false`.
+That is forbidden.
 
-A2 adopts page text but leaves that policy unchanged, so the normal reader still rejects Text-only and TTS.
+Required behavior:
 
-When a native embedded-text result passes the trust gate and page-count/source identity validation, atomically promote the live session into an explicit **trusted canonical text, no exact visual geometry yet** state.
+1. On PDF source change, egui may enqueue a bounded cache lookup request and immediately continue rendering.
+2. Cache filesystem read, parse, validation, source-identity checks, and document-scale allocation happen off-thread.
+3. A valid cache hit enters the same stale-safe trusted-text preparation/adoption pipeline as native extraction.
+4. A cache miss/corrupt/stale result launches native extraction without blocking egui.
+5. Cache failure never affects visual PDF usability.
+6. Cache load and cache persistence are both worker-owned.
 
-Required semantics after trusted adoption:
+Add a production-path test/diagnostic proving a warm cached PDF open performs no native-text cache filesystem/parse work on the egui thread.
 
-- Text-only is allowed and shows the accepted canonical PDF text;
-- search is allowed over the trusted canonical PDF text;
-- ordinary Windows TTS is allowed through the existing reader/TTS pipeline;
-- native page count/current page/bookmark ownership remain unchanged;
-- sentence -> native page provenance remains deterministic;
-- visual sentence highlighting stays disabled because exact geometry has not yet been implemented;
-- `pretty_sync_enabled` / exact sentence sync remain false unless real geometry evidence exists;
-- no guessed rectangles or fake sentence overlays are introduced.
+## A4 correction 2 — replace pseudo-bounded snapshot publication with a truly bounded adoption patch
 
-Do not merely set a flag in UI code. The canonical `ReaderSession` PDF runtime policy/capability state must become truthful so existing `toggle_text_only()`, search, `tts_play()`, play-from-page/highlight, seek/repeat, persistence, and snapshots observe the same ownership decision.
+A3's `snapshot_with_prepared_canonical_sentences()` still calls `snapshot_internal()` and merely disables the snapshot counter. The underlying path still performs work that scales with document size, including page-count/stat scans and document-vector cloning.
 
-### Required policy regression
+Required behavior:
 
-Start from the real production-shaped visual-only PDF policy, then apply a trusted prepared native-text payload and prove:
+- Do not call `ReaderSession::snapshot()` or `snapshot_internal()` from trusted PDF enrichment publication.
+- The worker owns all document-scale prepared state.
+- The egui adoption commit validates source/generation/revision/page count/trust, moves/swaps already-prepared session state, publishes a bounded runtime patch/projection, and returns.
+- No operation in this commit may scale with total PDF pages/sentences.
+- Do not clone full `page_sentence_counts`, full search-result vectors, canonical sentence vectors, or other document-wide payloads on egui.
+- If runtime state needs document-owned data, share immutable prepared state (`Arc` or equivalent) or publish handles/revisions plus current-page-local projection.
+- Current page, native page count, Text-only capability, search capability, TTS capability/state, settings, and current-page-local text/sentence data must update correctly.
+- Do not load config/normalizer/filesystem state from the adoption commit.
 
-- Text-only becomes allowed;
-- full canonical search becomes allowed;
-- TTS becomes allowed;
-- ordinary TTS commands enter the existing canonical playback state;
-- native page domain remains unchanged;
-- sentence overlay/highlight sync remains disabled;
-- rejected/untrusted text does not promote policy.
+Replace the counter-only test with instrumentation that would fail if snapshot assembly, document-wide stats scans, or document-vector clones run during egui adoption.
 
-Do not use a synthetic PDF session with `pdf_runtime_policy = None` as the only acceptance evidence.
+## A4 correction 3 — make advertised FullText PDF search actually document-wide
 
-## A3 correction 2 — make the egui adoption commit genuinely bounded
+Trusted native PDF policy advertises `PdfSearchPolicy::FullText`, but A3 still searches only `current_sentences()`.
 
-A2 moved sentence preparation off-thread, but its egui completion still calls ordinary `ReaderSession::snapshot()`. That function flattens/clones canonical sentences across the entire document, so large-PDF enrichment still performs O(document) allocation/copy work on the render thread.
+Required semantics:
 
-A2 also sends a duplicate full cache artifact through `PdfEmbeddedTextPreparedEvent` after the cache has already been persisted. The UI does not need that payload and should not perform document-scale destruction of it.
+- FullText search operates over the accepted canonical PDF sentence domain across all native pages.
+- Search results carry deterministic native-page + page-local/canonical sentence provenance sufficient for navigation.
+- Search Next/Previous can move to the owning native page and sentence.
+- Native page domain remains authoritative.
+- No guessed visual geometry is required.
+- No line-count repagination.
 
-Required A3 behavior:
+Add a regression where the query exists only on a later PDF page while page 1 is current; prove search finds it and navigation lands on the correct native page/canonical sentence.
 
-1. The worker/effect side owns all document-scale preparation.
-2. The egui commit validates source/generation/revision/page count/trust and swaps already-prepared session state with bounded work.
-3. The PDF enrichment commit must **not** call the ordinary document-scale `ReaderSession::snapshot()` path.
-4. Runtime/UI publication must use a bounded patch/projection or an already-prepared projection whose expensive document fields were built off-thread.
-5. Do not clone/flatten every canonical PDF sentence on egui merely to publish enrichment.
-6. Do not send the already-persisted duplicate cache artifact through the UI event unless the UI genuinely needs it. Prefer leaving/dropping it on the worker side.
-7. Cache serialization/write remains worker-only.
-8. Reuse the app-owned normalizer/config state or otherwise avoid fresh filesystem/config loading from the enrichment commit path.
+## A4 correction 4 — UI-facing native request submission must be nonblocking
 
-### Required bounded-commit regression
+`metadata_async()` and `embedded_text_async()` currently use blocking `SyncSender::send()` calls.
 
-Use the existing snapshot-construction instrumentation or equivalent production-path diagnostics to prove:
+Required behavior:
 
-- trusted PDF enrichment commits without invoking the full `ReaderSession::snapshot()` construction path on egui;
-- no document-scale cache serialization/write occurs on egui;
-- no duplicate full cache payload is destroyed on egui as part of normal trusted adoption;
-- the runtime/UI sees the needed current-page/Text-only/search/TTS capability update after the bounded commit.
+- Calls reachable from egui/source-change/update paths must not block waiting for bounded native request-channel capacity.
+- Use `try_send`, a dedicated dispatcher worker, or an equivalent nonblocking enqueue contract.
+- Saturation must be explicit and safe: coalesce, retry later, supersede stale work, or return a typed busy/deferred result.
+- Source generation/cancellation semantics remain authoritative.
+- Do not silently drop the current source's only enrichment request without a deterministic retry path.
 
-## A3 correction 3 — all pending visual raster work outranks text enrichment
+Add a saturation regression showing a full native text/metadata request queue cannot stall the caller/UI thread.
 
-A2 only checks `PdfRequestPriority::Current` before the next text unit. `Nearby` requests can remain queued while the text job runs to completion.
+## Trusted-text policy contract
 
-For the continuous reader, Nearby includes non-anchor page work needed for visible/adjacent/overscan presentation. A page already visible at a seam must not wait behind hundreds of background text pages.
+After trusted adoption:
 
-Before each background text unit/chunk:
+- Text-only is allowed;
+- document-wide canonical search is allowed;
+- ordinary Windows TTS is allowed through existing canonical machinery;
+- native `pdf_page_count` and current page remain authoritative;
+- bookmark/canonical sentence ownership remains native-page aligned;
+- visual sentence highlighting remains disabled;
+- `pretty_sync_enabled = false` and `exact_sentence_sync = false` until real sentence geometry exists;
+- no guessed rectangles or fake visual sync.
 
-- inspect the normal raster scheduler;
-- if any raster request is queued, service raster work first;
-- preserve the scheduler's existing Current-over-Nearby ordering;
-- then allow bounded background text progress when no raster is waiting.
+Rejected/untrusted text must remain visual-only.
 
-Rapid visual navigation may starve background text temporarily. That is acceptable: visual responsiveness is authoritative.
+## Cache / extraction contract
 
-### Required arbitration regressions
-
-Keep the existing Current-preemption probe and add a deterministic Nearby/visible case:
-
-- native text job is in progress and incomplete;
-- no Current raster is pending;
-- submit a Nearby raster request;
-- Nearby raster completes before text terminalization;
-- text then resumes/completes;
-- metadata/raster/text still share the same native Pdfium owner/thread.
-
-## A3 correction 4 — cooperative extraction must not reopen the document once per page
-
-A2 yields between pages but `extract_embedded_text_page()` calls `load_pdf_from_file()` for every page. On a 638-page book this can mean hundreds of full native document opens/reparses.
-
-Preserve cooperative arbitration while reducing reopen amplification.
-
-Acceptable implementation shapes include:
-
-- a small bounded page chunk per document open;
-- an owner-local resumable text document handle if the Pdfium lifetime model permits it cleanly;
-- another bounded strategy that does not require one full document open per page.
-
-The worker must still yield frequently enough that pending raster work is serviced promptly.
-
-Add a deterministic diagnostic/test showing the long text probe uses substantially fewer document opens than page count while retaining Current/Nearby preemption.
-
-## Trust gate
-
-Keep a deterministic conservative embedded-text trust assessment with named/tested thresholds or constants. At minimum reject:
-
-- absent/image-only text;
-- clearly insufficient text-bearing page coverage;
-- obvious replacement/control garbage;
-- obvious duplicate/noise pathologies.
-
-This goal remains binary for adoption:
-
-- trustworthy embedded text -> canonical PDF text/TTS eligible;
-- otherwise -> visual-only with explicit degraded reason.
-
-Do not attempt mixed/scanned/hostile recovery here.
-
-## PDF page-domain / TTS contract
-
-Accepted text must preserve:
-
-`native PDF page N -> canonical page text -> canonical sentences belonging to page N`
-
-Preserve native `pdf_page_count`, current native page, bookmarks, continuous viewport position, reader settings, and source identity.
-
-Text-only/search/Play/Pause/seek/repeat must use existing canonical ReaderSession/TTS machinery. No separate PDF TTS engine.
-
-Exact visual spoken sentence highlighting is still a later goal.
-
-## Cache contract
-
-Cache identity must include source/content identity and explicit native-text extraction revision. Reopen should reuse trusted page text without rerunning native extraction. Corrupt/version-stale artifacts must be ignored/removed/rebuilt non-destructively. Raster textures remain ephemeral.
-
-Cache load/write must not block egui. Cache persistence failure must not break the active visual or trusted-text session.
+- Cache identity includes source/content identity plus explicit extraction revision.
+- Warm trusted cache avoids native re-extraction.
+- Corrupt/stale cache is ignored/rebuilt safely.
+- Raster textures remain ephemeral.
+- Current and Nearby raster requests preempt background text chunks.
+- Cooperative extraction must use substantially fewer native document opens than page count.
+- Rapid visual use may temporarily starve text enrichment; visual responsiveness wins.
 
 ## Required deterministic coverage
 
 At minimum prove:
 
-- one process-wide Pdfium owner serves metadata, raster, and native text;
-- Current raster preempts in-progress text extraction;
-- Nearby/visible raster preempts in-progress text extraction;
-- cooperative extraction does not reopen the PDF once per page;
-- native/document-scale heavy work stays off egui;
-- document-scale canonical preparation stays off egui;
-- the enrichment commit does not build an ordinary full ReaderSnapshot on egui;
-- cache persistence/cache-payload destruction stays off egui;
-- production render-only PDF policy promotes correctly after trusted text;
-- trusted Text-only/search/TTS work through normal canonical machinery;
-- sentence visual highlighting remains disabled without geometry;
+- one process-wide Pdfium owner serves metadata/raster/text;
+- Current raster preempts text;
+- Nearby/visible raster preempts text;
+- cooperative extraction avoids one-open-per-page amplification;
+- native/document-scale preparation stays off egui;
+- cache load/parse stays off egui;
+- cache persistence stays off egui;
+- UI-facing request submission cannot block on full native channels;
+- trusted enrichment commit does not call snapshot/snapshot_internal and does not perform O(document) work;
+- production render-only PDF policy promotes correctly;
+- Text-only works after trusted adoption;
+- FullText search finds a later-page-only query and navigates correctly;
+- ordinary TTS uses existing first-sample semantics;
+- visual sentence sync remains disabled without geometry;
 - trustworthy fixture passes trust gate;
 - empty/image-only/garbage/noise fixtures degrade;
-- visual open succeeds independently of enrichment outcome;
+- visual open succeeds independently of enrichment/cache outcome;
 - trusted adoption preserves native page count/current page;
-- canonical sentences map deterministically to native pages;
-- PDF text is not arbitrary line-count repaginated;
+- sentence provenance remains deterministic;
 - source-switch stale results are ignored;
-- extraction/cache failure leaves PDF visually browsable;
 - trusted cache is reused on reopen;
 - corrupt/stale cache is safe;
 - Goal 0019/0020 regressions remain green;
@@ -226,6 +176,6 @@ At minimum prove:
 
 Run focused tests plus serialized workspace tests as appropriate, `cargo check --workspace`, `cargo build --workspace`, repo-native Windows QA preparation, `git diff --check`, hosted `native-workspace`, and hosted renderer/native-PDF capability coverage.
 
-Do not terminalize or signal Goal achieved until the hosted workflow for the substantive A3 implementation lineage is green.
+Do not terminalize or signal Goal achieved until the hosted workflow for the substantive A4 implementation lineage is green.
 
-Update `docs/work/reports/0022.md` with A3 evidence. Move ready -> active -> done normally, push before terminal signaling, restore shared checkout to `main`, and do not request human QA. The director reviews first.
+Update `docs/work/reports/0022.md` with A4 evidence. Move ready -> active -> done normally, push before terminal signaling, restore shared checkout to `main`, and do not request human QA. The director reviews first.

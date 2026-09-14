@@ -106,23 +106,25 @@ After Fit Width/Fit Page, `+/-` should step from the current effective fit perce
 
 ## P4 — Goal 0022: trustworthy native PDF embedded text + TTS
 
-**READY A3 — CURRENT SUBSTANTIVE PRODUCT PRIORITY**
+**READY A4 — CURRENT SUBSTANTIVE PRODUCT PRIORITY**
 
-A1 and A2 are rejected before human QA; neither is accepted for physical testing.
+A1, A2, and A3 were rejected before human QA; none is accepted for physical testing.
 
-A3 preserves the native-only embedded-text direction while closing the remaining production gaps:
+A3 fixed substantial architecture: trusted policy promotion, Current/Nearby raster preemption, off-thread preparation/persistence, and bounded eight-page native extraction. Fresh hosted Windows CI passed.
 
-- trusted text must promote the real render-only PDF session into a truthful trusted-text/no-exact-geometry policy so Text-only, search, and ordinary Windows TTS actually become usable;
-- the egui adoption commit must stay bounded and must not build an ordinary document-scale `ReaderSnapshot` or own/drop duplicate full cache payloads;
-- both Current and queued visible/Nearby raster work must outrank background text extraction;
-- cooperative extraction must stop reopening/reparsing the PDF once per page while retaining frequent arbitration points.
+A4 owns the remaining production blockers:
+
+- native-text cache lookup/read/parse must move completely off the egui frame;
+- trusted-text adoption must publish through a genuinely bounded runtime patch rather than `snapshot_internal()` with its counter disabled;
+- advertised `FullText` PDF search must actually search the whole canonical native-page-aligned document and navigate to later-page results;
+- UI-facing native metadata/text request submission must be nonblocking under bounded-channel saturation.
 
 Hard exclusions remain: Quack-check, Python, Docling, OCR, exact sentence overlays, and hostile-PDF recovery.
 
-The visual reader must remain usable before, during, and after text enrichment failure.
+The visual reader must remain usable before, during, and after text/cache enrichment failure.
 
-Authoritative A3 contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
-A2 rejection: `docs/work/reviews/0022-a2-director-rejection.md`.
+Authoritative A4 contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
+A3 rejection: `docs/work/reviews/0022-a3-director-rejection.md`.
 Architecture boundary: `docs/architecture/pdf-text-recovery-boundary-2026-09.md`.
 
 ## P4.1 — Native PDF sentence geometry/highlight/follow
