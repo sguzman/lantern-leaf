@@ -961,13 +961,16 @@ impl LanternLeafApp {
         let config_service: Arc<dyn config_service::ConfigService> =
             Arc::new(config_service::FilesystemConfigService);
         let config_path = app_config_path();
-        let effect_context = EffectContext::with_services(
+        #[cfg(not(target_arch = "wasm32"))]
+        let (pdf_worker, pdf_service) = PdfRenderWorker::start();
+        let effect_context = EffectContext::with_services_and_pdf_service(
             app_config.clone(),
             normalizer.clone(),
             Arc::clone(&persistence),
             Arc::clone(&cache_service),
             config_path,
             Arc::clone(&config_service),
+            pdf_service,
         );
         let effect_session = Arc::clone(&effect_context.session);
         let effect_dispatcher = EffectDispatcher::new(effect_context, Some(cc.egui_ctx.clone()));
@@ -1019,7 +1022,7 @@ impl LanternLeafApp {
             scheduler_events: Vec::new(),
             pdf_render_state: PdfRenderState::default(),
             #[cfg(not(target_arch = "wasm32"))]
-            pdf_worker: PdfRenderWorker::start(),
+            pdf_worker,
             #[cfg(not(target_arch = "wasm32"))]
             pdf_textures: HashMap::new(),
             #[cfg(not(target_arch = "wasm32"))]
@@ -1097,13 +1100,16 @@ impl LanternLeafApp {
         let config_service: Arc<dyn config_service::ConfigService> =
             Arc::new(config_service::FilesystemConfigService);
 
-        let effect_context = EffectContext::with_services(
+        #[cfg(not(target_arch = "wasm32"))]
+        let (pdf_worker, pdf_service) = PdfRenderWorker::start();
+        let effect_context = EffectContext::with_services_and_pdf_service(
             app_config.clone(),
             normalizer.clone(),
             Arc::clone(&persistence),
             Arc::clone(&cache_service),
             PathBuf::new(),
             Arc::clone(&config_service),
+            pdf_service,
         );
         let effect_session = Arc::clone(&effect_context.session);
         let effect_dispatcher = EffectDispatcher::new(effect_context, Some(cc.egui_ctx.clone()));
@@ -1154,7 +1160,7 @@ impl LanternLeafApp {
             scheduler_events: Vec::new(),
             pdf_render_state: PdfRenderState::default(),
             #[cfg(not(target_arch = "wasm32"))]
-            pdf_worker: PdfRenderWorker::start(),
+            pdf_worker,
             #[cfg(not(target_arch = "wasm32"))]
             pdf_textures: HashMap::new(),
             #[cfg(not(target_arch = "wasm32"))]

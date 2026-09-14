@@ -7,10 +7,11 @@ use std::{
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
     sync::{
-        Arc, Condvar, Mutex,
+        atomic::{AtomicBool, Ordering},
+        Arc, Condvar, Mutex, OnceLock, Weak,
         mpsc::{self, Receiver},
     },
-    thread,
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
@@ -205,14 +206,6 @@ impl NativePdfRenderer {
     pub fn drain_eviction_events(&mut self) -> Vec<NativeRenderEviction> {
         std::mem::take(&mut self.eviction_events)
     }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn probe_pdf_page_count(source_path: &Path) -> Result<usize, String> {
-    let renderer = NativePdfRenderer::new().map_err(|err| format!("{err:?}"))?;
-    renderer
-        .page_count(source_path)
-        .map_err(|err| format!("{err:?}"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -493,31 +486,106 @@ pub(crate) struct PdfRenderResult {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) struct PdfRenderWorker {
-    scheduler: Arc<(Mutex<PdfRenderScheduler>, Condvar)>,
-    result_rx: Receiver<PdfRenderResult>,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PdfMetadata {
+    pub page_count: usize,
+    pub worker_thread: thread::ThreadId,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl PdfRenderWorker {
+struct PdfMetadataRequest {
+    source: PathBuf,
+    reply: mpsc::SyncSender<Result<PdfMetadata, String>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
+pub(crate) struct PdfNativeService {
+    scheduler: Arc<(Mutex<PdfRenderScheduler>, Condvar)>,
+    metadata_tx: mpsc::SyncSender<PdfMetadataRequest>,
+    result_rx: Arc<Mutex<Receiver<PdfRenderResult>>>,
+    lifetime: Arc<()>,
+    shutdown: Arc<AtomicBool>,
+    worker: Arc<Mutex<Option<JoinHandle<()>>>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PdfNativeService {
+    #[cfg(test)]
+    pub(crate) fn test_stub() -> Self {
+        Self {
+            scheduler: Arc::new((Mutex::new(PdfRenderScheduler::default()), Condvar::new())),
+            metadata_tx: mpsc::sync_channel(1).0,
+            result_rx: Arc::new(Mutex::new(mpsc::sync_channel(1).1)),
+            lifetime: Arc::new(()),
+            shutdown: Arc::new(AtomicBool::new(true)),
+            worker: Arc::new(Mutex::new(None)),
+        }
+    }
+
     pub(crate) fn start() -> Self {
+        #[cfg(test)]
+        return Self::start_owned();
+
+        #[cfg(not(test))]
+        {
+        static SERVICE: OnceLock<PdfNativeService> = OnceLock::new();
+            SERVICE.get_or_init(Self::start_owned).clone()
+        }
+    }
+
+    fn start_owned() -> Self {
         let scheduler = Arc::new((Mutex::new(PdfRenderScheduler::default()), Condvar::new()));
         let worker_scheduler = Arc::clone(&scheduler);
+        let lifetime = Arc::new(());
+        let worker_lifetime = Arc::downgrade(&lifetime);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let worker_shutdown = Arc::clone(&shutdown);
+        let (metadata_tx, metadata_rx) = mpsc::sync_channel::<PdfMetadataRequest>(2);
         let (result_tx, result_rx) = mpsc::sync_channel(PDF_RENDER_QUEUE_CAPACITY);
-        thread::Builder::new()
-            .name("lanternleaf-pdf-render".to_string())
+        let worker_handle = thread::Builder::new()
+            .name("lanternleaf-pdf-native".to_string())
             .spawn(move || {
                 let mut renderer = NativePdfRenderer::new().ok();
                 let worker_thread = thread::current().id();
                 loop {
+                    if worker_lifetime.upgrade().is_none()
+                        || worker_shutdown.load(Ordering::Acquire)
+                    {
+                        break;
+                    }
+                    if let Ok(request) = metadata_rx.try_recv() {
+                        let result = match renderer.as_ref() {
+                            Some(renderer) => validate_pdf_source(&request.source)
+                                .and_then(|()| {
+                                    renderer.page_count(&request.source).map_err(|err| format!("{err:?}"))
+                                })
+                                .map(|page_count| PdfMetadata {
+                                    page_count,
+                                    worker_thread,
+                                }),
+                            None => Err("native PDF service is unavailable".to_string()),
+                        };
+                        let _ = request.reply.send(result);
+                        continue;
+                    }
+
                     let key = {
                         let (lock, wake) = &*worker_scheduler;
                         let mut scheduler = lock.lock().expect("PDF scheduler lock");
                         loop {
+                            if worker_lifetime.upgrade().is_none()
+                                || worker_shutdown.load(Ordering::Acquire)
+                            {
+                                return;
+                            }
                             if let Some(key) = scheduler.take_next() {
                                 break key;
                             }
-                            scheduler = wake.wait(scheduler).expect("PDF scheduler wait");
+                            let (next_scheduler, _) = wake
+                                .wait_timeout(scheduler, Duration::from_millis(10))
+                                .expect("PDF scheduler wait");
+                            scheduler = next_scheduler;
                         }
                     };
                     let image = match renderer.as_mut() {
@@ -530,7 +598,7 @@ impl PdfRenderWorker {
                             )
                             .map(|outcome| outcome.image)
                             .map_err(|err| format!("{err:?}")),
-                        None => Err("native PDF renderer is unavailable".to_string()),
+                        None => Err("native PDF service is unavailable".to_string()),
                     };
                     if result_tx
                         .send(PdfRenderResult {
@@ -544,14 +612,32 @@ impl PdfRenderWorker {
                     }
                 }
             })
-            .expect("PDF render worker must start");
+            .expect("PDF native service must start");
         Self {
             scheduler,
-            result_rx,
+            metadata_tx,
+            result_rx: Arc::new(Mutex::new(result_rx)),
+            lifetime,
+            shutdown,
+            worker: Arc::new(Mutex::new(Some(worker_handle))),
         }
     }
 
-    pub(crate) fn request(&mut self, key: PdfRenderKey, priority: PdfRequestPriority) -> bool {
+    pub(crate) fn metadata(&self, source: PathBuf) -> Result<PdfMetadata, String> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        self.metadata_tx
+            .send(PdfMetadataRequest {
+                source,
+                reply: reply_tx,
+            })
+            .map_err(|_| "native PDF service stopped".to_string())?;
+        self.scheduler.1.notify_one();
+        reply_rx
+            .recv()
+            .map_err(|_| "native PDF metadata request stopped".to_string())?
+    }
+
+    fn submit_render(&self, key: PdfRenderKey, priority: PdfRequestPriority) -> bool {
         let (lock, wake) = &*self.scheduler;
         let submitted = lock
             .lock()
@@ -563,10 +649,68 @@ impl PdfRenderWorker {
         submitted
     }
 
+    fn shutdown(&self) {
+        self.shutdown.store(true, Ordering::Release);
+        self.scheduler.1.notify_all();
+        if let Some(worker) = self.worker.lock().expect("PDF worker lock").take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for PdfNativeService {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.lifetime) == 1 {
+            self.shutdown();
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn validate_pdf_source(source: &Path) -> Result<(), String> {
+    let bytes = std::fs::read(source).map_err(|err| err.to_string())?;
+    if !bytes.starts_with(b"%PDF-") || !bytes.windows(b"%%EOF".len()).any(|window| window == b"%%EOF") {
+        return Err("source is not a complete PDF document".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct PdfRenderWorker {
+    service: PdfNativeService,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PdfRenderWorker {
+    pub(crate) fn start() -> (Self, PdfNativeService) {
+        #[cfg(test)]
+        {
+            let service = PdfNativeService::test_stub();
+            return (Self { service: service.clone() }, service);
+        }
+
+        #[cfg(not(test))]
+        {
+        let service = PdfNativeService::start();
+            (Self { service: service.clone() }, service)
+        }
+    }
+
+    pub(crate) fn from_service(service: PdfNativeService) -> Self {
+        Self { service }
+    }
+
+    pub(crate) fn request(&mut self, key: PdfRenderKey, priority: PdfRequestPriority) -> bool {
+        self.service.submit_render(key, priority)
+    }
+
     pub(crate) fn drain(&mut self) -> Vec<PdfRenderResult> {
         let mut results = Vec::new();
-        while let Ok(result) = self.result_rx.try_recv() {
-            self.scheduler
+        let result_rx = self.service.result_rx.lock().expect("PDF result lock");
+        while let Ok(result) = result_rx.try_recv() {
+            self.service
+                .scheduler
                 .0
                 .lock()
                 .expect("PDF scheduler lock")
@@ -577,11 +721,17 @@ impl PdfRenderWorker {
     }
 
     pub(crate) fn pending_len(&self) -> usize {
-        self.scheduler
+        self.service
+            .scheduler
             .0
             .lock()
             .expect("PDF scheduler lock")
             .pending_len()
+    }
+
+    #[cfg(test)]
+    fn shutdown(&self) {
+        self.service.shutdown();
     }
 }
 
@@ -758,7 +908,8 @@ mod tests {
     }
 
     #[test]
-    fn native_metadata_counts_real_pages_and_rejects_header_only_input() {
+    #[ignore = "run as a dedicated process-wide Pdfium lifecycle probe"]
+    fn production_service_uses_one_owner_for_metadata_and_raster_and_rejects_malformed_input() {
         let root =
             std::env::temp_dir().join(format!("lanternleaf-pdf-probe-{}", std::process::id()));
         std::fs::create_dir_all(&root).expect("probe temp directory");
@@ -767,8 +918,34 @@ mod tests {
         std::fs::write(&valid, two_page_pdf_bytes()).expect("valid PDF");
         std::fs::write(&invalid, b"%PDF-1.7\n").expect("header-only PDF");
 
-        assert_eq!(probe_pdf_page_count(&valid).expect("native page count"), 2);
-        assert!(probe_pdf_page_count(&invalid).is_err());
+        let service = PdfNativeService::start();
+        let metadata = service.metadata(valid.clone()).expect("native page count");
+        assert_eq!(metadata.page_count, 2);
+        assert!(service.metadata(invalid).is_err());
+
+        let mut worker = PdfRenderWorker::from_service(service);
+        let render_key = PdfRenderKey {
+            source: valid,
+            generation: 1,
+            page_index: 0,
+            width: 832,
+            height: 1200,
+        };
+        assert!(worker.request(render_key.clone(), PdfRequestPriority::Current));
+        let result = (0..200).find_map(|_| {
+            let result = worker
+                .drain()
+                .into_iter()
+                .find(|result| result.key == render_key);
+            if result.is_none() {
+                thread::sleep(Duration::from_millis(10));
+            }
+            result
+        });
+        let result = result.expect("shared native service render result");
+        assert!(result.image.is_ok());
+        assert_eq!(metadata.worker_thread, result.worker_thread);
+        worker.shutdown();
 
         let _ = std::fs::remove_dir_all(root);
     }

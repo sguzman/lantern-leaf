@@ -1,5 +1,6 @@
 use eframe::egui;
 use std::path::PathBuf;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Instant;
@@ -19,6 +20,8 @@ use lanternleaf_core::{
 use tracing::{debug, error, info, trace, warn};
 
 use crate::helpers::bootstrap_config_from_app_config;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::pdf_renderer::PdfNativeService;
 
 type EffectHandler =
     Arc<dyn Fn(EffectContext, PlannedEffect, mpsc::Sender<AppEvent>) + Send + Sync>;
@@ -34,6 +37,8 @@ pub struct EffectContext {
     pub cache_service: Arc<dyn cache_service::CacheService>,
     pub config_path: PathBuf,
     pub config_service: Arc<dyn config_service::ConfigService>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) pdf_service: PdfNativeService,
 }
 
 impl EffectContext {
@@ -66,6 +71,23 @@ impl EffectContext {
         config_path: PathBuf,
         config_service: Arc<dyn config_service::ConfigService>,
     ) -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            #[cfg(test)]
+            let pdf_service = PdfNativeService::test_stub();
+            #[cfg(not(test))]
+            let pdf_service = PdfNativeService::start();
+            return Self::with_services_and_pdf_service(
+                config,
+                normalizer,
+                persistence,
+                cache_service,
+                config_path,
+                config_service,
+                pdf_service,
+            );
+        }
+        #[cfg(target_arch = "wasm32")]
         Self {
             config: Arc::new(Mutex::new(config)),
             normalizer: Arc::new(normalizer),
@@ -76,6 +98,30 @@ impl EffectContext {
             cache_service,
             config_path,
             config_service,
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn with_services_and_pdf_service(
+        config: config::AppConfig,
+        normalizer: normalizer::TextNormalizer,
+        persistence: Arc<lanternleaf_app::persistence::PersistenceLifecycle>,
+        cache_service: Arc<dyn cache_service::CacheService>,
+        config_path: PathBuf,
+        config_service: Arc<dyn config_service::ConfigService>,
+        pdf_service: PdfNativeService,
+    ) -> Self {
+        Self {
+            config: Arc::new(Mutex::new(config)),
+            normalizer: Arc::new(normalizer),
+            calibre_config: Arc::new(calibre::CalibreConfig::load_default()),
+            session: Arc::new(Mutex::new(None)),
+            panels: Arc::new(Mutex::new(session::PanelState::default())),
+            persistence,
+            cache_service,
+            config_path,
+            config_service,
+            pdf_service,
         }
     }
 }
@@ -96,7 +142,7 @@ impl EffectDispatcher {
         egui_ctx: Option<egui::Context>,
         handler: EffectHandler,
     ) -> Self {
-        let (effect_tx, effect_rx) = mpsc::channel();
+        let (effect_tx, effect_rx) = mpsc::channel::<PlannedEffect>();
         let (event_tx, event_rx) = mpsc::channel();
 
         // Internal channel that will proxy to the final event_tx and trigger repaint
@@ -119,7 +165,30 @@ impl EffectDispatcher {
                 let ctx = context.clone();
                 let handler = handler.clone();
                 let event_tx = dispatcher_internal_tx.clone();
-                thread::spawn(move || handler(ctx, planned, event_tx));
+                thread::spawn(move || {
+                    let request_id = planned.request_id;
+                    let failure_effect = planned.effect.clone();
+                    if catch_unwind(AssertUnwindSafe(|| handler(ctx, planned, event_tx.clone())))
+                        .is_err()
+                    {
+                        let error = BridgeError {
+                            code: "effect_panicked".to_string(),
+                            message: "A runtime effect worker panicked; the operation was terminated."
+                                .to_string(),
+                        };
+                        emit_failure_progress(
+                            &failure_effect,
+                            request_id,
+                            &event_tx,
+                            Some(error.message.clone()),
+                        );
+                        let _ = event_tx.send(AppEvent::CommandFailed {
+                            request_id,
+                            scope: effect_scope(&failure_effect),
+                            error,
+                        });
+                    }
+                });
             }
         });
 
@@ -1042,8 +1111,11 @@ fn open_source_from_path(
     let config = load_config(context)?;
     let native_pdf_page_count = if source_is_pdf {
         Some(
-            crate::pdf_renderer::probe_pdf_page_count(&source_path)
-                .map_err(|err| bridge_error("source_open_failed", err))?,
+            context
+                .pdf_service
+                .metadata(source_path.clone())
+                .map_err(|err| bridge_error("source_open_failed", err))?
+                .page_count,
         )
     } else {
         None
@@ -1434,6 +1506,44 @@ mod tests {
             .expect("worker thread started");
         assert_ne!(worker_id, thread::current().id());
         let _ = release_tx.send(());
+    }
+
+    #[test]
+    fn detached_effect_panic_emits_terminal_failure() {
+        let context = EffectContext::new(
+            config::AppConfig::default(),
+            normalizer::TextNormalizer::default(),
+            Arc::new(lanternleaf_app::persistence::PersistenceLifecycle::new(
+                Arc::new(lanternleaf_app::persistence::FilesystemPersistenceService::default()),
+            )),
+            std::env::temp_dir().join("lanternleaf-egui-effect-panic-test.toml"),
+        );
+        let handler: EffectHandler = Arc::new(|_, _, _| panic!("synthetic effect panic"));
+        let dispatcher = EffectDispatcher::with_handler(context, None, handler);
+        dispatcher.dispatch(PlannedEffect {
+            request_id: 777,
+            effect: RuntimeEffect::OpenSourcePath {
+                path: "synthetic.pdf".to_string(),
+            },
+        });
+
+        let terminal = (0..100).find_map(|_| {
+            let event = dispatcher.drain_events().into_iter().find(|event| {
+                matches!(
+                    event,
+                    AppEvent::CommandFailed {
+                        request_id: 777,
+                        error,
+                        ..
+                    } if error.code == "effect_panicked"
+                )
+            });
+            if event.is_none() {
+                thread::sleep(Duration::from_millis(10));
+            }
+            event
+        });
+        assert!(terminal.is_some(), "effect panic must terminalize operation");
     }
 
     struct TestConfigService {
