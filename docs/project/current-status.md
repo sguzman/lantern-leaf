@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-14 after Goal 0016 real-desktop closure and Goal 0019 promotion.
+Updated: 2026-09-14 after Goal 0019 A3 real-desktop rejection and A4 reopening.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -79,9 +79,9 @@ The earlier `42866` incident remains withdrawn as evidence of a LanternLeaf mate
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-Goal 0016 is closed. The real 105,570-book Caliberate library now becomes usable while the catalog is still loading: provider pages publish progressively, the starter shell shows truthful loaded/total progress, final reconciliation preserves live cover state, and successful source persistence refreshes Recents in the same process.
+The real 105,570-book Caliberate library becomes usable while the catalog is still loading: provider pages publish progressively, the starter shell shows truthful loaded/total progress, final reconciliation preserves live cover state, and successful source persistence refreshes Recents in the same process.
 
-Physical Windows closure also verified durable Recents after restart, immediate warm cached EPUB reopen, and preservation of EPUB TTS / visual settings. The first open after `-ResetQaState` was slower because the isolated QA materialization/document cache was deliberately cold; this is retained as performance evidence rather than a demonstrated normal-path regression.
+Physical Windows closure also verified durable Recents after restart, immediate warm cached EPUB reopen, and preservation of EPUB TTS / visual settings.
 
 See `docs/work/reviews/0016-a2-real-desktop-acceptance.md`.
 
@@ -91,11 +91,13 @@ See `docs/work/reviews/0016-a2-real-desktop-acceptance.md`.
 
 Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow without permanent highlight pinning or fighting user scrolling. Media-related severe reflow remains part of this bounded polish track.
 
-## Goal 0017 — progressive cover backpressure/error-state polish
+## Goal 0017 — progressive cover backpressure / cached-hydration scaling
 
-**QUEUED — MINOR LIBRARY POLISH**
+**QUEUED — CONFIRMED LIBRARY SCALING POLISH**
 
-During the full cold catalog walk, short cover timeouts can temporarily surface `Cover fetch/decode failed` and cause visible-row retry churn before covers later succeed. This goal owns provider-pressure-aware retry/backoff and readable theme-aware catalog error presentation, including removal of the hard-coded yellow-on-light-theme message.
+Cold progressive-load QA showed short cover timeouts/retry churn. A later warm cached run additionally proved multiple local thumbnail-hydration passes were scanning roughly the entire ~104,732-row cache, hitting ~4-second budgets and rewriting the giant catalog cache. Goal 0017 now owns both provider-pressure retry/backoff and elimination of repeated O(total-books) cached thumbnail rediscovery, plus readable theme-aware errors and bounded logging.
+
+The accepted direction remains lazy visible/near-visible ownership or one bounded/indexed cache association mechanism; warm startup must not scan ~105k rows merely to rediscover thumbnail files.
 
 ## Goal 0018 — Windows QA bootstrap idempotence
 
@@ -111,22 +113,25 @@ Preserve the existing ordinary Windows voice backend. Goal 0011 remains a dorman
 
 ## Goal 0019 / Gate 3 — native PDF visual stability
 
-**READY NEXT — ONE AUTHORIZED MACRO-GOAL**
+**READY NEXT — REOPENED FOR A4 AFTER REAL-DESKTOP FAILURE**
 
-Current physical PDF behavior is not accepted as a working reader. The repository has useful native Pdfium, viewport, cache, zoom, and diagnostic scaffolding, but the user-facing Reader surface still does not provide a real accepted native page view.
+A1/A2/A3 produced a sound native Pdfium/egui renderer: bounded off-render-thread Pdfium work, stale-safe source/page/size identity, real presentation-scale zoom, current-priority scheduling, and deterministic current-page-pinned texture residency. A3 passed director source/CI review and was integrated to `main` for physical QA.
 
-Goal 0019 is now the one ready implementation goal. It must connect PDF page rastering to the native reader through a bounded off-render-thread worker, explicit stale-safe request ownership, real zoom-aware render keys, bounded texture/cache lifecycle, stable page navigation/resize/scroll behavior, and a user-facing native PDF canvas. It explicitly does not include PDF TTS/highlight synchronization.
+The first real Caliberate PDF open then failed **before Pdfium rendering**. Provider materialization succeeded, but the generic PDF source-ingestion path synchronously required a Quack-check transcript. The staged QA Quack-check `scripts_dir` resolved to a nonexistent `.qa/windows/scripts/quack-check` path, propagated `source_open_failed`, and transitioned the shell to `SourceError`.
+
+This is now treated as a Gate 3 architectural defect, not merely a QA path typo: native visual PDF opening must not depend on Quack-check/Python/Docling/OCR/transcript availability at all. Goal 0019 A4 must establish a visual-first PDF session so a readable local/materialized PDF can render immediately while text recovery is absent, degraded, deferred, or failed.
 
 Contract: `docs/work/ready/0019-native-pdf-visual-stability.md`.
+Review: `docs/work/reviews/0019-a3-real-desktop-rejection.md`.
 
 ## Gate 4 — PDF text/TTS/highlight synchronization
 
 **FUTURE CORE PRODUCT GATE**
 
-After Gate 3: canonical sentence/page mapping, geometry confidence/overlays, jump/follow behavior, OCR/degraded modes, first-sample playback integration, and representative regression corpus.
+After Gate 3: integrate canonical sentence/page mapping, geometry confidence/overlays, jump/follow behavior, OCR/degraded modes, first-sample playback integration, representative regression corpus, and the hostile-PDF recovery capabilities represented by Quack-check. Gate 4 recovery must remain subordinate to the visual reader rather than blocking it.
 
 ## Workflow status
 
-**GOAL 0019 READY NEXT**
+**GOAL 0019 A4 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
 
-Goal 0016 is closed. Goal 0019 is the only authorized ready macro-goal. Goals 0015, 0017, and 0018 remain queued; Goal 0011 remains deferred. No human PDF QA is authorized until Goal 0019 implementation passes director source/CI review and is integrated to `main`.
+Goal 0019 is reopened after physical rejection. A4 is the only authorized ready macro-goal. Goals 0015, 0017, and 0018 remain queued; Goal 0011 remains deferred. Do not request more human PDF QA until A4 implementation passes director source/CI review and is integrated to `main`.
