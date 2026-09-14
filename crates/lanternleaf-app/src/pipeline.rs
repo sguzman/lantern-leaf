@@ -457,6 +457,19 @@ pub fn plan_command(state: &AppState, request_id: u64, command: AppCommand) -> D
         };
     }
 
+    if state.starter.loading_calibre && matches!(command, AppCommand::LoadCalibreBooks { .. }) {
+        trace!(
+            action = action,
+            "Ignoring duplicate Calibre catalog refresh while the authoritative worker is active"
+        );
+        return DispatchPlan {
+            request_id,
+            action,
+            local_events: Vec::new(),
+            effects: Vec::new(),
+        };
+    }
+
     let (local_events, effects) = match command {
         AppCommand::Bootstrap => (
             vec![
@@ -656,30 +669,23 @@ pub fn plan_command(state: &AppState, request_id: u64, command: AppCommand) -> D
                 vec![effect],
             )
         }
-        AppCommand::LoadCalibreBooks { force_refresh } => {
-            let mut effects = Vec::new();
-            if !force_refresh && state.starter.calibre_books.is_empty() {
-                effects.push(RuntimeEffect::LoadCalibreCachedBooks);
-            }
-            effects.push(RuntimeEffect::LoadCalibreBooks { force_refresh });
-            (
-                vec![
-                    AppEvent::LoadingCalibreChanged(true),
-                    AppEvent::CalibreLoadProgress(CalibreLoadEvent {
-                        request_id,
-                        phase: "started".to_string(),
-                        count: Some(0),
-                        total: None,
-                        message: None,
-                    }),
-                    AppEvent::OperationChanged {
-                        scope: OperationScope::CalibreLoad,
-                        active: true,
-                    },
-                ],
-                effects,
-            )
-        }
+        AppCommand::LoadCalibreBooks { force_refresh } => (
+            vec![
+                AppEvent::LoadingCalibreChanged(true),
+                AppEvent::CalibreLoadProgress(CalibreLoadEvent {
+                    request_id,
+                    phase: "started".to_string(),
+                    count: Some(0),
+                    total: None,
+                    message: None,
+                }),
+                AppEvent::OperationChanged {
+                    scope: OperationScope::CalibreLoad,
+                    active: true,
+                },
+            ],
+            vec![RuntimeEffect::LoadCalibreBooks { force_refresh }],
+        ),
         AppCommand::OpenCalibreBook { book } => (
             vec![AppEvent::OperationChanged {
                 scope: OperationScope::SourceOpen,
@@ -1903,6 +1909,86 @@ mod tests {
             Some("newer.jpg")
         );
         assert_eq!(state.runtime_jobs.calibre_cover_events.len(), 1);
+    }
+
+    #[test]
+    fn catalog_reconciliation_preserves_live_cover_through_batch_and_completion() {
+        let mut state = AppState::default();
+        let book = |cover_thumbnail| CalibreBookDto {
+            id: 7,
+            title: "Cover book".to_string(),
+            extension: "epub".to_string(),
+            authors: "Author".to_string(),
+            year: None,
+            file_size_bytes: None,
+            source_path: None,
+            cover_thumbnail,
+            has_cover: true,
+        };
+        state.set_starter_calibre_books(vec![book(None)]);
+        apply_event(
+            &mut state,
+            AppEvent::CalibreCoverCompleted(CalibreCoverEvent {
+                request_id: 42,
+                book_id: 7,
+                outcome: "loaded".to_string(),
+                thumbnail_path: Some("live-thumb.jpg".to_string()),
+                message: None,
+            }),
+        );
+        apply_event(
+            &mut state,
+            AppEvent::CalibreBooksBatch {
+                request_id: 43,
+                books: vec![book(None)],
+                loaded_count: 1,
+                total: Some(1),
+            },
+        );
+        assert_eq!(
+            state.starter.calibre_books[0].cover_thumbnail.as_deref(),
+            Some("live-thumb.jpg")
+        );
+        apply_event(
+            &mut state,
+            AppEvent::CalibreBooksLoaded {
+                request_id: 43,
+                books: vec![book(None)],
+                from_cache: false,
+            },
+        );
+        assert_eq!(
+            state.starter.calibre_books[0].cover_thumbnail.as_deref(),
+            Some("live-thumb.jpg")
+        );
+        apply_event(
+            &mut state,
+            AppEvent::CalibreBooksLoaded {
+                request_id: 44,
+                books: vec![book(Some("explicit-new.jpg".to_string()))],
+                from_cache: false,
+            },
+        );
+        assert_eq!(
+            state.starter.calibre_books[0].cover_thumbnail.as_deref(),
+            Some("explicit-new.jpg")
+        );
+    }
+
+    #[test]
+    fn duplicate_catalog_refresh_is_not_planned_while_worker_is_active() {
+        let mut state = AppState::default();
+        state.starter.loading_calibre = true;
+        state.app_shell.operations.calibre_load = true;
+        let plan = plan_command(
+            &state,
+            88,
+            AppCommand::LoadCalibreBooks {
+                force_refresh: true,
+            },
+        );
+        assert!(plan.local_events.is_empty());
+        assert!(plan.effects.is_empty());
     }
 
     #[test]

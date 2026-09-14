@@ -236,7 +236,12 @@ fn execute_effect(
             }
         }
         Err(error) => {
-            emit_failure_progress(&failure_effect, request_id, &event_tx);
+            emit_failure_progress(
+                &failure_effect,
+                request_id,
+                &event_tx,
+                Some(error.message.clone()),
+            );
             error!(
                 request_id,
                 code = %error.code,
@@ -1253,7 +1258,12 @@ fn effect_scope(effect: &RuntimeEffect) -> Option<OperationScope> {
     }
 }
 
-fn emit_failure_progress(effect: &RuntimeEffect, request_id: u64, tx: &mpsc::Sender<AppEvent>) {
+fn emit_failure_progress(
+    effect: &RuntimeEffect,
+    request_id: u64,
+    tx: &mpsc::Sender<AppEvent>,
+    message: Option<String>,
+) {
     match effect {
         RuntimeEffect::OpenSourcePath { .. }
         | RuntimeEffect::OpenClipboardText { .. }
@@ -1284,7 +1294,7 @@ fn emit_failure_progress(effect: &RuntimeEffect, request_id: u64, tx: &mpsc::Sen
                 phase: "failed".to_string(),
                 count: None,
                 total: None,
-                message: Some("Calibre load failed".to_string()),
+                message: message.or_else(|| Some("Calibre load failed".to_string())),
             }));
         }
         _ => {}
@@ -1294,9 +1304,85 @@ fn emit_failure_progress(effect: &RuntimeEffect, request_id: u64, tx: &mpsc::Sen
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::time::Duration;
+
+    #[test]
+    fn calibre_effect_reports_failed_refresh_after_publishing_fresh_rows() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            for (status, body) in [
+                (
+                    "HTTP/1.1 200 OK",
+                    br#"{"items":[{"id":41,"title":"Fresh","authors":["Author"],"formats":[{"format":"EPUB","size_bytes":10}]}],"total":2,"offset":0,"limit":500}"#.to_vec(),
+                ),
+                (
+                    "HTTP/1.1 503 Service Unavailable",
+                    b"provider down".to_vec(),
+                ),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 2048];
+                let _ = stream.read(&mut request);
+                let header = format!(
+                    "{status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(header.as_bytes()).unwrap();
+                stream.write_all(&body).unwrap();
+            }
+        });
+
+        let mut calibre_config = calibre::CalibreConfig::default();
+        calibre_config.enabled = true;
+        calibre_config.provider = calibre::CalibreProvider::Caliberate;
+        calibre_config.library_url = Some(format!("http://{address}"));
+        calibre_config.allowed_extensions = vec!["epub".to_string()];
+        let base_context = EffectContext::new(
+            config::AppConfig::default(),
+            normalizer::TextNormalizer::default(),
+            Arc::new(lanternleaf_app::persistence::PersistenceLifecycle::new(
+                Arc::new(lanternleaf_app::persistence::FilesystemPersistenceService::default()),
+            )),
+            std::env::temp_dir().join("lanternleaf-egui-calibre-effect-test.toml"),
+        );
+        let context = EffectContext {
+            calibre_config: Arc::new(calibre_config),
+            ..base_context
+        };
+        let (event_tx, event_rx) = mpsc::channel();
+        execute_effect(
+            context,
+            PlannedEffect {
+                request_id: 71,
+                effect: RuntimeEffect::LoadCalibreBooks {
+                    force_refresh: true,
+                },
+            },
+            event_tx,
+        );
+        let events: Vec<_> = event_rx.try_iter().collect();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            AppEvent::CalibreBooksBatch { books, .. } if books.iter().any(|book| book.id == 41)
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            AppEvent::CalibreLoadProgress(progress)
+                if progress.phase == "failed"
+                    && progress.message.as_deref().unwrap_or_default().contains("HTTP 503")
+        )));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, AppEvent::CalibreBooksLoaded { .. }))
+        );
+        server.join().unwrap();
+    }
 
     #[test]
     fn dispatcher_runs_effects_off_thread() {

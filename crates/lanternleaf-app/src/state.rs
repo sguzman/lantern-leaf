@@ -406,6 +406,22 @@ impl AppState {
     }
 
     pub fn set_starter_calibre_books(&mut self, calibre_books: Vec<CalibreBookDto>) {
+        let live_covers: HashMap<u64, String> = self
+            .starter
+            .calibre_books
+            .iter()
+            .filter_map(|book| {
+                book.cover_thumbnail
+                    .as_ref()
+                    .map(|cover| (book.id, cover.clone()))
+            })
+            .collect();
+        let mut calibre_books = calibre_books;
+        for book in &mut calibre_books {
+            if book.cover_thumbnail.is_none() {
+                book.cover_thumbnail = live_covers.get(&book.id).cloned();
+            }
+        }
         self.starter.calibre_catalog_index = Arc::new(
             calibre_books
                 .iter()
@@ -419,8 +435,11 @@ impl AppState {
     pub fn merge_starter_calibre_batch(&mut self, batch: Vec<CalibreBookDto>) {
         let books = Arc::make_mut(&mut self.starter.calibre_books);
         let index = Arc::make_mut(&mut self.starter.calibre_catalog_index);
-        for book in batch {
+        for mut book in batch {
             if let Some(&book_index) = index.get(&book.id) {
+                if book.cover_thumbnail.is_none() {
+                    book.cover_thumbnail = books[book_index].cover_thumbnail.clone();
+                }
                 books[book_index] = book;
             } else {
                 let book_index = books.len();

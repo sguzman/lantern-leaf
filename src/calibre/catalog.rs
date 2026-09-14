@@ -111,7 +111,12 @@ where
         info!("Calibre cache missing/incompatible; fetching from source via HTTP API");
     }
 
-    let mut books = match fetch_books_with_progress(config, cancel, &mut on_batch) {
+    let mut fresh_batch_count = 0usize;
+    let mut emit_fresh_batch = |batch: Vec<CalibreBook>, loaded: usize, total: Option<usize>| {
+        fresh_batch_count += 1;
+        on_batch(batch, loaded, total);
+    };
+    let mut books = match fetch_books_with_progress(config, cancel, &mut emit_fresh_batch) {
         Ok(books) => books,
         Err(err) => {
             ensure_not_cancelled(cancel, "after_fetch_books_failed")?;
@@ -119,7 +124,8 @@ where
                 warn!(
                     error = %err,
                     book_count = cached.len(),
-                    "Failed to fetch calibre catalog; falling back to cached catalog"
+                    fresh_batches = fresh_batch_count,
+                    "Failed to fetch calibre catalog; retaining fallback catalog data while reporting refresh failure"
                 );
                 let changed = hydrate_book_thumbnails(
                     config,
@@ -129,16 +135,20 @@ where
                     cancel,
                     matches!(config.provider, CalibreProvider::Calibre),
                 );
-                if changed {
-                    let _ = write_cache(config, &signature, &cached);
+                if fresh_batch_count == 0 {
+                    if changed {
+                        info!(
+                            book_count = cached.len(),
+                            "Hydrated fallback calibre catalog in memory"
+                        );
+                    }
+                    let fallback_count = cached.len();
+                    on_batch(cached, fallback_count, Some(fallback_count));
                 }
-                on_batch(cached.clone(), cached.len(), Some(cached.len()));
-                info!(
-                    book_count = cached.len(),
-                    elapsed_ms = started.elapsed().as_millis(),
-                    "Finished calibre catalog load from fallback cache"
-                );
-                return Ok(cached);
+                return Err(anyhow!(
+                    "calibre provider refresh failed after {} fresh page(s): {err}",
+                    fresh_batch_count
+                ));
             }
             return Err(err);
         }
@@ -460,12 +470,94 @@ mod tests {
             std::slice::from_ref(&caliberate_book),
         )
         .unwrap();
-        let fallback = load_books_with_cancel(&caliberate, true, None).unwrap();
-        assert_eq!(fallback.len(), 1);
-        assert_eq!(fallback[0].title, caliberate_book.title);
-        assert_eq!(fallback[0].id, caliberate_book.id);
+        let mut fallback_batches = Vec::new();
+        let error = load_books_with_progress(&caliberate, true, None, |batch, loaded, total| {
+            fallback_batches.push((batch, loaded, total));
+        })
+        .expect_err("stale fallback must not convert provider failure into success");
+        assert!(
+            error
+                .to_string()
+                .contains("calibre provider refresh failed")
+        );
+        assert_eq!(fallback_batches.len(), 1);
+        assert_eq!(fallback_batches[0].0[0].title, caliberate_book.title);
+        assert_eq!(fallback_batches[0].0[0].id, caliberate_book.id);
+        assert_eq!(fallback_batches[0].1, 1);
+        assert_eq!(fallback_batches[0].2, Some(1));
         let _ = fs::remove_file(cache_store::calibre_cache_path_for(&legacy));
         let _ = fs::remove_file(cache_store::calibre_cache_path_for(&caliberate));
+    }
+
+    #[test]
+    fn progressive_provider_failure_preserves_fresh_rows_and_reports_degraded_refresh() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            for (index, body) in [
+                (
+                    "HTTP/1.1 200 OK",
+                    br#"{"items":[{"id":41,"title":"Fresh","authors":["Author"],"formats":[{"format":"EPUB","size_bytes":10}]}],"total":2,"offset":0,"limit":500}"#.to_vec(),
+                ),
+                (
+                    "HTTP/1.1 503 Service Unavailable",
+                    b"provider down".to_vec(),
+                ),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 2048];
+                let _ = stream.read(&mut request);
+                let header = format!(
+                    "{status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len(),
+                    status = index
+                );
+                stream.write_all(header.as_bytes()).unwrap();
+                stream.write_all(&body).unwrap();
+            }
+        });
+
+        let mut config = CalibreConfig::default();
+        config.enabled = true;
+        config.provider = CalibreProvider::Caliberate;
+        config.library_url = Some(format!("http://{}", address));
+        config.allowed_extensions = vec!["epub".to_string()];
+        let cached_book = CalibreBook {
+            id: 99,
+            title: "Stale fallback".to_string(),
+            extension: "epub".to_string(),
+            authors: "Old".to_string(),
+            year: None,
+            file_size_bytes: Some(5),
+            cover_thumbnail: None,
+            has_cover: false,
+            path: None,
+        };
+        let signature = cache_signature(&config);
+        write_cache(&config, &signature, std::slice::from_ref(&cached_book)).unwrap();
+
+        let mut batches = Vec::new();
+        let error = load_books_with_progress(&config, true, None, |batch, loaded, total| {
+            batches.push((batch, loaded, total));
+        })
+        .expect_err("provider failure must remain a failed refresh");
+        assert!(
+            error
+                .to_string()
+                .contains("calibre provider refresh failed")
+        );
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].0[0].id, 41);
+        assert_eq!(batches[0].1, 1);
+        assert_eq!(batches[0].2, Some(2));
+        assert!(
+            !batches
+                .iter()
+                .any(|batch| batch.0.iter().any(|book| book.id == 99))
+        );
+
+        server.join().unwrap();
+        let _ = fs::remove_file(cache_store::calibre_cache_path_for(&config));
     }
 
     #[test]
