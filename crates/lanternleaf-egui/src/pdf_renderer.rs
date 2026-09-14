@@ -6,6 +6,7 @@ use std::{
     convert::TryFrom,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
+    io::{Read, Seek, SeekFrom},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Condvar, Mutex, OnceLock, Weak,
@@ -580,13 +581,17 @@ impl PdfNativeService {
                                 return;
                             }
                             if let Some(key) = scheduler.take_next() {
-                                break key;
+                                break Some(key);
                             }
                             let (next_scheduler, _) = wake
                                 .wait_timeout(scheduler, Duration::from_millis(10))
                                 .expect("PDF scheduler wait");
                             scheduler = next_scheduler;
+                            break None;
                         }
+                    };
+                    let Some(key) = key else {
+                        continue;
                     };
                     let image = match renderer.as_mut() {
                         Some(renderer) => renderer
@@ -669,8 +674,17 @@ impl Drop for PdfNativeService {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn validate_pdf_source(source: &Path) -> Result<(), String> {
-    let bytes = std::fs::read(source).map_err(|err| err.to_string())?;
-    if !bytes.starts_with(b"%PDF-") || !bytes.windows(b"%%EOF".len()).any(|window| window == b"%%EOF") {
+    const PDF_TAIL_CHECK_BYTES: u64 = 64 * 1024;
+    let mut file = std::fs::File::open(source).map_err(|err| err.to_string())?;
+    let mut header = [0u8; 5];
+    file.read_exact(&mut header).map_err(|err| err.to_string())?;
+    let length = file.metadata().map_err(|err| err.to_string())?.len();
+    let tail_length = length.min(PDF_TAIL_CHECK_BYTES);
+    file.seek(SeekFrom::End(-(tail_length as i64)))
+        .map_err(|err| err.to_string())?;
+    let mut tail = vec![0u8; tail_length as usize];
+    file.read_exact(&mut tail).map_err(|err| err.to_string())?;
+    if &header != b"%PDF-" || !tail.windows(b"%%EOF".len()).any(|window| window == b"%%EOF") {
         return Err("source is not a complete PDF document".to_string());
     }
     Ok(())
@@ -919,6 +933,7 @@ mod tests {
         std::fs::write(&invalid, b"%PDF-1.7\n").expect("header-only PDF");
 
         let service = PdfNativeService::start();
+        thread::sleep(Duration::from_millis(50));
         let metadata = service.metadata(valid.clone()).expect("native page count");
         assert_eq!(metadata.page_count, 2);
         assert!(service.metadata(invalid).is_err());
@@ -945,6 +960,14 @@ mod tests {
         let result = result.expect("shared native service render result");
         assert!(result.image.is_ok());
         assert_eq!(metadata.worker_thread, result.worker_thread);
+
+        thread::sleep(Duration::from_millis(50));
+        let second_metadata = worker
+            .service
+            .metadata(root.join("two-pages.pdf"))
+            .expect("second idle metadata request");
+        assert_eq!(second_metadata.page_count, 2);
+        assert_eq!(metadata.worker_thread, second_metadata.worker_thread);
         worker.shutdown();
 
         let _ = std::fs::remove_dir_all(root);
