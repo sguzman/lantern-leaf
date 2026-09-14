@@ -322,6 +322,7 @@ pub struct ReaderSession {
 pub struct PreparedPdfEmbeddedText {
     pub pages: Vec<String>,
     pub tts_text: String,
+    pub canonical_sentences: Vec<String>,
     pub page_sentences: Vec<Vec<String>>,
     pub page_sentence_counts: Vec<usize>,
     pub page_word_counts: Vec<usize>,
@@ -456,7 +457,7 @@ impl ReaderSession {
             &self.search_query,
             self.pdf_search_allowed(),
         )?;
-        self.apply_prepared_pdf_embedded_text(prepared)
+        self.apply_prepared_pdf_embedded_text(prepared).map(|_| ())
     }
 
     /// Build the complete canonical PDF text payload without touching a live
@@ -510,6 +511,7 @@ impl ReaderSession {
         }
         Ok(PreparedPdfEmbeddedText {
             tts_text: page_texts.join("\n\n"),
+            canonical_sentences: page_sentences.iter().flatten().cloned().collect(),
             pages: page_texts,
             page_sentences,
             page_sentence_counts,
@@ -524,7 +526,7 @@ impl ReaderSession {
     pub fn apply_prepared_pdf_embedded_text(
         &mut self,
         prepared: PreparedPdfEmbeddedText,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<String>, String> {
         if !self.is_pdf_source() {
             return Err("embedded PDF text requires a PDF session".to_string());
         }
@@ -535,6 +537,7 @@ impl ReaderSession {
                 prepared.pages.len()
             ));
         }
+        let canonical_sentences = prepared.canonical_sentences;
         self.tts_text = prepared.tts_text;
         self.pages = prepared.pages;
         self.markdown_pages.clear();
@@ -550,7 +553,18 @@ impl ReaderSession {
         self.current_plan = None;
         self.search_matches = prepared.search_matches;
         self.selected_search_match = (!self.search_matches.is_empty()).then_some(0);
-        Ok(())
+        self.pdf_runtime_policy = Some(crate::epub_loader::PdfRuntimePolicySummary {
+            text_only_policy: crate::epub_loader::PdfTextOnlyPolicy::FullText,
+            sentence_highlight_policy: crate::epub_loader::PdfSentenceHighlightPolicy::Disabled,
+            search_policy: crate::epub_loader::PdfSearchPolicy::FullText,
+            bookmark_policy: crate::epub_loader::PdfBookmarkPolicy::CanonicalText,
+            tts_allowed: true,
+            pretty_sync_enabled: false,
+            exact_sentence_sync: false,
+            explanation: "Trusted native embedded text is available; exact visual sentence geometry is not available yet.".to_string(),
+            degraded_reasons: Vec::new(),
+        });
+        Ok(canonical_sentences)
     }
 
     pub(crate) fn page_domain_len(&self) -> usize {
@@ -1371,14 +1385,39 @@ impl ReaderSession {
         panels: PanelState,
         normalizer: &normalizer::TextNormalizer,
     ) -> ReaderSnapshot {
-        self.snapshot_constructions.fetch_add(1, Ordering::SeqCst);
+        self.snapshot_internal(panels, normalizer, None, true)
+    }
+
+    /// Publish a native-PDF enrichment snapshot using canonical sentences that
+    /// were prepared off-thread. The caller transfers ownership, so this path
+    /// does not flatten or clone the document on egui.
+    pub fn snapshot_with_prepared_canonical_sentences(
+        &mut self,
+        panels: PanelState,
+        normalizer: &normalizer::TextNormalizer,
+        canonical_sentences: Vec<String>,
+    ) -> ReaderSnapshot {
+        self.snapshot_internal(panels, normalizer, Some(canonical_sentences), false)
+    }
+
+    fn snapshot_internal(
+        &mut self,
+        panels: PanelState,
+        normalizer: &normalizer::TextNormalizer,
+        prepared_canonical_sentences: Option<Vec<String>>,
+        count_construction: bool,
+    ) -> ReaderSnapshot {
+        if count_construction {
+            self.snapshot_constructions.fetch_add(1, Ordering::SeqCst);
+        }
         let snapshot_started = Instant::now();
         let sentences = self.current_sentences(normalizer);
-        let canonical_sentences = self
-            .raw_page_sentences
-            .iter()
-            .flat_map(|page| page.iter().cloned())
-            .collect();
+        let canonical_sentences = prepared_canonical_sentences.unwrap_or_else(|| {
+            self.raw_page_sentences
+                .iter()
+                .flat_map(|page| page.iter().cloned())
+                .collect()
+        });
         let sentence_anchor_map = self.current_sentence_anchor_map();
         let anchor_hits = sentence_anchor_map
             .iter()
@@ -2342,6 +2381,80 @@ mod tests {
             Some(crate::epub_loader::PdfSyncStrategy::RenderOnly)
         );
         assert!(snapshot.sentences.is_empty());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn trusted_native_text_promotes_render_only_pdf_capabilities_without_geometry() {
+        let path = unique_pdf_source_path();
+        fs::write(&path, b"%PDF-1.7\nvisual-session-fixture").expect("write readable PDF");
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = load_session_for_source(
+            path.clone(),
+            &config::AppConfig::default(),
+            &normalizer,
+        )
+        .expect("render-only PDF session");
+        session.set_pdf_page_count(2);
+        let initial = session.snapshot(PanelState::default(), &normalizer);
+        assert_eq!(
+            initial.pdf_runtime_policy.as_ref().map(|policy| policy.tts_allowed),
+            Some(false)
+        );
+        assert_eq!(
+            initial.pdf_runtime_policy.as_ref().map(|policy| policy.search_policy),
+            Some(crate::epub_loader::PdfSearchPolicy::Disabled)
+        );
+
+        let prepared = ReaderSession::prepare_pdf_embedded_text(
+            vec!["First native page.".to_string(), "Second native page.".to_string()],
+            "native",
+            true,
+        )
+        .expect("prepared trusted text");
+        let canonical_sentences = session
+            .apply_prepared_pdf_embedded_text(prepared)
+            .expect("trusted text adoption");
+        let before_bounded_snapshot = session.snapshot_constructions.load(Ordering::SeqCst);
+        let adopted = session.snapshot_with_prepared_canonical_sentences(
+            PanelState::default(),
+            &normalizer,
+            canonical_sentences,
+        );
+        assert_eq!(
+            session.snapshot_constructions.load(Ordering::SeqCst),
+            before_bounded_snapshot,
+            "prepared PDF publication must not increment ordinary snapshot construction"
+        );
+        let policy = adopted.pdf_runtime_policy.expect("promoted policy");
+        assert_eq!(policy.text_only_policy, crate::epub_loader::PdfTextOnlyPolicy::FullText);
+        assert_eq!(policy.search_policy, crate::epub_loader::PdfSearchPolicy::FullText);
+        assert!(policy.tts_allowed);
+        assert!(!policy.pretty_sync_enabled);
+        assert!(!policy.exact_sentence_sync);
+        assert_eq!(adopted.total_pages, 2);
+        assert_eq!(adopted.page_sentence_counts, vec![1, 1]);
+
+        session.toggle_text_only(&normalizer);
+        assert!(session.text_only_mode);
+        session.set_search_query("native".to_string(), &normalizer);
+        assert_eq!(session.search_matches, vec![0]);
+        session.tts_play(&normalizer);
+        assert_eq!(session.tts_state, TtsPlaybackState::Playing);
+
+        let mut rejected = load_session_for_source(
+            path.clone(),
+            &config::AppConfig::default(),
+            &normalizer,
+        )
+        .expect("second render-only PDF session");
+        rejected.set_pdf_page_count(2);
+        assert!(
+            rejected
+                .snapshot(PanelState::default(), &normalizer)
+                .pdf_runtime_policy
+                .is_some_and(|policy| !policy.tts_allowed)
+        );
         let _ = fs::remove_file(path);
     }
 

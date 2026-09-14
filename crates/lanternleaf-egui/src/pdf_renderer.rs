@@ -127,23 +127,29 @@ impl NativePdfRenderer {
         Ok(self.page_metadata(source_path)?.len())
     }
 
-    /// Extract exactly one page so the owning service can arbitrate between
-    /// background text work and visible raster work between pages.
-    pub(crate) fn extract_embedded_text_page(
+    /// Extract a bounded page chunk so the owner can yield between chunks
+    /// without reopening the native document once per page.
+    pub(crate) fn extract_embedded_text_pages(
         &self,
         source_path: &Path,
-        page_index: usize,
-    ) -> Result<String, NativePdfRendererError> {
+        first_page: usize,
+        max_pages: usize,
+    ) -> Result<Vec<String>, NativePdfRendererError> {
         let document = self.pdfium.load_pdf_from_file(source_path, None)?;
-        Ok(document
-            .pages()
-            .get(
-                page_index
-                    .try_into()
-                    .map_err(|_| NativePdfRendererError::PageIndexOutOfBounds(page_index))?,
-            )?
-            .text()?
-            .all())
+        let pages = document.pages();
+        let end = (first_page + max_pages).min(pages.len() as usize);
+        (first_page..end)
+            .map(|page_index| {
+                Ok(pages
+                    .get(
+                        page_index
+                            .try_into()
+                            .map_err(|_| NativePdfRendererError::PageIndexOutOfBounds(page_index))?,
+                    )?
+                    .text()?
+                    .all())
+            })
+            .collect()
     }
 
     fn render_for_target(
@@ -694,11 +700,18 @@ pub(crate) struct PdfNativeService {
     lifetime: Arc<()>,
     shutdown: Arc<AtomicBool>,
     text_generation: Arc<std::sync::atomic::AtomicU64>,
+    #[cfg(test)]
+    text_document_opens: Arc<std::sync::atomic::AtomicUsize>,
     worker: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl PdfNativeService {
+    #[cfg(test)]
+    fn text_document_open_count(&self) -> usize {
+        self.text_document_opens.load(Ordering::SeqCst)
+    }
+
     #[cfg(test)]
     pub(crate) fn test_stub() -> Self {
         Self {
@@ -709,6 +722,7 @@ impl PdfNativeService {
             lifetime: Arc::new(()),
             shutdown: Arc::new(AtomicBool::new(true)),
             text_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            text_document_opens: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             worker: Arc::new(Mutex::new(None)),
         }
     }
@@ -733,6 +747,10 @@ impl PdfNativeService {
         let worker_shutdown = Arc::clone(&shutdown);
         let text_generation = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let worker_text_generation = Arc::clone(&text_generation);
+        #[cfg(test)]
+        let text_document_opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        #[cfg(test)]
+        let worker_text_document_opens = Arc::clone(&text_document_opens);
         let (metadata_tx, metadata_rx) = mpsc::sync_channel::<PdfMetadataRequest>(2);
         let (text_tx, text_rx) = mpsc::sync_channel::<PdfTextRequest>(2);
         let (result_tx, result_rx) = mpsc::sync_channel(PDF_RENDER_QUEUE_CAPACITY);
@@ -748,7 +766,7 @@ impl PdfNativeService {
                     {
                         break;
                     }
-                    if let Some(key) = take_current_render(&worker_scheduler) {
+                    if let Some(key) = take_pending_render(&worker_scheduler) {
                         let image = match renderer.as_mut() {
                             Some(renderer) => renderer
                                 .render_canvas_at_size(
@@ -831,12 +849,17 @@ impl PdfNativeService {
                         thread::sleep(Duration::from_millis(5));
                         match renderer.as_ref() {
                             Some(renderer) => match renderer
-                                .extract_embedded_text_page(&job.source, job.next_page)
+                                .extract_embedded_text_pages(&job.source, job.next_page, 8)
                                 .map_err(|err| format!("{err:?}"))
                             {
-                                Ok(page_text) => {
-                                    job.page_texts[job.next_page] = page_text;
-                                    job.next_page += 1;
+                                Ok(page_texts) => {
+                                    let chunk_len = page_texts.len();
+                                    #[cfg(test)]
+                                    worker_text_document_opens.fetch_add(1, Ordering::SeqCst);
+                                    for (offset, page_text) in page_texts.into_iter().enumerate() {
+                                        job.page_texts[job.next_page + offset] = page_text;
+                                    }
+                                    job.next_page += chunk_len;
                                     if job.next_page == job.page_texts.len() {
                                         let job = text_job.take().expect("active text job");
                                         let assessment = assess_pdf_text(&job.page_texts);
@@ -923,6 +946,8 @@ impl PdfNativeService {
             lifetime,
             shutdown,
             text_generation,
+            #[cfg(test)]
+            text_document_opens,
             worker: Arc::new(Mutex::new(Some(worker_handle))),
         }
     }
@@ -1008,20 +1033,14 @@ impl PdfNativeService {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn take_current_render(
+fn take_pending_render(
     scheduler: &Arc<(Mutex<PdfRenderScheduler>, Condvar)>,
 ) -> Option<PdfRenderKey> {
     let (lock, _) = &**scheduler;
     let mut scheduler = lock.lock().expect("PDF scheduler lock");
-    if scheduler
-        .queued
-        .iter()
-        .any(|item| item.priority == PdfRequestPriority::Current)
-    {
-        scheduler.take_next()
-    } else {
-        None
-    }
+    (!scheduler.queued.is_empty())
+        .then(|| scheduler.take_next())
+        .flatten()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1537,6 +1556,66 @@ mod tests {
             .expect("incremental embedded text extraction");
         assert_eq!(text.page_count, 40);
         assert_eq!(text.worker_thread, format!("{:?}", metadata.worker_thread));
+        assert!(
+            service.text_document_open_count() < 40,
+            "bounded chunks must avoid one native document open per page"
+        );
+        worker.shutdown();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    #[ignore = "run as a dedicated process-wide Pdfium arbitration probe"]
+    fn production_service_nearby_raster_preempts_incremental_embedded_text() {
+        let root = std::env::temp_dir().join(format!(
+            "lanternleaf-pdf-nearby-arbitration-probe-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("probe temp directory");
+        let source = root.join("many-pages.pdf");
+        std::fs::write(&source, many_page_pdf_bytes(40)).expect("long valid PDF");
+
+        let service = PdfNativeService::start();
+        thread::sleep(Duration::from_millis(50));
+        let metadata = service.metadata(source.clone()).expect("native metadata");
+        let text_rx = service.embedded_text_async(source.clone(), 12, 18);
+        thread::sleep(Duration::from_millis(20));
+        assert!(text_rx.try_recv().is_err());
+
+        let mut worker = PdfRenderWorker::from_service(service.clone());
+        let render_key = PdfRenderKey {
+            source: source.clone(),
+            generation: 12,
+            page_index: 1,
+            width: 832,
+            height: 1200,
+        };
+        assert!(worker.request(render_key.clone(), PdfRequestPriority::Nearby));
+        let render_started = Instant::now();
+        let render = loop {
+            if let Some(result) = worker
+                .drain()
+                .into_iter()
+                .find(|result| result.key == render_key)
+            {
+                break result;
+            }
+            assert!(render_started.elapsed() < Duration::from_secs(5));
+            assert!(
+                text_rx.try_recv().is_err(),
+                "Nearby raster must complete before text terminalization"
+            );
+            thread::sleep(Duration::from_millis(10));
+        };
+        assert!(render.image.is_ok());
+        assert_eq!(render.worker_thread, metadata.worker_thread);
+        let text = text_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("resumed text terminal result")
+            .expect("incremental embedded text extraction");
+        assert_eq!(text.page_count, 40);
+        assert_eq!(text.worker_thread, format!("{:?}", metadata.worker_thread));
+        assert!(service.text_document_open_count() < 40);
         worker.shutdown();
         let _ = std::fs::remove_dir_all(root);
     }

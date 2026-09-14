@@ -410,7 +410,6 @@ impl LanternLeafApp {
                     worker_thread: event.worker_thread,
                     preparation_thread,
                     prepared,
-                    cache_artifact,
                 },
             ));
         });
@@ -442,13 +441,13 @@ impl LanternLeafApp {
             );
             return;
         }
-        let normalizer = lanternleaf_core::normalizer::TextNormalizer::load_default();
         let prepared = std::mem::take(&mut event.prepared);
+        let normalizer = self.normalizer.clone();
         let mut adoption_error = None;
         let adopted = if let Ok(mut session) = self.effect_session.lock() {
             if let Some(session) = session.as_mut() {
                 match session.apply_prepared_pdf_embedded_text(prepared) {
-                    Ok(()) => {
+                    Ok(canonical_sentences) => {
                         let panels = self
                             .runtime
                             .state_snapshot()
@@ -456,7 +455,11 @@ impl LanternLeafApp {
                             .session
                             .map(|state| state.panels)
                             .unwrap_or_default();
-                        let snapshot = session.snapshot(panels, &normalizer);
+                        let snapshot = session.snapshot_with_prepared_canonical_sentences(
+                            panels,
+                            &normalizer,
+                            canonical_sentences,
+                        );
                         self.runtime.apply_event(AppEvent::ReaderUpdated(
                             lanternleaf_app::contracts::ReaderStateEvent {
                                 request_id: event.request_id,

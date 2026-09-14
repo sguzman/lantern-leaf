@@ -1,4 +1,4 @@
-use lanternleaf_core::{browser_tabs, cache, calibre, config, session};
+use lanternleaf_core::{browser_tabs, calibre, config, session};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -174,7 +174,6 @@ pub struct PdfEmbeddedTextPreparedEvent {
     pub worker_thread: String,
     pub preparation_thread: String,
     pub prepared: session::PreparedPdfEmbeddedText,
-    pub cache_artifact: cache::PdfRenderPrecomputedState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
