@@ -64,21 +64,19 @@ Do not resurrect the withdrawn fake materialization defect from the test where C
 
 ## P2.11 — Goal 0016: starter library live-state continuity
 
-**READY NEXT**
+**A2 DIRECTOR-ACCEPTED + INTEGRATED — REAL-DESKTOP SIGNOFF ACTIVE**
 
-This is the next ordinary-usability repair discovered by Goal 0010 physical QA.
+The progressive catalog and same-session Recents repair is integrated on `main`. Caliberate pages publish incrementally while the full provider walk continues off-thread; the starter UI exposes partial/loading progress and loaded-row search/sort scope; successful source persistence triggers a background Recents refresh without requiring restart.
 
-A cold/incompatible QA catalog cache currently leaves the starter shell looking empty while LanternLeaf fetches the real 105,570-book Caliberate catalog in the provider's supported 500-row pages. The provider is healthy and pages are arriving; LanternLeaf simply does not publish useful partial catalog state until the full walk finishes.
+A2 closes the director-found ownership defects: live lazy covers survive later catalog reconciliation, provider failure with stale fallback remains visibly failed/degraded, and catalog refreshes are single-worker/coalesced so overlapping full walks and stale durable-cache races are prevented.
 
-Separately, opening a source persists its recent-source state correctly but does not refresh the in-memory Recents model. The entry appears after restart, proving the defect is same-session UI/state continuity rather than cache loss.
-
-Goal 0016 must add progressive/cache-first catalog presentation with truthful partial/loading state, stale-request rejection, usable rows after partial provider failure, and immediate same-session Recents refresh after successful opens. Heavy/blocking work remains off the render thread. Contract: `docs/work/ready/0016-starter-library-live-state-continuity.md`.
+Implementation `602e8952d077796ba478bd28e0b0cfe2d1e6bb51` passed Windows baseline run `34832563563` with native-workspace and hosted-renderer-probe success. The only remaining gate is focused physical Windows validation. See `docs/work/reviews/0016-a2-director-acceptance.md`.
 
 ## P2.12 — Goal 0015: highlight viewport-band reflow polish
 
 **QUEUED — MINOR POLISH**
 
-During severe letter-spacing/font-scale reflow, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. Preserve a temporary transaction-scoped viewport band when practical without permanent highlight pinning or fighting user scroll. This remains below Goal 0016.
+During severe letter-spacing/font-scale reflow, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. Preserve a temporary transaction-scoped viewport band when practical without permanent highlight pinning or fighting user scroll. This remains below Goal 0016 physical closure.
 
 ## P2.13 — Goal 0011: Windows Natural/HD voice capability
 
