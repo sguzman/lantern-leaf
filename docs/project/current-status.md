@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-14 after Goal 0020 A1 director rejection and A2 reopening.
+Updated: 2026-09-14 after Goal 0020 A2 director rejection and A3 reopening.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -125,22 +125,19 @@ Real-desktop acceptance: `docs/work/reviews/0019-a7-real-desktop-acceptance.md`.
 
 ## Goal 0020 — continuous native PDF viewport and practical zoom
 
-**REOPENED FOR A2 — A1 REJECTED BEFORE HUMAN QA**
+**REOPENED FOR A3 — A2 REJECTED BEFORE HUMAN QA**
 
-A1 correctly moved the Reader toward a continuous page stack and broadened manual zoom, while preserving the native single-Pdfium-owner architecture. Director review found several production blockers before physical QA:
+A2 successfully repaired most A1 structural problems: the continuous viewport publishes actual visible pages to the planner; native page dimensions are collected off-thread; long-document geometry is cached/indexed; horizontal navigation exists; fit calculations are based on viewport/page geometry; semantic viewport witnesses preserve focal position; visible pages are protected in residency; and the required hosted Windows run passed both native jobs.
 
-- actual continuous visible pages are computed inside the Reader but the canonical viewport planner still receives only `snapshot.current_page`, splitting scheduling/residency ownership;
-- Fit page is hard-coded to `0.72` in production and the correct fit helper is not wired in;
-- high manual zoom lives inside a vertical-only scroll area, so oversized page width is not practically pannable;
-- zoom/resize does not capture/restore a semantic viewport witness, so focal position is not preserved;
-- mixed-page slot geometry is initially guessed and changes when raster textures arrive;
-- all page geometry is rebuilt for `0..total_pages` every frame on egui;
-- the A1 report explicitly left required hosted Windows CI outstanding, yet terminal signaling occurred.
+Director review nevertheless found a deterministic production render-spec defect:
 
-A2 must preserve the accepted continuous/native direction while unifying viewport-plan ownership, implementing real fit modes and horizontal access, adding production focal anchoring, stabilizing geometry from off-thread native metadata, bounding long-document hot-frame work, and waiting for hosted Windows success before terminalizing.
+- the canonical scheduler derives request width from `pdf_viewport_width * scale`, while the Reader derives texture lookup width from `PDF_BASE_PAGE_WIDTH * effective_zoom`; outside special cases such as Fit width these `PdfRenderKey`s differ, so successful worker rasters can be invisible to the presentation path;
+- changing zoom/reset/fit increments generation or invalidates textures, but `should_commit_viewport_update()` can reject the unchanged visible/overscan range as a repeat target, so stationary geometry changes may not schedule replacement rasters at all.
+
+A3 must introduce one canonical render specification shared by planning/scheduling/cache/presentation and make render-spec/generation/zoom/fit/resize changes force bounded authoritative replanning even when the visible page set is unchanged.
 
 Contract: `docs/work/ready/0020-continuous-pdf-viewport-and-zoom.md`.
-Director rejection: `docs/work/reviews/0020-a1-director-rejection.md`.
+Director rejection: `docs/work/reviews/0020-a2-director-rejection.md`.
 
 ## Gate 4 — PDF text/TTS/highlight synchronization
 
@@ -150,6 +147,6 @@ After the continuous viewport is trustworthy: integrate canonical sentence/page 
 
 ## Workflow status
 
-**GOAL 0020 A2 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
+**GOAL 0020 A3 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
 
-Goal 0019 is closed. Goal 0020 remains the only ready repository goal, now as A2. Goals 0015, 0017, and 0018 remain queued; Goal 0011 remains deferred. Do not request human PDF QA or start Gate 4 until A2 passes director source/CI review.
+Goal 0019 is closed. Goal 0020 remains the only ready repository goal, now as A3. Goals 0015, 0017, and 0018 remain queued; Goal 0011 remains deferred. Do not request human PDF QA or start Gate 4 until A3 passes director source/CI review.
