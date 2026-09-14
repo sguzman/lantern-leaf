@@ -74,11 +74,11 @@ Physical closure verified durable Recents after restart, immediate warm EPUB reo
 
 During severe text-metric/media-related reflow, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. Preserve a temporary transaction-scoped viewport band without permanent highlight pinning or fighting user scroll.
 
-## P2.13 — Goal 0017: progressive cover backpressure + error-state polish
+## P2.13 — Goal 0017: progressive cover backpressure + cached-hydration scaling
 
 **QUEUED — MINOR POLISH**
 
-Normal provider pressure during a huge cold catalog walk should not present as repeated scary cover failures or immediate retry churn. Add sane transient backoff/retry semantics and theme-aware readable provider/catalog error presentation.
+Normal provider pressure during a huge cold catalog walk should not present as repeated scary cover failures or immediate retry churn. Warm startup must also stop repeatedly scanning roughly the entire cached catalog merely to rediscover already-cached thumbnails. Add bounded transient backoff/retry, lazy or indexed cached-thumbnail association, theme-aware readable errors, and bounded logging/cache rewrites.
 
 ## P2.14 — Goal 0018: Windows QA bootstrap idempotence
 
@@ -94,15 +94,25 @@ Do not investigate, implement, or test Natural/Narrator/HD voices for now. Prese
 
 ## P3 — Goal 0019: native PDF visual stability
 
+**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
+
+LanternLeaf now has a functioning native Pdfium/egui visual PDF reader. Physical Windows QA verified a real 638-page Caliberate PDF opening through the native Reader, truthful native page-domain ownership, working Next/Previous navigation, aggressive ordinary browsing, and no representative EPUB regression.
+
+The accepted foundation includes one authoritative `PdfNativeService` / one native Pdfium owner; visual-first open independent of Quack-check/transcript/OCR; all native/heavy PDF work off the egui thread; stale-safe source/page/zoom identity; current-priority rendering; bounded texture residency; real logical zoom; and terminal failure/panic behavior.
+
+## P3.1 — Goal 0020: continuous native PDF viewport + practical zoom
+
 **READY NEXT — CURRENT SUBSTANTIVE PRODUCT PRIORITY**
 
-Make PDF a real native Rust/egui reader surface. The gate requires visible native page rastering, an off-render-thread Pdfium worker, stale-safe request ownership, zoom-aware render/cache identity, bounded viewport/texture lifecycle, page navigation, and stable zoom/resize/scroll behavior on representative PDFs.
+Replace the temporary one-page-at-a-time PDF presentation with a continuous virtualized page stack while preserving explicit native page identity/navigation and the accepted Goal-0019 architecture.
 
-Do not bundle TTS/highlight/OCR synchronization into this gate. The authoritative contract is `docs/work/ready/0019-native-pdf-visual-stability.md`.
+Required UX includes continuous page-boundary scrolling, partial adjacent pages, bounded visible/overscan rendering, stable current-page derivation, Next/Previous as viewport jumps, Fit width, Fit page, Reset/100%, substantially broader bounded manual zoom, stable focal anchoring during zoom/resize, and immediate-mode responsiveness on long documents.
+
+Do not bundle PDF TTS/highlight/OCR synchronization into this goal. The authoritative contract is `docs/work/ready/0020-continuous-pdf-viewport-and-zoom.md`.
 
 ## P4 — PDF text/TTS/highlight synchronization
 
-After P3: canonical sentence/page mapping, geometry confidence/overlays, jump/follow behavior, OCR/degraded modes, first-sample playback integration, and regression corpus.
+After Goal 0020: canonical sentence/page mapping, geometry confidence/overlays, first-sample playback identity, auto-follow/jump behavior, OCR/degraded modes, Quack-check hostile-PDF recovery integration, and representative regression corpus.
 
 ## P5 — Format expansion / ingestion hardening
 
