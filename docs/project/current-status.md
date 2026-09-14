@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-14 after Goal 0020 real-desktop acceptance and Gate-4 recovery-boundary audit.
+Updated: 2026-09-14 after Goal 0022 A2 director rejection and A3 reopening.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -133,32 +133,39 @@ Real-desktop acceptance: `docs/work/reviews/0020-a3-real-desktop-acceptance.md`.
 
 ## Gate 4 — PDF text/TTS/highlight synchronization
 
-**ACTIVE NEXT CORE PRODUCT GATE — GOAL 0022 READY**
+**ACTIVE NEXT CORE PRODUCT GATE — GOAL 0022 A3 READY**
 
-The Gate-4 architecture has been narrowed after auditing the old Quack-check lineage.
+The Gate-4 architecture remains native-first and recovery-isolated. Quack-check is **not** trusted as baseline infrastructure and cannot block visual open. The accepted recovery boundary is documented in `docs/architecture/pdf-text-recovery-boundary-2026-09.md`.
 
-Quack-check is **not** trusted as baseline infrastructure and will not be allowed to block visual open again. The accepted recovery boundary is documented in `docs/architecture/pdf-text-recovery-boundary-2026-09.md`.
+The trust order remains:
 
-The trust order is now:
-
-1. native visual Pdfium reader remains immediately usable;
+1. native visual Pdfium reader is immediately usable;
 2. trustworthy embedded text is extracted asynchronously through the same process-wide Pdfium owner;
 3. only later, for degraded/mixed/scanned PDFs, a typed background recovery provider may reuse/rewrite Quack-check/Docling/OCR components.
 
-The standalone `sguzman/quack-check` repository is not a runtime dependency. LanternLeaf already contains an evolved local fork with cancellation and richer artifacts, but even that code remains quarantined from Goal 0022.
+The standalone `sguzman/quack-check` repository is not a runtime dependency. Goal 0022 explicitly excludes Quack-check, Python, Docling, OCR, and exact PDF sentence overlays.
 
 ### Goal 0022 — native PDF embedded-text/TTS trustworthy path
 
-**READY NEXT — ONLY AUTHORIZED SUBSTANTIVE MACRO-GOAL**
+**READY A3 — A1 AND A2 REJECTED BEFORE HUMAN QA**
 
-Goal 0022 adds page-aligned native Pdfium text extraction through `PdfNativeService`, a conservative embedded-text trust gate, asynchronous session enrichment, native-page-aligned canonical sentence ownership, Text-only/search/Windows TTS through the existing first-sample pipeline, and versioned durable text precompute reuse.
+A1 established useful native text/trust/cache machinery but was rejected because whole-document extraction monopolized the sole Pdfium owner and document-scale adoption/cache work ran on egui.
 
-It explicitly excludes Quack-check, Python, Docling, OCR, and exact PDF sentence overlays.
+A2 corrected those defects with cooperative extraction, Current-raster preemption, off-thread canonical preparation/cache persistence, and green hosted Windows validation. Director review still found three production blockers:
 
-Contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
+- trusted text was adopted without promoting the production render-only PDF policy, so Text-only/search/TTS would remain disabled;
+- the egui completion still called the ordinary full `ReaderSession::snapshot()` path, cloning document-scale canonical sentence state on the render thread;
+- only `Current` raster work preempted text extraction, so queued `Nearby`/adjacent-visible pages could still wait behind the background text job.
+
+A2 also reopened/reparsed the native PDF once per extracted text page; A3 must preserve cooperative yielding while reducing that amplification.
+
+A3 therefore requires truthful trusted-text/no-geometry policy promotion, a genuinely bounded UI commit, all pending visual raster work ahead of text enrichment, and bounded-chunk/resumable native extraction without one document open per page.
+
+Authoritative contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
+A2 rejection: `docs/work/reviews/0022-a2-director-rejection.md`.
 
 ## Workflow status
 
-**GOAL 0022 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
+**GOAL 0022 A3 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
 
-Goals 0015, 0017, 0018, and 0021 remain queued. Goal 0011 remains deferred. Exact native PDF spoken overlays/follow come after Goal 0022. Hostile-PDF Quack-check/Docling/OCR recovery comes only after the native trustworthy-text path is physically accepted.
+No human QA is authorized for A2. Goals 0015, 0017, 0018, and 0021 remain queued. Goal 0011 remains deferred. Exact native PDF spoken overlays/follow come after Goal 0022. Hostile-PDF Quack-check/Docling/OCR recovery comes only after the native trustworthy-text path is physically accepted.
