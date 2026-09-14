@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-13 after Goal 0010 A6 director rejection and A7 correction promotion.
+Updated: 2026-09-13 after Goal 0010 A7 director acceptance and integration for focused real-desktop QA.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -73,15 +73,15 @@ Implementation `430e9c1` and Windows baseline run `34768445726` are the accepted
 
 ## Goal 0010 — Caliberate catalog covers / provider availability UX
 
-**A6 REJECTED BEFORE HUMAN QA — A7 CORRECTION READY**
+**A7 DIRECTOR-ACCEPTED + INTEGRATED — FOCUSED REAL-DESKTOP QA PENDING**
 
-A6 successfully repaired the A5 global Calibre busy-scope problem and added an explicit book-identified `CalibreCoverCompleted` seam with loaded / cover-unavailable / provider-unavailable / fetch-decode-error outcomes. It also synchronized both repositories, preserved the accepted Goal 0014/0015 lifecycle state, added post-change Caliberate cover tests, and passed LanternLeaf Windows CI run `34778760376`.
+Goal 0010 now has the intended provider/cover architecture plus the A7 concurrency correction. Caliberate exposes the explicit `/api/v1/books/{id}/cover` provider contract; LanternLeaf propagates `has_cover`, loads covers lazily only for visible/near-visible rows, keeps network/disk/decode work off the UI thread, distinguishes loading/no-cover/provider-unavailable/fetch-error states, and never materializes an EPUB merely to obtain a thumbnail.
 
-Director review found one remaining blocking concurrency defect. The egui starter consumes concurrent cover completions using one global `last_calibre_cover_event_request_id` watermark. The effect dispatcher launches independent effects on separate worker threads, so request completions can arrive out of order. If a higher request ID completes first, a later valid completion for another book with a lower request ID is discarded, which can leave that book stuck in the pending/`Loading cover…` state despite a real terminal result.
+A6 introduced explicit book-identified `CalibreCoverCompleted` terminal outcomes. A7 replaced the remaining global completion watermark with per-book request ownership/freshness. Different books may now finish in arbitrary order, stale older same-book completions cannot overwrite newer retry state, and automatic plus manual `Ensure thumbnail` paths share the same four-request bounded/coalesced ownership path.
 
-A7 must replace this global ordering assumption with per-book request ownership/freshness (or an equivalent concurrency-safe model), including protection against stale same-book retries overwriting newer state. The visible `Ensure thumbnail` action must also use the same bounded ownership path or be coalesced/disabled while pending so manual clicks cannot bypass cover concurrency bounds.
+LanternLeaf implementation `54e22c172745171b084221a6f80465e3f6ffe77d` passed Windows baseline run `34793890003`, including both native-workspace and hosted-renderer-probe jobs. The Goal 0010 terminal branch was fast-forward integrated to LanternLeaf `main` at `fb02dde145e881a04c6052fba0baa2aff6e579db` before the director acceptance record. The sibling Caliberate endpoint/test lineage was fast-forward integrated to Caliberate `main` at `3799ccac03ce05404700efbbf33e489aa965f757`.
 
-See `docs/work/reviews/0010-a6-director-rejection.md` and the A7 correction section in `docs/work/ready/0010-caliberate-catalog-reliability.md`.
+One focused physical Windows pass remains: covers before first open, no permanent `Loading cover…` rows, intentional no-cover state, provider-down classification and recovery after restart, bounded manual ensure behavior, and representative existing Caliberate open/TTS regression. See `docs/work/reviews/0010-a7-director-acceptance.md`.
 
 The earlier `42866` open failure remains withdrawn as evidence of a LanternLeaf materialization defect because Caliberate was not running during that attempt.
 
@@ -89,7 +89,7 @@ The earlier `42866` open failure remains withdrawn as evidence of a LanternLeaf 
 
 **QUEUED — MINOR POLISH**
 
-Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow without inventing permanent highlight pinning or fighting user scrolling. Do not prioritize ahead of Goal 0010 unless new evidence makes it materially disruptive.
+Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow without inventing permanent highlight pinning or fighting user scrolling. Do not prioritize ahead of Goal 0010 closure unless new evidence makes it materially disruptive.
 
 ## Windows Natural/HD voices
 
@@ -105,6 +105,6 @@ Gate 3 native PDF visual stability remains future work and is not currently auth
 
 ## Workflow status
 
-**GOAL 0010 A7 READY**
+**HUMAN QA GATE ACTIVE — GOAL 0010 A7**
 
-Goal 0014 is closed. Goal 0010 remains the single authorized macro-goal, now as an A7 correction in the existing Codex session. Goal 0015 is queued minor polish; Goal 0011 remains deferred; PDF work remains future.
+Goal 0010 A7 is director-accepted and integrated in both LanternLeaf and Caliberate. No new Codex Goal is authorized right now. Goal 0015 is queued minor polish; Goal 0011 remains deferred; PDF work remains future.
