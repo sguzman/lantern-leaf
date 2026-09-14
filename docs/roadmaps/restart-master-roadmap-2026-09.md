@@ -88,21 +88,23 @@ Real-desktop closure verifies real covers before first open, continued lazy cove
 
 ### Goal 0016 — starter library live-state continuity
 
-**STATUS: READY NEXT**
+**STATUS: A2 DIRECTOR-ACCEPTED + INTEGRATED — FOCUSED REAL-DESKTOP QA PENDING**
 
-Goal 0010 physical QA exposed two ordinary starter-state continuity defects.
+Progressive Caliberate catalog publication and same-session Recents refresh are now integrated on `main`.
 
-First, a cold/incompatible catalog cache leaves the starter shell looking empty while LanternLeaf walks the real 105,570-book Caliberate catalog in the provider's supported 500-row pages. Caliberate is healthy and pages arrive continuously; the defect is that LanternLeaf waits for the whole fetch before publishing useful catalog state.
+The catalog worker publishes bounded provider pages while the full walk continues off-thread. The starter surface exposes partial/loading progress and loaded-row search/sort scope, then reconciles to the stable full catalog and durable cache only on successful completion. Successful SourceOpen persistence now triggers the existing background Recents listing path so a newly opened source can appear in the current process.
 
-Second, successfully opening a source persists its recent-source state correctly but does not update the in-memory Recents model in the same process. Restarting LanternLeaf reveals the expected recent entries, proving persistence is intact.
+A2 hardens the implementation by preserving live lazy-cover state through later metadata/final reconciliation, retaining a visibly failed/degraded state when a progressive provider refresh fails despite stale fallback data, and coalescing catalog-load ownership so only one authoritative full walk can run and commit durable cache state at a time.
 
-Goal 0016 must add progressive/cache-first catalog publication with truthful partial/progress state, stale-request rejection, useful partial-provider-failure behavior, and immediate same-session Recents refresh after successful opens. Heavy/blocking work remains off the egui/render thread. See `docs/work/ready/0016-starter-library-live-state-continuity.md`.
+Implementation `602e8952d077796ba478bd28e0b0cfe2d1e6bb51` passed Windows baseline run `34832563563` with both native-workspace and hosted-renderer-probe success. Goal terminal commit `ca94477c6280ae1e5c47a5b32d02947019a428c4` is integrated to `main`.
+
+One focused human pass remains: verify early rows/progress from a clean QA catalog cache, cover continuity through full completion, immediate same-session Recents after opening a representative EPUB, Recents durability after restart, and preservation of representative EPUB/TTS behavior. See `docs/work/reviews/0016-a2-director-acceptance.md`.
 
 ### Goal 0015 — highlight viewport-band reflow polish
 
 **STATUS: QUEUED — MINOR POLISH**
 
-Under severe text-metric changes, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. Future polish should preserve a temporary transaction-scoped viewport band without permanent highlight pinning or fighting user scroll. It remains below Goal 0016.
+Under severe text-metric changes, an already-visible canonical highlight can drift farther than desired before ordinary auto-follow restores it. Future polish should preserve a temporary transaction-scoped viewport band without permanent highlight pinning or fighting user scroll. It remains below Goal 0016 physical closure.
 
 ### Goal 0011 — Windows Natural/HD voices
 
@@ -114,7 +116,7 @@ Do not investigate or test until explicitly re-authorized. Preserve the ordinary
 
 **STATUS: FUTURE CORE PRODUCT GATE**
 
-Current physical PDF behavior is not accepted as a working reader. After the current starter-library continuity repair, Gate 3 remains the substantive PDF product gate unless priorities are explicitly changed:
+Current physical PDF behavior is not accepted as a working reader. After Goal 0016 physical closure, Gate 3 remains the substantive PDF product gate unless priorities are explicitly changed:
 
 - page raster/rendering;
 - texture/cache lifecycle;
