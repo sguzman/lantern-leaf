@@ -36,9 +36,9 @@ use crate::pdf::{
     PdfPageRegistryEntry, PdfViewportBudgetDecision, PdfViewportBudgetInput, PdfViewportPlanInput,
     PdfViewportRenderPlan, build_pdf_viewport_render_plan, choose_pdf_viewport_evictions,
 };
-use crate::pdf_renderer::{
-    NativePdfRenderer, NativeRenderEviction, NativeRenderSpan, RenderTarget,
-};
+use crate::pdf_renderer::{NativeRenderEviction, NativeRenderSpan, RenderTarget};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::pdf_renderer::{PdfRenderKey, PdfRenderWorker};
 use crate::pdf_subsystem::{
     PdfScrollPolicy, PdfViewportRange, PdfViewportUpdateTrigger, PdfZoomDirection, PdfZoomPolicy,
 };
@@ -440,7 +440,14 @@ struct LanternLeafApp {
     overlay_pressure_focus: bool,
     scheduler_events: Vec<SchedulerEvent>,
     pdf_render_state: PdfRenderState,
-    pdf_renderer: Option<NativePdfRenderer>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pdf_worker: PdfRenderWorker,
+    #[cfg(not(target_arch = "wasm32"))]
+    pdf_textures: HashMap<PdfRenderKey, TextureHandle>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pdf_render_errors: HashMap<PdfRenderKey, String>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pdf_generation: u64,
     current_pdf_path: Option<PathBuf>,
     pretty_page_cache_key: Option<PrettyPageCacheKey>,
     pretty_page_cache_blocks: Vec<PrettyBlock>,
@@ -938,13 +945,6 @@ impl LanternLeafApp {
         normalizer: normalizer::TextNormalizer,
     ) -> Self {
         let font_registry = setup_egui_fonts(&cc.egui_ctx, &app_config);
-        let pdf_renderer = match NativePdfRenderer::new() {
-            Ok(renderer) => Some(renderer),
-            Err(err) => {
-                warn!(error = ?err, "Failed to initialize native PDF renderer");
-                None
-            }
-        };
         let persistence_service: Arc<dyn PersistenceService> =
             if let Some(url) = &app_config.remote_url {
                 Arc::new(RemotePersistenceService::new(url.clone()))
@@ -1014,7 +1014,14 @@ impl LanternLeafApp {
             overlay_pressure_focus: false,
             scheduler_events: Vec::new(),
             pdf_render_state: PdfRenderState::default(),
-            pdf_renderer,
+            #[cfg(not(target_arch = "wasm32"))]
+            pdf_worker: PdfRenderWorker::start(),
+            #[cfg(not(target_arch = "wasm32"))]
+            pdf_textures: HashMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            pdf_render_errors: HashMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            pdf_generation: 0,
             current_pdf_path: None,
             pretty_page_cache_key: None,
             pretty_page_cache_blocks: Vec::new(),
@@ -1138,7 +1145,14 @@ impl LanternLeafApp {
             overlay_pressure_focus: false,
             scheduler_events: Vec::new(),
             pdf_render_state: PdfRenderState::default(),
-            pdf_renderer: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            pdf_worker: PdfRenderWorker::start(),
+            #[cfg(not(target_arch = "wasm32"))]
+            pdf_textures: HashMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            pdf_render_errors: HashMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            pdf_generation: 0,
             current_pdf_path: None,
             pretty_page_cache_key: None,
             pretty_page_cache_blocks: Vec::new(),
@@ -2758,7 +2772,16 @@ impl LanternLeafApp {
     fn update_pdf_render_state(&mut self, snapshot: Option<&ReaderSnapshot>) {
         if let Some(snapshot) = snapshot {
             if snapshot.pretty_kind == PrettyKind::Pdf && snapshot.total_pages > 0 {
-                self.current_pdf_path = Some(PathBuf::from(&snapshot.source_path));
+                let source_path = PathBuf::from(&snapshot.source_path);
+                if self.current_pdf_path.as_ref() != Some(&source_path) {
+                    self.current_pdf_path = Some(source_path);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        self.pdf_generation = self.pdf_generation.saturating_add(1);
+                        self.pdf_textures.clear();
+                        self.pdf_render_errors.clear();
+                    }
+                }
                 self.update_pdf_confidence(snapshot);
                 let visible_page_indexes = vec![snapshot.current_page];
                 let highlighted_page = snapshot

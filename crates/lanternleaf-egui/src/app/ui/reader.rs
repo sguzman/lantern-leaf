@@ -350,7 +350,9 @@ impl LanternLeafApp {
             ui.separator();
             self.render_reader_summary(ui, snapshot);
             ui.add_space(6.0);
-            if self.should_render_pretty(snapshot) {
+            if snapshot.pretty_kind == PrettyKind::Pdf && !effective_text_only {
+                self.render_pdf_surface(ui, snapshot);
+            } else if self.should_render_pretty(snapshot) {
                 self.render_pretty_page(ui, snapshot, highlighted_sentence_idx);
             } else {
                 trace!(
@@ -382,6 +384,151 @@ impl LanternLeafApp {
         !self.resolved_text_only_mode(snapshot)
             && snapshot.pretty_kind != PrettyKind::Pdf
             && snapshot.pretty_kind != PrettyKind::None
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn render_pdf_surface(&mut self, ui: &mut Ui, snapshot: &ReaderSnapshot) {
+        for result in self.pdf_worker.drain() {
+            if !crate::pdf_renderer::accepts_render_result(
+                &result.key,
+                std::path::Path::new(&snapshot.source_path),
+                self.pdf_generation,
+            ) {
+                continue;
+            }
+            match result.image {
+                Ok(image) => {
+                    let texture = ui.ctx().load_texture(
+                        format!(
+                            "pdf:{}:{}:{}",
+                            result.key.page_index, result.key.width, result.key.generation
+                        ),
+                        image,
+                        eframe::egui::TextureOptions::LINEAR,
+                    );
+                    self.pdf_textures.insert(result.key, texture);
+                }
+                Err(error) => {
+                    self.pdf_render_errors.insert(result.key, error);
+                }
+            }
+        }
+        while self.pdf_textures.len() > 8 {
+            if let Some(key) = self.pdf_textures.keys().next().cloned() {
+                self.pdf_textures.remove(&key);
+            }
+        }
+        while self.pdf_render_errors.len() > 8 {
+            if let Some(key) = self.pdf_render_errors.keys().next().cloned() {
+                self.pdf_render_errors.remove(&key);
+            }
+        }
+
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                if ui.button("← Prev page").clicked() {
+                    self.execute_reader_command(ReaderCommand::Session(SessionCommand::PrevPage));
+                }
+                ui.label(format!(
+                    "Page {} / {}",
+                    snapshot.current_page + 1,
+                    snapshot.total_pages
+                ));
+                if ui.button("Next page →").clicked() {
+                    self.execute_reader_command(ReaderCommand::Session(SessionCommand::NextPage));
+                }
+                if ui.button("−").clicked()
+                    && self
+                        .pdf_render_state
+                        .request_zoom(crate::pdf_subsystem::PdfZoomDirection::Out)
+                        .applied
+                {
+                    self.pdf_generation = self.pdf_generation.saturating_add(1);
+                    self.pdf_textures
+                        .retain(|key, _| key.generation == self.pdf_generation);
+                    self.pdf_render_errors
+                        .retain(|key, _| key.generation == self.pdf_generation);
+                }
+                ui.label(format!("{:.0}%", self.pdf_render_state.zoom_level * 100.0));
+                if ui.button("+").clicked()
+                    && self
+                        .pdf_render_state
+                        .request_zoom(crate::pdf_subsystem::PdfZoomDirection::In)
+                        .applied
+                {
+                    self.pdf_generation = self.pdf_generation.saturating_add(1);
+                    self.pdf_textures
+                        .retain(|key, _| key.generation == self.pdf_generation);
+                    self.pdf_render_errors
+                        .retain(|key, _| key.generation == self.pdf_generation);
+                }
+                if ui.button("Reset").clicked() {
+                    self.pdf_render_state.zoom_level = crate::pdf_subsystem::PDF_DEFAULT_ZOOM_LEVEL;
+                    self.pdf_generation = self.pdf_generation.saturating_add(1);
+                    self.pdf_textures
+                        .retain(|key, _| key.generation == self.pdf_generation);
+                    self.pdf_render_errors
+                        .retain(|key, _| key.generation == self.pdf_generation);
+                }
+            });
+
+            let width = (ui.available_width().max(320.0)
+                * self.pdf_render_state.zoom_level.clamp(0.75, 1.75))
+            .round() as u32;
+            let height = 3600u32;
+            let source: std::path::PathBuf = snapshot.source_path.clone().into();
+            let planned_pages = self
+                .pdf_render_state
+                .plan
+                .as_ref()
+                .map(|plan| {
+                    plan.canvas_page_indexes
+                        .iter()
+                        .copied()
+                        .take(5)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_else(|| vec![snapshot.current_page]);
+            let pages =
+                crate::pdf_renderer::bounded_render_pages(planned_pages, snapshot.current_page, 5);
+            for page_index in pages {
+                self.pdf_worker.request(crate::pdf_renderer::PdfRenderKey {
+                    source: source.clone(),
+                    generation: self.pdf_generation,
+                    page_index,
+                    width,
+                    height,
+                });
+            }
+            let current_key = crate::pdf_renderer::PdfRenderKey {
+                source,
+                generation: self.pdf_generation,
+                page_index: snapshot.current_page,
+                width,
+                height,
+            };
+            ScrollArea::both()
+                .id_source("native_pdf_viewport")
+                .show(ui, |ui| {
+                    if let Some(texture) = self.pdf_textures.get(&current_key) {
+                        let size = texture.size_vec2();
+                        let scale = (ui.available_width() / size.x.max(1.0)).min(1.0);
+                        ui.add(Image::new(texture).fit_to_exact_size(size * scale));
+                    } else if let Some(error) = self.pdf_render_errors.get(&current_key) {
+                        ui.label(format!("PDF page unavailable: {error}"));
+                    } else {
+                        ui.add_space(120.0);
+                        ui.centered_and_justified(|ui| ui.label("Rendering PDF page…"));
+                        ui.add_space(120.0);
+                    }
+                });
+            ui.label(format!(
+                "Native PDF worker queue: {}",
+                self.pdf_worker.pending_len()
+            ));
+        });
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(50));
     }
 
     fn resolved_text_only_mode(&self, snapshot: &ReaderSnapshot) -> bool {

@@ -6,6 +6,8 @@ use std::{
     convert::TryFrom,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
+    sync::mpsc::{self, Receiver, SyncSender, TrySendError},
+    thread,
     time::{Duration, Instant},
 };
 
@@ -18,7 +20,10 @@ use pdfium_auto::bind_bundled;
 #[cfg(not(target_arch = "wasm32"))]
 use pdfium_render::prelude::*;
 
-const CACHE_CAPACITY: usize = 32;
+const CACHE_CAPACITY: usize = 12;
+pub(crate) const PDF_RENDER_QUEUE_CAPACITY: usize = 8;
+pub(crate) const PDF_RENDER_MAX_WIDTH: u32 = 2400;
+pub(crate) const PDF_RENDER_MAX_HEIGHT: u32 = 3600;
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -69,6 +74,22 @@ impl NativePdfRenderer {
         self.render_for_target(source_path, page_index, RenderTarget::Canvas)
     }
 
+    pub fn render_canvas_at_size(
+        &mut self,
+        source_path: &Path,
+        page_index: usize,
+        max_width: u32,
+        max_height: u32,
+    ) -> Result<RenderOutcome, NativePdfRendererError> {
+        self.render_for_dimensions(
+            source_path,
+            page_index,
+            RenderTarget::Canvas,
+            max_width,
+            max_height,
+        )
+    }
+
     pub fn render_text_layer(
         &mut self,
         source_path: &Path,
@@ -87,6 +108,26 @@ impl NativePdfRenderer {
             source: source_path.to_path_buf(),
             page_index,
             target,
+            width: 0,
+            height: 0,
+        };
+        self.render_for_dimensions(source_path, page_index, target, key.width, key.height)
+    }
+
+    fn render_for_dimensions(
+        &mut self,
+        source_path: &Path,
+        page_index: usize,
+        target: RenderTarget,
+        max_width: u32,
+        max_height: u32,
+    ) -> Result<RenderOutcome, NativePdfRendererError> {
+        let key = RenderCacheKey {
+            source: source_path.to_path_buf(),
+            page_index,
+            target,
+            width: max_width,
+            height: max_height,
         };
         if let Some(image) = self.cache.get(&key) {
             return Ok(RenderOutcome {
@@ -102,7 +143,11 @@ impl NativePdfRenderer {
             let page_index = PdfPageIndex::try_from(page_index)
                 .map_err(|_| NativePdfRendererError::PageIndexOutOfBounds(page_index))?;
             let page = document.pages().get(page_index)?;
-            let dims = target.render_dimensions(&page);
+            let dims = if max_width == 0 || max_height == 0 {
+                target.render_dimensions(&page)
+            } else {
+                target.render_dimensions_for(&page, max_width, max_height)
+            };
             let config = PdfRenderConfig::new()
                 .set_target_width(dims.width)
                 .set_target_height(dims.height);
@@ -205,6 +250,24 @@ impl RenderTarget {
         RenderDimensions { width, height }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn render_dimensions_for(
+        &self,
+        page: &PdfPage,
+        max_width: u32,
+        max_height: u32,
+    ) -> RenderDimensions {
+        let width = f32::min(max_width.max(1) as f32, PDF_RENDER_MAX_WIDTH as f32);
+        let height = f32::min(max_height.max(1) as f32, PDF_RENDER_MAX_HEIGHT as f32);
+        let page_width = page.width().value.abs().max(1.0);
+        let page_height = page.height().value.abs().max(1.0);
+        let scale = (width / page_width).min(height / page_height);
+        RenderDimensions {
+            width: (page_width * scale).round().max(1.0) as Pixels,
+            height: (page_height * scale).round().max(1.0) as Pixels,
+        }
+    }
+
     pub(crate) fn label(&self) -> &'static str {
         match self {
             RenderTarget::Canvas => "canvas",
@@ -220,6 +283,187 @@ pub struct RenderOutcome {
     pub image: (),
     pub duration: Duration,
     pub cache_hit: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct PdfRenderKey {
+    pub source: PathBuf,
+    pub generation: u64,
+    pub page_index: usize,
+    pub width: u32,
+    pub height: u32,
+}
+
+pub(crate) fn accepts_render_result(key: &PdfRenderKey, source: &Path, generation: u64) -> bool {
+    key.generation == generation && key.source == source
+}
+
+pub(crate) fn bounded_render_pages(
+    pages: impl IntoIterator<Item = usize>,
+    current_page: usize,
+    limit: usize,
+) -> Vec<usize> {
+    let mut result = Vec::with_capacity(limit.min(1));
+    if limit == 0 {
+        return result;
+    }
+    result.push(current_page);
+    for page in pages {
+        if result.len() >= limit {
+            break;
+        }
+        if !result.contains(&page) {
+            result.push(page);
+        }
+    }
+    result
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+pub(crate) struct PdfRenderResult {
+    pub key: PdfRenderKey,
+    pub image: Result<ColorImage, String>,
+    pub worker_thread: thread::ThreadId,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct PdfRenderWorker {
+    request_tx: SyncSender<PdfRenderKey>,
+    result_rx: Receiver<PdfRenderResult>,
+    pending: HashMap<PdfRenderKey, ()>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PdfRenderWorker {
+    pub(crate) fn start() -> Self {
+        let (request_tx, request_rx) =
+            mpsc::sync_channel::<PdfRenderKey>(PDF_RENDER_QUEUE_CAPACITY);
+        let (result_tx, result_rx) = mpsc::sync_channel(PDF_RENDER_QUEUE_CAPACITY);
+        thread::Builder::new()
+            .name("lanternleaf-pdf-render".to_string())
+            .spawn(move || {
+                let mut renderer = NativePdfRenderer::new().ok();
+                let worker_thread = thread::current().id();
+                while let Ok(key) = request_rx.recv() {
+                    let image = match renderer.as_mut() {
+                        Some(renderer) => renderer
+                            .render_canvas_at_size(
+                                &key.source,
+                                key.page_index,
+                                key.width,
+                                key.height,
+                            )
+                            .map(|outcome| outcome.image)
+                            .map_err(|err| format!("{err:?}")),
+                        None => Err("native PDF renderer is unavailable".to_string()),
+                    };
+                    if result_tx
+                        .send(PdfRenderResult {
+                            key,
+                            image,
+                            worker_thread,
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .expect("PDF render worker must start");
+        Self {
+            request_tx,
+            result_rx,
+            pending: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn request(&mut self, key: PdfRenderKey) -> bool {
+        if self.pending.contains_key(&key) {
+            return false;
+        }
+        match self.request_tx.try_send(key.clone()) {
+            Ok(()) => {
+                self.pending.insert(key, ());
+                true
+            }
+            Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => false,
+        }
+    }
+
+    pub(crate) fn drain(&mut self) -> Vec<PdfRenderResult> {
+        let mut results = Vec::new();
+        while let Ok(result) = self.result_rx.try_recv() {
+            self.pending.remove(&result.key);
+            results.push(result);
+        }
+        results
+    }
+
+    pub(crate) fn pending_len(&self) -> usize {
+        self.pending.len()
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    fn key(generation: u64, page_index: usize, width: u32) -> PdfRenderKey {
+        PdfRenderKey {
+            source: PathBuf::from("book.pdf"),
+            generation,
+            page_index,
+            width,
+            height: 3600,
+        }
+    }
+
+    #[test]
+    fn render_key_includes_page_and_quantized_size() {
+        assert_ne!(key(1, 0, 800), key(1, 1, 800));
+        assert_ne!(key(1, 0, 800), key(1, 0, 1200));
+    }
+
+    #[test]
+    fn stale_source_and_generation_results_are_rejected() {
+        assert!(accepts_render_result(
+            &key(3, 0, 800),
+            Path::new("book.pdf"),
+            3
+        ));
+        assert!(!accepts_render_result(
+            &key(2, 0, 800),
+            Path::new("book.pdf"),
+            3
+        ));
+        assert!(!accepts_render_result(
+            &key(3, 0, 800),
+            Path::new("other.pdf"),
+            3
+        ));
+    }
+
+    #[test]
+    fn bounded_pages_always_preserve_current_page() {
+        let pages = bounded_render_pages([8, 2, 8, 4], 4, 3);
+        assert_eq!(pages, vec![4, 8, 2]);
+        assert_eq!(bounded_render_pages([1, 2], 7, 0), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn worker_request_queue_is_bounded_by_channel_capacity() {
+        let (tx, rx) = mpsc::sync_channel::<PdfRenderKey>(PDF_RENDER_QUEUE_CAPACITY);
+        for index in 0..PDF_RENDER_QUEUE_CAPACITY {
+            tx.try_send(key(1, index, 800)).expect("queue has capacity");
+        }
+        assert!(matches!(
+            tx.try_send(key(1, 99, 800)),
+            Err(TrySendError::Full(_))
+        ));
+        drop(rx);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -267,6 +511,8 @@ struct RenderCacheKey {
     source: PathBuf,
     page_index: usize,
     target: RenderTarget,
+    width: u32,
+    height: u32,
 }
 
 impl Hash for RenderCacheKey {
@@ -274,6 +520,8 @@ impl Hash for RenderCacheKey {
         self.source.hash(state);
         self.page_index.hash(state);
         self.target.hash(state);
+        self.width.hash(state);
+        self.height.hash(state);
     }
 }
 
