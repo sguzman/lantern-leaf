@@ -17,6 +17,8 @@ pub mod pdf_renderer;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod pdf_subsystem;
 #[cfg(not(target_arch = "wasm32"))]
+mod pdf_viewport;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod pretty;
 
 #[cfg(target_arch = "wasm32")]

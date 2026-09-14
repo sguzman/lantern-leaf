@@ -40,7 +40,8 @@ use crate::pdf_renderer::{NativeRenderEviction, NativeRenderSpan, RenderTarget};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::pdf_renderer::{PdfRenderKey, PdfRenderWorker};
 use crate::pdf_subsystem::{
-    PdfScrollPolicy, PdfViewportRange, PdfViewportUpdateTrigger, PdfZoomDirection, PdfZoomPolicy,
+    PdfScrollPolicy, PdfViewportRange, PdfViewportUpdateTrigger, PdfZoomDirection, PdfZoomMode,
+    PdfZoomPolicy,
 };
 use crate::pretty::{PrettyBlock, PrettyPageCacheKey};
 use crate::shell::{FocusOwner, LayoutPolicy, ShellState};
@@ -452,6 +453,10 @@ struct LanternLeafApp {
     pdf_texture_last_touched: HashMap<PdfRenderKey, u64>,
     #[cfg(not(target_arch = "wasm32"))]
     pdf_texture_touch_counter: u64,
+    #[cfg(not(target_arch = "wasm32"))]
+    pdf_page_aspects: HashMap<usize, f32>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pdf_pending_jump_page: Option<usize>,
     current_pdf_path: Option<PathBuf>,
     pretty_page_cache_key: Option<PrettyPageCacheKey>,
     pretty_page_cache_blocks: Vec<PrettyBlock>,
@@ -1033,6 +1038,9 @@ impl LanternLeafApp {
             pdf_texture_last_touched: HashMap::new(),
             #[cfg(not(target_arch = "wasm32"))]
             pdf_texture_touch_counter: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            pdf_page_aspects: HashMap::new(),
+            pdf_pending_jump_page: None,
             current_pdf_path: None,
             pretty_page_cache_key: None,
             pretty_page_cache_blocks: Vec::new(),
@@ -1171,6 +1179,9 @@ impl LanternLeafApp {
             pdf_texture_last_touched: HashMap::new(),
             #[cfg(not(target_arch = "wasm32"))]
             pdf_texture_touch_counter: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            pdf_page_aspects: HashMap::new(),
+            pdf_pending_jump_page: None,
             current_pdf_path: None,
             pretty_page_cache_key: None,
             pretty_page_cache_blocks: Vec::new(),
@@ -2799,6 +2810,7 @@ impl LanternLeafApp {
                         self.pdf_textures.clear();
                         self.pdf_render_errors.clear();
                         self.pdf_texture_last_touched.clear();
+                        self.pdf_page_aspects.clear();
                     }
                 }
                 self.update_pdf_confidence(snapshot);
@@ -5252,6 +5264,7 @@ struct PdfRenderState {
     active_tts_page_index: Option<usize>,
     jump_target_page_index: Option<usize>,
     zoom_level: f32,
+    zoom_mode: PdfZoomMode,
     zoom_policy: PdfZoomPolicy,
     zoom_last_request: Option<Instant>,
     zoom_throttle_blocked: usize,
@@ -5295,6 +5308,7 @@ impl Default for PdfRenderState {
             active_tts_page_index: None,
             jump_target_page_index: None,
             zoom_level: crate::pdf_subsystem::PDF_DEFAULT_ZOOM_LEVEL,
+            zoom_mode: PdfZoomMode::Manual,
             zoom_policy: PdfZoomPolicy::new(&crate::pdf_subsystem::PDF_ZOOM_LEVELS),
             zoom_last_request: None,
             zoom_throttle_blocked: 0,
@@ -5339,6 +5353,7 @@ impl PdfRenderState {
         self.active_tts_page_index = None;
         self.jump_target_page_index = None;
         self.zoom_level = crate::pdf_subsystem::PDF_DEFAULT_ZOOM_LEVEL;
+        self.zoom_mode = PdfZoomMode::Manual;
         self.zoom_last_request = None;
         self.zoom_throttle_blocked = 0;
         self.viewport_scroll_policy = PdfScrollPolicy::new(PDF_VIEWPORT_SCROLL_THRESHOLD);
@@ -5399,6 +5414,7 @@ impl PdfRenderState {
             };
         }
         self.zoom_last_request = Some(now);
+        self.zoom_mode = PdfZoomMode::Manual;
         let previous_zoom = self.zoom_level;
         let requested_zoom = self.zoom_policy.step_zoom(self.zoom_level, direction);
         let applied = self.apply_zoom_level(requested_zoom);

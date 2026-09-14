@@ -99,8 +99,40 @@ pub trait OverlayAndHighlightManager: Send + Sync {
     fn refresh_overlays(&mut self);
 }
 
-pub const PDF_ZOOM_LEVELS: [f32; 7] = [0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75];
+pub const PDF_ZOOM_LEVELS: [f32; 15] = [0.25, 0.35, 0.5, 0.67, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0];
 pub const PDF_DEFAULT_ZOOM_LEVEL: f32 = 1.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PdfZoomMode {
+    Manual,
+    FitWidth,
+    FitPage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PdfZoomState {
+    pub mode: PdfZoomMode,
+    pub manual_level: f32,
+}
+
+impl Default for PdfZoomState {
+    fn default() -> Self { Self { mode: PdfZoomMode::Manual, manual_level: PDF_DEFAULT_ZOOM_LEVEL } }
+}
+
+impl PdfZoomState {
+    pub fn manual(level: f32) -> Self {
+        Self { mode: PdfZoomMode::Manual, manual_level: level.clamp(0.25, 4.0) }
+    }
+
+    pub fn effective_level(self, available_width: f32, available_height: f32, page_width: f32, page_height: f32) -> f32 {
+        match self.mode {
+            PdfZoomMode::Manual => self.manual_level.clamp(0.25, 4.0),
+            PdfZoomMode::FitWidth => (available_width.max(1.0) / page_width.max(1.0)).clamp(0.25, 4.0),
+            PdfZoomMode::FitPage => (available_width.max(1.0) / page_width.max(1.0))
+                .min(available_height.max(1.0) / page_height.max(1.0)).clamp(0.25, 4.0),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PdfZoomDirection {
@@ -188,5 +220,16 @@ mod tests {
         assert!(policy.should_scroll(3));
         assert!(!policy.should_scroll(4));
         assert!(policy.should_scroll(5));
+    }
+
+    #[test]
+    fn practical_zoom_supports_fit_modes_and_wider_manual_range() {
+        let state = PdfZoomState::manual(3.0);
+        assert_eq!(state.effective_level(800.0, 600.0, 400.0, 800.0), 3.0);
+        let width = PdfZoomState { mode: PdfZoomMode::FitWidth, manual_level: 1.0 };
+        assert_eq!(width.effective_level(800.0, 600.0, 400.0, 800.0), 2.0);
+        let page = PdfZoomState { mode: PdfZoomMode::FitPage, manual_level: 1.0 };
+        assert_eq!(page.effective_level(800.0, 600.0, 400.0, 800.0), 0.75);
+        assert!(PDF_ZOOM_LEVELS[0] < 0.75 && PDF_ZOOM_LEVELS[PDF_ZOOM_LEVELS.len() - 1] > 1.75);
     }
 }

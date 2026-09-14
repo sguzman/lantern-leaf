@@ -15,6 +15,8 @@ mod pdf_renderer;
 #[cfg(not(target_arch = "wasm32"))]
 mod pdf_subsystem;
 #[cfg(not(target_arch = "wasm32"))]
+mod pdf_viewport;
+#[cfg(not(target_arch = "wasm32"))]
 mod pretty;
 #[cfg(not(target_arch = "wasm32"))]
 mod shell;

@@ -440,6 +440,9 @@ impl PdfRenderScheduler {
             return false;
         }
         if priority == PdfRequestPriority::Current {
+            // A new viewport anchor supersedes obsolete queued work.  Keep only
+            // the exact request being promoted; in-flight work remains bounded
+            // and is rejected by generation/source identity when stale.
             self.queued.retain(|item| item.key == key);
         } else if self.queued.len() >= PDF_RENDER_QUEUE_CAPACITY {
             return false;
