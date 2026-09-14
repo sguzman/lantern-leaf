@@ -2,11 +2,14 @@
 
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     convert::TryFrom,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver, SyncSender, TrySendError},
+    sync::{
+        Arc, Condvar, Mutex,
+        mpsc::{self, Receiver},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -320,6 +323,127 @@ pub(crate) fn bounded_render_pages(
     result
 }
 
+pub(crate) fn presented_page_size(
+    texture_size: [usize; 2],
+    viewport_width: f32,
+    zoom: f32,
+    max_presented_width: f32,
+) -> [f32; 2] {
+    let aspect = texture_size[1].max(1) as f32 / texture_size[0].max(1) as f32;
+    let width = (viewport_width.max(1.0) * zoom.max(0.1)).min(max_presented_width.max(1.0));
+    [width, (width * aspect).max(1.0)]
+}
+
+pub(crate) fn quantized_render_width(viewport_width: f32, zoom: f32) -> u32 {
+    let requested =
+        (viewport_width.max(320.0) * zoom.max(0.1)).clamp(320.0, PDF_RENDER_MAX_WIDTH as f32);
+    ((requested / 64.0).ceil() as u32 * 64).min(PDF_RENDER_MAX_WIDTH)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug)]
+pub(crate) struct PdfResidentEntry {
+    pub key: PdfRenderKey,
+    pub last_touched: u64,
+    pub pinned: bool,
+    pub keep: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn choose_resident_texture_evictions(
+    mut entries: Vec<PdfResidentEntry>,
+    capacity: usize,
+) -> Vec<PdfRenderKey> {
+    let overflow = entries.len().saturating_sub(capacity);
+    if overflow == 0 {
+        return Vec::new();
+    }
+    entries.sort_by_key(|entry| {
+        (
+            entry.pinned,
+            entry.keep,
+            entry.last_touched,
+            entry.key.generation,
+            entry.key.page_index,
+            entry.key.width,
+        )
+    });
+    entries
+        .into_iter()
+        .filter(|entry| !entry.pinned)
+        .take(overflow)
+        .map(|entry| entry.key)
+        .collect()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum PdfRequestPriority {
+    Nearby,
+    Current,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug)]
+struct QueuedRender {
+    key: PdfRenderKey,
+    priority: PdfRequestPriority,
+    sequence: u64,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct PdfRenderScheduler {
+    queued: Vec<QueuedRender>,
+    in_flight: HashSet<PdfRenderKey>,
+    next_sequence: u64,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PdfRenderScheduler {
+    fn submit(&mut self, key: PdfRenderKey, priority: PdfRequestPriority) -> bool {
+        if self.in_flight.contains(&key) || self.queued.iter().any(|item| item.key == key) {
+            return false;
+        }
+        if priority == PdfRequestPriority::Current {
+            self.queued.retain(|item| item.key == key);
+        } else if self.queued.len() >= PDF_RENDER_QUEUE_CAPACITY {
+            return false;
+        }
+        if self.queued.len() >= PDF_RENDER_QUEUE_CAPACITY {
+            return false;
+        }
+        let sequence = self.next_sequence;
+        self.next_sequence = self.next_sequence.saturating_add(1);
+        self.queued.push(QueuedRender {
+            key,
+            priority,
+            sequence,
+        });
+        true
+    }
+
+    fn take_next(&mut self) -> Option<PdfRenderKey> {
+        let index = self
+            .queued
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, item)| (item.priority, item.key.generation, item.sequence))
+            .map(|(index, _)| index)?;
+        let item = self.queued.remove(index);
+        self.in_flight.insert(item.key.clone());
+        Some(item.key)
+    }
+
+    fn finish(&mut self, key: &PdfRenderKey) {
+        self.in_flight.remove(key);
+    }
+
+    fn pending_len(&self) -> usize {
+        self.queued.len() + self.in_flight.len()
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug)]
 pub(crate) struct PdfRenderResult {
@@ -330,23 +454,32 @@ pub(crate) struct PdfRenderResult {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct PdfRenderWorker {
-    request_tx: SyncSender<PdfRenderKey>,
+    scheduler: Arc<(Mutex<PdfRenderScheduler>, Condvar)>,
     result_rx: Receiver<PdfRenderResult>,
-    pending: HashMap<PdfRenderKey, ()>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl PdfRenderWorker {
     pub(crate) fn start() -> Self {
-        let (request_tx, request_rx) =
-            mpsc::sync_channel::<PdfRenderKey>(PDF_RENDER_QUEUE_CAPACITY);
+        let scheduler = Arc::new((Mutex::new(PdfRenderScheduler::default()), Condvar::new()));
+        let worker_scheduler = Arc::clone(&scheduler);
         let (result_tx, result_rx) = mpsc::sync_channel(PDF_RENDER_QUEUE_CAPACITY);
         thread::Builder::new()
             .name("lanternleaf-pdf-render".to_string())
             .spawn(move || {
                 let mut renderer = NativePdfRenderer::new().ok();
                 let worker_thread = thread::current().id();
-                while let Ok(key) = request_rx.recv() {
+                loop {
+                    let key = {
+                        let (lock, wake) = &*worker_scheduler;
+                        let mut scheduler = lock.lock().expect("PDF scheduler lock");
+                        loop {
+                            if let Some(key) = scheduler.take_next() {
+                                break key;
+                            }
+                            scheduler = wake.wait(scheduler).expect("PDF scheduler wait");
+                        }
+                    };
                     let image = match renderer.as_mut() {
                         Some(renderer) => renderer
                             .render_canvas_at_size(
@@ -373,36 +506,42 @@ impl PdfRenderWorker {
             })
             .expect("PDF render worker must start");
         Self {
-            request_tx,
+            scheduler,
             result_rx,
-            pending: HashMap::new(),
         }
     }
 
-    pub(crate) fn request(&mut self, key: PdfRenderKey) -> bool {
-        if self.pending.contains_key(&key) {
-            return false;
+    pub(crate) fn request(&mut self, key: PdfRenderKey, priority: PdfRequestPriority) -> bool {
+        let (lock, wake) = &*self.scheduler;
+        let submitted = lock
+            .lock()
+            .expect("PDF scheduler lock")
+            .submit(key, priority);
+        if submitted {
+            wake.notify_one();
         }
-        match self.request_tx.try_send(key.clone()) {
-            Ok(()) => {
-                self.pending.insert(key, ());
-                true
-            }
-            Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => false,
-        }
+        submitted
     }
 
     pub(crate) fn drain(&mut self) -> Vec<PdfRenderResult> {
         let mut results = Vec::new();
         while let Ok(result) = self.result_rx.try_recv() {
-            self.pending.remove(&result.key);
+            self.scheduler
+                .0
+                .lock()
+                .expect("PDF scheduler lock")
+                .finish(&result.key);
             results.push(result);
         }
         results
     }
 
     pub(crate) fn pending_len(&self) -> usize {
-        self.pending.len()
+        self.scheduler
+            .0
+            .lock()
+            .expect("PDF scheduler lock")
+            .pending_len()
     }
 }
 
@@ -453,16 +592,74 @@ mod tests {
     }
 
     #[test]
-    fn worker_request_queue_is_bounded_by_channel_capacity() {
-        let (tx, rx) = mpsc::sync_channel::<PdfRenderKey>(PDF_RENDER_QUEUE_CAPACITY);
-        for index in 0..PDF_RENDER_QUEUE_CAPACITY {
-            tx.try_send(key(1, index, 800)).expect("queue has capacity");
-        }
-        assert!(matches!(
-            tx.try_send(key(1, 99, 800)),
-            Err(TrySendError::Full(_))
-        ));
-        drop(rx);
+    fn presentation_zoom_changes_logical_size_without_changing_aspect() {
+        let fit = presented_page_size([1000, 1400], 800.0, 1.0, 4800.0);
+        let zoomed = presented_page_size([1000, 1400], 800.0, 1.5, 4800.0);
+        assert_eq!(fit, [800.0, 1120.0]);
+        assert_eq!(zoomed, [1200.0, 1680.0]);
+        assert!(zoomed[0] > 800.0);
+    }
+
+    #[test]
+    fn landscape_presentation_preserves_landscape_aspect() {
+        let size = presented_page_size([1600, 900], 800.0, 1.0, 4800.0);
+        assert_eq!(size, [800.0, 450.0]);
+        assert!(size[0] > size[1]);
+    }
+
+    #[test]
+    fn navigation_owns_a_new_visible_page_key() {
+        assert_ne!(key(4, 1, 832), key(4, 2, 832));
+    }
+
+    #[test]
+    fn raster_width_is_quantized_and_bounded() {
+        assert_eq!(quantized_render_width(801.0, 1.0), 832);
+        assert_eq!(quantized_render_width(10_000.0, 2.0), PDF_RENDER_MAX_WIDTH);
+    }
+
+    #[test]
+    fn resident_eviction_pins_current_and_prefers_irrelevant_old_pages() {
+        let entries = (0..4)
+            .map(|page| PdfResidentEntry {
+                key: key(1, page, 800),
+                last_touched: page as u64,
+                pinned: page == 2,
+                keep: page == 1 || page == 2,
+            })
+            .collect();
+        let evicted = choose_resident_texture_evictions(entries, 2);
+        assert_eq!(evicted, vec![key(1, 0, 800), key(1, 3, 800)]);
+    }
+
+    #[test]
+    fn scheduler_coalesces_and_prioritizes_new_current_work() {
+        let mut scheduler = PdfRenderScheduler::default();
+        assert!(scheduler.submit(key(1, 1, 800), PdfRequestPriority::Nearby));
+        assert!(scheduler.submit(key(1, 2, 800), PdfRequestPriority::Nearby));
+        assert!(scheduler.submit(key(2, 7, 1200), PdfRequestPriority::Current));
+        assert_eq!(scheduler.pending_len(), 1);
+        assert_eq!(scheduler.take_next(), Some(key(2, 7, 1200)));
+        assert!(!scheduler.submit(key(2, 7, 1200), PdfRequestPriority::Current));
+    }
+
+    #[test]
+    fn scheduler_rejects_duplicate_frame_requests() {
+        let mut scheduler = PdfRenderScheduler::default();
+        assert!(scheduler.submit(key(1, 1, 800), PdfRequestPriority::Nearby));
+        assert!(!scheduler.submit(key(1, 1, 800), PdfRequestPriority::Nearby));
+        assert_eq!(scheduler.pending_len(), 1);
+    }
+
+    #[test]
+    fn finished_failure_terminalizes_request_and_allows_recovery() {
+        let mut scheduler = PdfRenderScheduler::default();
+        let failed = key(1, 3, 800);
+        assert!(scheduler.submit(failed.clone(), PdfRequestPriority::Current));
+        assert_eq!(scheduler.take_next(), Some(failed.clone()));
+        scheduler.finish(&failed);
+        assert_eq!(scheduler.pending_len(), 0);
+        assert!(scheduler.submit(failed, PdfRequestPriority::Current));
     }
 }
 

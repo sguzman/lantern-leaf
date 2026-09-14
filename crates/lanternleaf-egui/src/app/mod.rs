@@ -448,6 +448,10 @@ struct LanternLeafApp {
     pdf_render_errors: HashMap<PdfRenderKey, String>,
     #[cfg(not(target_arch = "wasm32"))]
     pdf_generation: u64,
+    #[cfg(not(target_arch = "wasm32"))]
+    pdf_texture_last_touched: HashMap<PdfRenderKey, u64>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pdf_texture_touch_counter: u64,
     current_pdf_path: Option<PathBuf>,
     pretty_page_cache_key: Option<PrettyPageCacheKey>,
     pretty_page_cache_blocks: Vec<PrettyBlock>,
@@ -1022,6 +1026,10 @@ impl LanternLeafApp {
             pdf_render_errors: HashMap::new(),
             #[cfg(not(target_arch = "wasm32"))]
             pdf_generation: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            pdf_texture_last_touched: HashMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            pdf_texture_touch_counter: 0,
             current_pdf_path: None,
             pretty_page_cache_key: None,
             pretty_page_cache_blocks: Vec::new(),
@@ -1153,6 +1161,10 @@ impl LanternLeafApp {
             pdf_render_errors: HashMap::new(),
             #[cfg(not(target_arch = "wasm32"))]
             pdf_generation: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            pdf_texture_last_touched: HashMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            pdf_texture_touch_counter: 0,
             current_pdf_path: None,
             pretty_page_cache_key: None,
             pretty_page_cache_blocks: Vec::new(),
@@ -2780,6 +2792,7 @@ impl LanternLeafApp {
                         self.pdf_generation = self.pdf_generation.saturating_add(1);
                         self.pdf_textures.clear();
                         self.pdf_render_errors.clear();
+                        self.pdf_texture_last_touched.clear();
                     }
                 }
                 self.update_pdf_confidence(snapshot);

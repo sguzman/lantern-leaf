@@ -406,6 +406,10 @@ impl LanternLeafApp {
                         image,
                         eframe::egui::TextureOptions::LINEAR,
                     );
+                    self.pdf_texture_touch_counter =
+                        self.pdf_texture_touch_counter.saturating_add(1);
+                    self.pdf_texture_last_touched
+                        .insert(result.key.clone(), self.pdf_texture_touch_counter);
                     self.pdf_textures.insert(result.key, texture);
                 }
                 Err(error) => {
@@ -448,6 +452,7 @@ impl LanternLeafApp {
                         .retain(|key, _| key.generation == self.pdf_generation);
                     self.pdf_render_errors
                         .retain(|key, _| key.generation == self.pdf_generation);
+                    self.pdf_texture_last_touched.clear();
                 }
                 ui.label(format!("{:.0}%", self.pdf_render_state.zoom_level * 100.0));
                 if ui.button("+").clicked()
@@ -461,6 +466,7 @@ impl LanternLeafApp {
                         .retain(|key, _| key.generation == self.pdf_generation);
                     self.pdf_render_errors
                         .retain(|key, _| key.generation == self.pdf_generation);
+                    self.pdf_texture_last_touched.clear();
                 }
                 if ui.button("Reset").clicked() {
                     self.pdf_render_state.zoom_level = crate::pdf_subsystem::PDF_DEFAULT_ZOOM_LEVEL;
@@ -469,12 +475,13 @@ impl LanternLeafApp {
                         .retain(|key, _| key.generation == self.pdf_generation);
                     self.pdf_render_errors
                         .retain(|key, _| key.generation == self.pdf_generation);
+                    self.pdf_texture_last_touched.clear();
                 }
             });
 
-            let width = (ui.available_width().max(320.0)
-                * self.pdf_render_state.zoom_level.clamp(0.75, 1.75))
-            .round() as u32;
+            let viewport_width = ui.available_width().max(320.0);
+            let zoom = self.pdf_render_state.zoom_level.clamp(0.75, 1.75);
+            let width = crate::pdf_renderer::quantized_render_width(viewport_width, zoom);
             let height = 3600u32;
             let source: std::path::PathBuf = snapshot.source_path.clone().into();
             let planned_pages = self
@@ -491,14 +498,21 @@ impl LanternLeafApp {
                 .unwrap_or_else(|| vec![snapshot.current_page]);
             let pages =
                 crate::pdf_renderer::bounded_render_pages(planned_pages, snapshot.current_page, 5);
-            for page_index in pages {
-                self.pdf_worker.request(crate::pdf_renderer::PdfRenderKey {
-                    source: source.clone(),
-                    generation: self.pdf_generation,
-                    page_index,
-                    width,
-                    height,
-                });
+            for (position, page_index) in pages.into_iter().enumerate() {
+                self.pdf_worker.request(
+                    crate::pdf_renderer::PdfRenderKey {
+                        source: source.clone(),
+                        generation: self.pdf_generation,
+                        page_index,
+                        width,
+                        height,
+                    },
+                    if position == 0 {
+                        crate::pdf_renderer::PdfRequestPriority::Current
+                    } else {
+                        crate::pdf_renderer::PdfRequestPriority::Nearby
+                    },
+                );
             }
             let current_key = crate::pdf_renderer::PdfRenderKey {
                 source,
@@ -507,13 +521,53 @@ impl LanternLeafApp {
                 width,
                 height,
             };
+            let planned_keep_pages = self
+                .pdf_render_state
+                .plan
+                .as_ref()
+                .map(|plan| plan.canvas_page_indexes.clone())
+                .unwrap_or_default();
+            let resident_entries = self
+                .pdf_textures
+                .keys()
+                .cloned()
+                .map(|key| crate::pdf_renderer::PdfResidentEntry {
+                    pinned: key == current_key,
+                    keep: key.source == current_key.source
+                        && key.generation == current_key.generation
+                        && key.width == current_key.width
+                        && planned_keep_pages.contains(&key.page_index),
+                    last_touched: self
+                        .pdf_texture_last_touched
+                        .get(&key)
+                        .copied()
+                        .unwrap_or_default(),
+                    key,
+                })
+                .collect();
+            for key in crate::pdf_renderer::choose_resident_texture_evictions(resident_entries, 8) {
+                self.pdf_textures.remove(&key);
+                self.pdf_texture_last_touched.remove(&key);
+            }
+            if self.pdf_textures.contains_key(&current_key) {
+                self.pdf_texture_touch_counter = self.pdf_texture_touch_counter.saturating_add(1);
+                self.pdf_texture_last_touched
+                    .insert(current_key.clone(), self.pdf_texture_touch_counter);
+            }
             ScrollArea::both()
                 .id_source("native_pdf_viewport")
                 .show(ui, |ui| {
                     if let Some(texture) = self.pdf_textures.get(&current_key) {
-                        let size = texture.size_vec2();
-                        let scale = (ui.available_width() / size.x.max(1.0)).min(1.0);
-                        ui.add(Image::new(texture).fit_to_exact_size(size * scale));
+                        let size = crate::pdf_renderer::presented_page_size(
+                            texture.size(),
+                            viewport_width,
+                            zoom,
+                            4800.0,
+                        );
+                        ui.add(
+                            Image::new(texture)
+                                .fit_to_exact_size(eframe::egui::vec2(size[0], size[1])),
+                        );
                     } else if let Some(error) = self.pdf_render_errors.get(&current_key) {
                         ui.label(format!("PDF page unavailable: {error}"));
                     } else {
