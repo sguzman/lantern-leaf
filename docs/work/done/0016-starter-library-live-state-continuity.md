@@ -85,3 +85,15 @@ Add deterministic reducer/worker tests for progressive batches, stale-request re
 Keep all heavy/blocking work off the egui/render thread. Run focused tests, `cargo check --workspace`, serialized workspace tests, QA build/preparation, and the required Windows CI. Write `docs/work/reports/0016.md`, terminalize only on success or a real escalation, push before terminal signaling, and restore the shared checkout to `main`.
 
 Do not request human QA during implementation. The director reviews the repository first.
+
+## Director correction A2
+
+A1 is rejected before human QA. See `docs/work/reviews/0016-a1-director-rejection.md`.
+
+Preserve A1's progressive catalog batches, partial/loading UI, reducer-level stale-request checks, same-session Recents refresh after successful source persistence, Goal 0010 lazy-cover scheduler, and off-render-thread worker architecture. Correct these three remaining ownership defects:
+
+1. **Preserve live lazy-cover state across catalog reconciliation.** Later metadata batches and final `CalibreBooksLoaded` reconciliation must not erase a `cover_thumbnail` that the live Goal 0010 cover path already acquired for the same book. Add deterministic coverage for cover survival across duplicate batch plus final completion.
+2. **Do not disguise progressive provider failure as success through stale-cache fallback.** A mid-refresh provider failure after one or more fresh pages must remain a failed/degraded refresh terminal state while retaining usable rows. A stale fallback cache may be presented as fallback data, but it must not cause ordinary successful completion or silently replace fresh partial state. Add an end-to-end worker/effect regression with fresh page(s), fallback cache present, then provider failure.
+3. **Extend stale-request ownership beyond the reducer.** Do not allow multiple uncontrolled 105k catalog walks to continue concurrently and race durable cache writes. Coalesce/disable a new refresh while one is active, or implement real cancellation/generation ownership that also prevents a stale worker from committing durable cache state. Add deterministic coverage.
+
+No Caliberate sibling change is authorized. Re-run focused Goal 0016/Goal 0010 regressions, workspace/check/build/QA preparation, and required Windows CI. Do not request human QA; the director reviews A2 first.

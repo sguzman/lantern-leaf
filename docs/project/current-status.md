@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-14 after Goal 0010 real-desktop closure and Goal 0016 promotion.
+Updated: 2026-09-14 after Goal 0016 A1 director review.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -81,14 +81,17 @@ The earlier `42866` open failure remains withdrawn as evidence of a LanternLeaf 
 
 ## Goal 0016 — starter library live-state continuity
 
-**READY NEXT**
+**A1 REJECTED BEFORE HUMAN QA — A2 CORRECTION READY**
 
-Real-desktop Goal 0010 QA exposed two same-session starter-state defects:
+A1 implemented the right overall direction: progressive 500-row Caliberate batches, partial/loading progress, stale-request reducer checks, and same-session Recents refresh after successful source persistence. Its branch and Windows CI completed successfully.
 
-- on a cold/incompatible catalog cache, LanternLeaf can look empty while it walks the real 105,570-book Caliberate catalog in the provider's supported 500-row pages;
-- a successfully opened source is durably persisted as a recent, but the current in-memory Recents panel does not update until an explicit reload/restart.
+Director review found three blocking ownership defects before physical QA:
 
-Goal 0016 will make the large catalog useful progressively/cache-first while preserving truthful partial-loading state and stale-request ownership, and will refresh/update Recents after successful opens without inventing a second persistence model. All catalog/network/disk/decode work remains off the render thread. Contract: `docs/work/ready/0016-starter-library-live-state-continuity.md`.
+- final/duplicate catalog reconciliation can erase live `cover_thumbnail` state acquired by Goal 0010's asynchronous lazy-cover path;
+- progressive provider failure can be converted into apparent successful completion by the older stale-cache fallback path, hiding the refresh failure and replacing fresh partial state;
+- stale-request ownership stops at the reducer, so a second refresh can create another uncontrolled full catalog worker while the old worker continues provider traffic and can still race durable cache writes.
+
+The A2 correction contract is appended to `docs/work/ready/0016-starter-library-live-state-continuity.md`; full rejection rationale is in `docs/work/reviews/0016-a1-director-rejection.md`. No human QA is authorized until A2 passes director review.
 
 ## Goal 0015 — highlight viewport-band reflow polish
 
@@ -110,6 +113,6 @@ Current physical behavior is not accepted as a working PDF reader. Gate 3 is nat
 
 ## Workflow status
 
-**GOAL 0016 READY NEXT**
+**GOAL 0016 A2 CORRECTION READY**
 
-Goal 0010 is closed. Goal 0016 is the one ready implementation goal. Goal 0015 remains queued minor polish; Goal 0011 remains deferred; PDF work remains later unless the director/user reprioritizes after Goal 0016.
+Goal 0010 is closed. Goal 0016 remains the one ready implementation goal, now as A2 after director rejection of A1. Goal 0015 remains queued minor polish; Goal 0011 remains deferred; PDF work remains later unless the director/user reprioritizes after Goal 0016.
