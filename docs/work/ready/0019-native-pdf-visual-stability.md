@@ -2,96 +2,97 @@
 
 ## Current state
 
-**REOPENED FOR A4 AFTER REAL-DESKTOP FAILURE — DO NOT REQUEST HUMAN QA YET**
+**REOPENED FOR A5 DIRECTOR CORRECTION — DO NOT REQUEST HUMAN QA YET**
 
-Goal 0019 remains the one authorized repository macro-goal. A1/A2/A3 established and repaired the native Pdfium/egui visual renderer, but the first real-desktop PDF open exposed a higher-level source-ingestion blocker: PDF source opening is still fatally coupled to Quack-check transcript initialization, so a transcript/configuration failure prevents the native visual Reader from appearing at all.
+A1/A2/A3 established the native Pdfium/egui renderer, real presentation-scale zoom, current-priority scheduling, stale-safe ownership, and deterministic texture residency. A4 correctly removed Quack-check/transcript recovery as a fatal prerequisite for visual PDF open, but director review found that PDF page navigation still inherits ordinary text-pagination ownership. A visual-only PDF therefore becomes a one-page Reader session even when the actual PDF has many pages.
 
-Read these director reviews in order:
+Read these reviews in order:
 
 - `docs/work/reviews/0019-a1-director-rejection.md`
 - `docs/work/reviews/0019-a2-director-rejection.md`
 - `docs/work/reviews/0019-a3-director-acceptance.md`
 - `docs/work/reviews/0019-a3-real-desktop-rejection.md`
+- `docs/work/reviews/0019-a4-director-rejection.md`
 
 Continue the existing implementation/report lineage on `codex/0019-native-pdf-visual-stability` / `docs/work/reports/0019.md`.
 
-## Outcome
+## Outcome remains unchanged
 
 Make PDF a real native reader surface in the authoritative Rust + `eframe`/`egui` application.
 
-A visually readable PDF must be able to enter the Reader and show its actual native Pdfium-rasterized page promptly, with stable navigation, real zoom, responsive scroll/resize behavior, bounded scheduling/residency, and no heavy PDF work on the egui/render thread.
+A readable PDF must enter the Reader without waiting for transcript/OCR/TTS recovery, show the actual native Pdfium-rasterized page, expose truthful native page count/navigation, support real zoom and scrolling, remain responsive under resize/navigation, and keep heavy PDF work off the egui/render thread.
 
-**Gate 3 visual rendering must not depend on Gate 4 transcript/OCR/TTS availability.**
-
-## Accepted visual architecture to preserve
+## Accepted architecture to preserve
 
 - Native Rust + egui + bundled/native Pdfium only. No Tauri, React, WebView, pdf.js, browser DOM overlays, or browser-owned rendering.
-- Pdfium initialization, PDF open/load, page rasterization, bitmap conversion, and renderer CPU caching stay on the dedicated bounded worker.
-- The egui thread only computes bounded requests, receives completed images, uploads bounded textures, and composes lightweight controls/presentation.
-- Render identity includes source/document identity, generation, page, and quantized/bounded render dimensions.
-- Stale source/generation results are rejected and duplicate work coalesces.
-- Newest current/visible work outranks obsolete queued nearby work.
-- Presentation size is distinct from raster resolution: zoom changes actual logical page size and may exceed the viewport; native raster resolution follows through bounded/quantized keys.
-- Deterministic viewport-aware texture residency is the sole visible texture-capacity path; current page is pinned, nearby/keep pages preferred, irrelevant pages evicted first.
-- Preserve all A1/A2/A3 zoom/scheduler/residency/native-render tests.
+- Pdfium initialization, native PDF open/metadata work, page rasterization, bitmap conversion, and renderer CPU caching remain off the egui/render thread.
+- The egui thread only consumes bounded metadata/results, computes bounded requests, uploads bounded textures, and composes controls/presentation.
+- Visual PDF open must not depend on Quack-check, Python, Docling, OCR, transcript cache generation, or Gate 4 text recovery.
+- Preserve A4's render-only degraded state (`PdfGeometryMode::RenderOnlyNoSync`, `PdfSyncStrategy::RenderOnly`) until later text recovery enriches it.
+- Preserve source/generation/page/render-dimension request identity, stale-result rejection, duplicate coalescing, newest-current priority, real presentation-scale zoom, bounded/quantized raster dimensions, and deterministic viewport-aware residency.
+- Preserve QA staging of repo-owned `scripts/quack-check` resources for later Gate 4 use.
 
-## A4 blocking correction — visual-first PDF open
+## A5 blocking correction — native PDF page-domain ownership
 
-The physical failure is upstream of Pdfium rendering. A Caliberate PDF successfully materialized, then `load_source_content()` routed it through `load_pdf_with_quack_check()`. On a transcript cache miss, Quack-check initialization failed because staged QA resolved `scripts_dir` to a nonexistent `.qa/windows/scripts/quack-check` path; the error propagated as `source_open_failed`, and the shell moved to `SourceError` before the native Reader could render.
+A4 returns a visual-only PDF `SourceContent` with empty `tts_text`. Ordinary `ReaderSession::repaginate()` then creates one empty text page. `ReaderSnapshot.total_pages` is still `self.pages.len()`, and `SessionCommand::NextPage` / `PrevPage` / `SetPage` clamp against that text-page vector. The PDF UI uses the same canonical cursor and page count.
 
-A4 must establish a visual-first PDF open contract.
+This means a real multi-page PDF is structurally stuck at page 1 even if Pdfium rendering itself works.
 
-### 1. A readable PDF path is sufficient for visual Reader ownership
+A5 must introduce explicit PDF page-domain ownership that is independent of text pagination.
 
-After local selection or provider materialization yields a readable PDF path, establish PDF visual/session state and permit the native render worker to render page 1/current page **without waiting for Quack-check, Python, Docling, OCR, or transcript cache generation**.
+### 1. Native page count is authoritative for visual PDF navigation
 
-If current session construction requires canonical text before opening, introduce the smallest explicit PDF visual-only/degraded session representation needed to carry source identity, `PrettyKind::Pdf`, current page, total/page-count metadata when known, and existing Reader controls.
+Obtain a trustworthy PDF page count from the native PDF open/metadata path, off the UI thread. The count may briefly be pending/unknown while native open completes, but once available it must become authoritative for PDF visual navigation.
 
-### 2. Transcript recovery is subordinate and non-fatal
+Do not infer page count from extracted text, transcript pages, or `tts_text` pagination.
 
-Quack-check/transcript failures may degrade PDF text/TTS/search/highlight capability, but must not turn a visually renderable PDF into `SourceError`.
+### 2. Reader PDF cursor must use the PDF page domain
 
-Missing scripts, Python/Docling absence, OCR failure, bad transcript cache, or other recovery failure should be represented as bounded degraded/text-unavailable state or deferred work. Do not show giant backend error dumps in the main Reader surface.
+For `PrettyKind::Pdf` / visual PDF sessions, canonical Reader `current_page`, `total_pages`, Next, Previous, SetPage, page label, bookmark page ownership, and renderer current-page request must operate in native PDF page coordinates.
 
-A4 may defer transcript work entirely from the visual open path. Do not broaden this correction into Gate 4 implementation.
+Text/TTS sentence pagination remains a separate future synchronization domain and may be empty in Gate 3.
 
-### 3. Keep expensive metadata/recovery off the UI thread
+Do not create fake empty text pages merely to simulate PDF pages if a cleaner explicit page-domain representation is available.
 
-Any PDF page-count probing, transcript extraction, Quack-check work, OCR, disk-heavy artifact work, or Pdfium operations remain off the egui/render thread.
+### 3. Preserve visual-first open
 
-The UI thread may consume already-produced page-count/session/render results only.
+Do not reintroduce Quack-check or transcript work into the visual-open critical path. A valid materialized/local PDF must still reach the native Reader when Quack-check/scripts/Python/Docling/OCR are unavailable.
 
-### 4. Local and Caliberate PDFs converge after a path exists
+### 4. Parse validity must be truthful
 
-Once a source path exists, local and Caliberate PDFs must enter the same visual Reader contract. Provider/materialization failure may remain fatal because there is no readable PDF. Transcript/recovery failure may not.
+A `%PDF-` prefix alone is not proof that Pdfium can open a document. The authoritative native metadata/open path must distinguish a genuine parse/open failure from a valid renderable PDF.
 
-### 5. Repair Quack-check resource resolution for later use, without restoring the dependency
+A parse-invalid file may fail visual ownership or enter a bounded native-render error state, but it must not be falsely treated as a healthy multi-page document merely because the header matches.
 
-The staged QA configuration currently copies `conf/quack-check.toml`, whose relative `scripts_dir = "scripts/quack-check"` is resolved into the QA staging tree and fails script pinning. Repair resource/path resolution or staging so Quack-check remains usable for future Gate 4 and hostile-PDF recovery.
+### 5. Keep all heavy/native work off the render thread
 
-This repair is secondary. Deliberately making Quack-check unavailable must still leave Gate 3 visual PDF opening functional.
+Native open, page-count probing, Pdfium calls, transcript recovery, OCR, filesystem-heavy work, and rasterization stay off egui. Do not solve page-count ownership by opening/parsing the PDF inside `render_pdf_surface()` or any frame-time/UI callback.
 
 ## Deterministic acceptance coverage
 
 Add tests proving:
 
-1. a PDF with Quack-check/scripts deliberately unavailable still establishes visual PDF Reader/session ownership rather than `SourceError`;
-2. transcript/recovery error becomes degraded/non-fatal state for visual open;
-3. local PDF and a successfully materialized provider PDF converge on the same visual-open contract after obtaining a path;
-4. truly missing/unreadable PDF remains a real open failure;
-5. existing source/generation/page/zoom stale-result, scheduler, presentation, and resident-texture tests remain green;
-6. representative EPUB/non-PDF reader/TTS/catalog behavior remains green.
+1. a visual-only PDF session can represent a native page count greater than one while `tts_text` remains empty;
+2. Next/Prev/SetPage move correctly across the PDF page domain and clamp at native PDF bounds;
+3. `ReaderSnapshot.total_pages` reports native PDF page count for PDF sessions;
+4. the PDF UI/render request follows the canonical PDF current page after navigation;
+5. local and successfully materialized provider PDFs converge on the same page-domain contract after a path exists;
+6. Quack-check/scripts deliberately unavailable still do not block visual PDF session ownership;
+7. parse-invalid/header-only PDF input is distinguished from a valid native PDF;
+8. source switching cannot leak stale page count or page imagery from the prior document;
+9. all accepted A1/A2/A3 renderer/zoom/scheduler/residency tests remain green;
+10. representative EPUB/non-PDF/TTS behavior remains green.
 
-Use deterministic policy/session tests when invoking a full Pdfium/Quack-check stack is unsuitable; retain the hosted renderer probe as native Pdfium capability evidence.
+Use deterministic unit/session tests where a full native fixture is unsuitable, but include a real valid multi-page PDF fixture or hosted/native probe evidence sufficient to prove actual page-count extraction rather than mocked text pagination.
 
 ## Required validation
 
-Before terminalizing A4:
+Before terminalizing A5:
 
-- focused PDF source-open/session + renderer tests;
+- focused PDF source/session/page-domain + renderer tests;
 - `cargo test -p lanternleaf-egui` and relevant app/core tests;
 - `cargo check --workspace`;
-- workspace tests and native build;
+- workspace tests and native Windows build gate;
 - repo-native QA preparation;
 - hosted Windows baseline workflow success including `native-workspace` and `hosted-renderer-probe`;
 - `git diff --check`;
@@ -99,25 +100,26 @@ Before terminalizing A4:
 
 ## Real-desktop recheck after director integration
 
-The next physical verification starts with a deliberately tiny gate:
+After director source/CI acceptance, the next human pass begins narrowly:
 
 1. open the same representative Caliberate PDF;
-2. verify the actual native first page appears;
-3. only then proceed to Next/Previous, real zoom/scroll, resize responsiveness, multi-page cache behavior, source switching, and one representative EPUB regression check.
+2. verify actual page 1 appears promptly;
+3. verify the displayed total page count is believable and greater than one for a known multi-page PDF;
+4. verify Next reaches page 2 and Prev returns to page 1;
+5. only then continue with rapid navigation, zoom/scroll, resize responsiveness, multi-page residency, source switching, and one representative EPUB regression check.
 
 ## Explicit non-goals
 
-Do not expand A4 into PDF TTS playback correctness, canonical sentence/text-layer geometry mapping, spoken-sentence highlighting, OCR quality work, click-to-sentence mapping, text selection/copy parity, broad PDF settings redesign, Goal 0015, Goal 0017, Goal 0018, Natural/HD voices, or unrelated UI redesign.
+Do not expand A5 into PDF TTS playback correctness, sentence/text-layer geometry mapping, spoken-sentence highlighting, OCR quality work, click-to-sentence mapping, text selection/copy parity, broad PDF settings redesign, Goal 0015, Goal 0017, Goal 0018, Natural/HD voices, or unrelated UI redesign.
 
 ## Repository handoff
 
 - Repository goal: `0019-native-pdf-visual-stability`
 - Branch: `codex/0019-native-pdf-visual-stability`
 - This is a correction continuation under the same repository goal ID.
-- Synchronize current director `main` before implementation.
+- Start from/synchronize current director `main` before implementation.
 - Move this file `ready -> active` and re-arm the normal watcher for the fresh Codex Goal attempt.
-- Preserve accepted A1/A2/A3 renderer work; implement the A4 visual-first source/session correction.
-- Update `docs/work/reports/0019.md` with A4 implementation/test/CI evidence and exact commits.
+- Preserve accepted A1/A2/A3 work and accepted A4 visual-first decoupling; implement the A5 native page-domain correction.
+- Update `docs/work/reports/0019.md` with A5 implementation/test/CI evidence and exact commits.
 - Terminalize to `done/` only after all required gates pass.
-- Push before terminal signaling and restore the shared checkout to `main`.
-- Do not request human QA. The director reviews first.
+- Push before terminal signaling, restore shared checkout to `main`, and do not request human QA. The director reviews first.
