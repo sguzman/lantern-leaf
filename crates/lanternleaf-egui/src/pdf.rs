@@ -263,6 +263,23 @@ mod tests {
     }
 
     #[test]
+    fn continuous_visible_set_is_authoritative_for_canvas_and_text_ownership() {
+        let visible = vec![10, 11, 12];
+        let plan = build_pdf_viewport_render_plan(&PdfViewportPlanInput {
+            total_pages: 10_000,
+            visible_page_indexes: visible.clone(),
+            overscan: 2,
+            active_tts_page_index: None,
+            jump_target_page_index: None,
+        });
+        for page in visible {
+            assert!(plan.canvas_page_indexes.contains(&page));
+            assert!(plan.text_layer_page_indexes.contains(&page));
+        }
+        assert!(plan.canvas_page_indexes.len() <= 9);
+    }
+
+    #[test]
     fn viewport_eviction_preserves_keep_pages() {
         let entries = (0..6)
             .map(|page_index| PdfPageRegistryEntry {

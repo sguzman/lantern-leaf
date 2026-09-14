@@ -4,6 +4,8 @@
 //! egui thread reserve stable page slots and select a bounded render window while
 //! native raster work remains owned by the worker.
 
+pub(crate) const PDF_BASE_PAGE_WIDTH: f32 = 816.0;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PdfPageGeometry {
     pub aspect_ratio: f32,
@@ -23,6 +25,14 @@ pub(crate) struct PdfPageSlot {
     pub top: f32,
     pub height: f32,
     pub width: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PdfViewportWitness {
+    pub page_index: usize,
+    pub vertical_fraction: f32,
+    pub horizontal_fraction: f32,
+    pub viewport_fraction: f32,
 }
 
 impl PdfPageSlot {
@@ -66,10 +76,9 @@ impl PdfViewportGeometry {
     pub(crate) fn visible_page_indexes(&self, top: f32, bottom: f32, overscan: f32) -> Vec<usize> {
         let top = top.max(0.0) - overscan.max(0.0);
         let bottom = bottom.max(top) + overscan.max(0.0);
-        self.slots.iter()
-            .filter(|slot| slot.bottom() >= top && slot.top <= bottom)
-            .map(|slot| slot.index)
-            .collect()
+        let start = self.slots.partition_point(|slot| slot.bottom() < top);
+        let end = self.slots.partition_point(|slot| slot.top <= bottom);
+        self.slots[start.min(end)..end].iter().map(|slot| slot.index).collect()
     }
 
     /// The page containing the viewport anchor.  A small hysteresis band around
@@ -77,8 +86,8 @@ impl PdfViewportGeometry {
     pub(crate) fn current_page(&self, viewport_top: f32, viewport_height: f32, previous: usize) -> Option<usize> {
         if self.slots.is_empty() { return None; }
         let anchor = viewport_top.max(0.0) + viewport_height.max(1.0) * 0.5;
-        let candidate = self.slots.iter().position(|slot| anchor <= slot.bottom())
-            .unwrap_or(self.slots.len() - 1);
+        let candidate = self.slots.partition_point(|slot| slot.bottom() < anchor)
+            .min(self.slots.len() - 1);
         let previous = previous.min(self.slots.len() - 1);
         let prior = self.slots[previous];
         if candidate != previous && anchor >= prior.top && anchor <= prior.bottom() {
@@ -95,6 +104,37 @@ impl PdfViewportGeometry {
 
     pub(crate) fn page(&self, index: usize) -> Option<PdfPageGeometry> { self.pages.get(index).copied() }
     pub(crate) fn gap(&self) -> f32 { self.gap }
+
+    pub(crate) fn capture_witness(
+        &self,
+        scroll_x: f32,
+        scroll_y: f32,
+        viewport_width: f32,
+        viewport_height: f32,
+        previous_page: usize,
+    ) -> Option<PdfViewportWitness> {
+        let page_index = self.current_page(scroll_y, viewport_height, previous_page)?;
+        let slot = self.slots[page_index];
+        Some(PdfViewportWitness {
+            page_index,
+            vertical_fraction: ((scroll_y + viewport_height * 0.5 - slot.top) / slot.height).clamp(0.0, 1.0),
+            horizontal_fraction: ((scroll_x + viewport_width * 0.5) / slot.width).clamp(0.0, 1.0),
+            viewport_fraction: 0.5,
+        })
+    }
+
+    pub(crate) fn restore_witness(
+        &self,
+        witness: PdfViewportWitness,
+        viewport_width: f32,
+        viewport_height: f32,
+    ) -> (f32, f32) {
+        let slot = self.slots[witness.page_index.min(self.slots.len().saturating_sub(1))];
+        (
+            (slot.top + slot.height * witness.vertical_fraction - viewport_height * witness.viewport_fraction).max(0.0),
+            (slot.width * witness.horizontal_fraction - viewport_width * 0.5).max(0.0),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -144,5 +184,27 @@ mod tests {
         let centered = geometry.jump_offset(2, 600.0, 0.5);
         assert!(centered < top);
         assert!((top - centered - 150.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn witness_restores_same_page_and_focal_fractions_after_resize() {
+        let before = geometry();
+        let witness = before.capture_witness(20.0, 450.0, 300.0, 300.0, 1).unwrap();
+        let after = PdfViewportGeometry::new(&[PdfPageGeometry::new(1.0); 4], 600.0, 16.0);
+        let (y, x) = after.restore_witness(witness, 400.0, 500.0);
+        let restored = after.capture_witness(x, y, 400.0, 500.0, witness.page_index).unwrap();
+        assert_eq!(restored.page_index, witness.page_index);
+        assert!((restored.vertical_fraction - witness.vertical_fraction).abs() < 0.02);
+    }
+
+    #[test]
+    fn long_document_lookup_returns_a_small_window() {
+        let pages = vec![PdfPageGeometry::new(0.707); 100_000];
+        let geometry = PdfViewportGeometry::new(&pages, 800.0, 16.0);
+        let visible = geometry.visible_page_indexes(50_000.0, 50_800.0, 900.0);
+        assert!(visible.len() < 10);
+        let current = geometry.current_page(50_000.0, 800.0, 10).unwrap();
+        assert!(current < 100_000);
+        assert_eq!(geometry.current_page(50_000.0, 800.0, current), Some(current));
     }
 }

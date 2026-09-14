@@ -39,11 +39,15 @@ use crate::pdf::{
 use crate::pdf_renderer::{NativeRenderEviction, NativeRenderSpan, RenderTarget};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::pdf_renderer::{PdfRenderKey, PdfRenderWorker};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::pdf_renderer::PdfMetadata;
 use crate::pdf_subsystem::{
     PdfScrollPolicy, PdfViewportRange, PdfViewportUpdateTrigger, PdfZoomDirection, PdfZoomMode,
     PdfZoomPolicy,
 };
 use crate::pretty::{PrettyBlock, PrettyPageCacheKey};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::pdf_viewport::{PdfViewportGeometry, PdfViewportWitness};
 use crate::shell::{FocusOwner, LayoutPolicy, ShellState};
 use lanternleaf_app::{
     AppRuntime,
@@ -457,6 +461,18 @@ struct LanternLeafApp {
     pdf_page_aspects: HashMap<usize, f32>,
     #[cfg(not(target_arch = "wasm32"))]
     pdf_pending_jump_page: Option<usize>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pdf_metadata_rx: Option<mpsc::Receiver<Result<PdfMetadata, String>>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pdf_geometry_cache: Option<Arc<PdfViewportGeometry>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pdf_geometry_cache_key: Option<(u32, u32, usize, u64)>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pdf_viewport_width: f32,
+    #[cfg(not(target_arch = "wasm32"))]
+    pdf_page_metadata_revision: u64,
+    #[cfg(not(target_arch = "wasm32"))]
+    pdf_pending_witness: Option<PdfViewportWitness>,
     current_pdf_path: Option<PathBuf>,
     pretty_page_cache_key: Option<PrettyPageCacheKey>,
     pretty_page_cache_blocks: Vec<PrettyBlock>,
@@ -1041,6 +1057,12 @@ impl LanternLeafApp {
             #[cfg(not(target_arch = "wasm32"))]
             pdf_page_aspects: HashMap::new(),
             pdf_pending_jump_page: None,
+            pdf_metadata_rx: None,
+            pdf_geometry_cache: None,
+            pdf_geometry_cache_key: None,
+            pdf_viewport_width: 800.0,
+            pdf_page_metadata_revision: 0,
+            pdf_pending_witness: None,
             current_pdf_path: None,
             pretty_page_cache_key: None,
             pretty_page_cache_blocks: Vec::new(),
@@ -1182,6 +1204,12 @@ impl LanternLeafApp {
             #[cfg(not(target_arch = "wasm32"))]
             pdf_page_aspects: HashMap::new(),
             pdf_pending_jump_page: None,
+            pdf_metadata_rx: None,
+            pdf_geometry_cache: None,
+            pdf_geometry_cache_key: None,
+            pdf_viewport_width: 800.0,
+            pdf_page_metadata_revision: 0,
+            pdf_pending_witness: None,
             current_pdf_path: None,
             pretty_page_cache_key: None,
             pretty_page_cache_blocks: Vec::new(),
@@ -2798,12 +2826,56 @@ impl LanternLeafApp {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn request_authoritative_pdf_renders(
+        &mut self,
+        source: &Path,
+        plan: &PdfViewportRenderPlan,
+    ) {
+        let scale = match self.pdf_render_state.zoom_mode {
+            PdfZoomMode::Manual => self.pdf_render_state.zoom_level,
+            PdfZoomMode::FitWidth | PdfZoomMode::FitPage => 1.0,
+        };
+        let width = crate::pdf_renderer::quantized_render_width(
+            self.pdf_viewport_width.max(320.0),
+            scale,
+        );
+        let anchor = self
+            .pdf_render_state
+            .visible_page_indexes
+            .first()
+            .copied()
+            .or_else(|| plan.priority_page_indexes.first().copied());
+        let pages = anchor
+            .into_iter()
+            .chain(plan.priority_page_indexes.iter().copied())
+            .chain(plan.canvas_page_indexes.iter().copied())
+            .chain(plan.low_priority_page_indexes.iter().copied())
+            .collect::<Vec<_>>();
+        for (position, page_index) in pages.into_iter().take(12).enumerate() {
+            self.pdf_worker.request(
+                PdfRenderKey {
+                    source: source.to_path_buf(),
+                    generation: self.pdf_generation,
+                    page_index,
+                    width,
+                    height: crate::pdf_renderer::PDF_RENDER_MAX_HEIGHT,
+                },
+                if position == 0 {
+                    crate::pdf_renderer::PdfRequestPriority::Current
+                } else {
+                    crate::pdf_renderer::PdfRequestPriority::Nearby
+                },
+            );
+        }
+    }
+
     fn update_pdf_render_state(&mut self, snapshot: Option<&ReaderSnapshot>) {
         if let Some(snapshot) = snapshot {
             if snapshot.pretty_kind == PrettyKind::Pdf && snapshot.total_pages > 0 {
                 let source_path = PathBuf::from(&snapshot.source_path);
                 if self.current_pdf_path.as_ref() != Some(&source_path) {
-                    self.current_pdf_path = Some(source_path);
+                    self.current_pdf_path = Some(source_path.clone());
                     #[cfg(not(target_arch = "wasm32"))]
                     {
                         self.pdf_generation = self.pdf_generation.saturating_add(1);
@@ -2811,10 +2883,45 @@ impl LanternLeafApp {
                         self.pdf_render_errors.clear();
                         self.pdf_texture_last_touched.clear();
                         self.pdf_page_aspects.clear();
+                        self.pdf_page_metadata_revision = self.pdf_page_metadata_revision.saturating_add(1);
+                        self.pdf_metadata_rx = Some(self.pdf_worker.request_metadata(
+                            PathBuf::from(&snapshot.source_path),
+                        ));
+                        self.pdf_geometry_cache = None;
+                        self.pdf_geometry_cache_key = None;
+                    }
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(receiver) = self.pdf_metadata_rx.as_ref() {
+                    match receiver.try_recv() {
+                        Ok(Ok(metadata)) => {
+                            self.pdf_page_aspects = metadata
+                                .page_dimensions
+                                .iter()
+                                .map(|dimension| dimension.width / dimension.height.max(1.0))
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                                .enumerate()
+                                .collect::<HashMap<_, _>>();
+                            self.pdf_page_metadata_revision = self.pdf_page_metadata_revision.saturating_add(1);
+                            self.pdf_metadata_rx = None;
+                            self.pdf_geometry_cache = None;
+                            self.pdf_geometry_cache_key = None;
+                        }
+                        Ok(Err(error)) => {
+                            warn!(error = %error, "native PDF page metadata unavailable");
+                            self.pdf_metadata_rx = None;
+                        }
+                        Err(mpsc::TryRecvError::Disconnected) => self.pdf_metadata_rx = None,
+                        Err(mpsc::TryRecvError::Empty) => {}
                     }
                 }
                 self.update_pdf_confidence(snapshot);
-                let visible_page_indexes = vec![snapshot.current_page];
+                let visible_page_indexes = if self.pdf_render_state.visible_page_indexes.is_empty() {
+                    vec![snapshot.current_page]
+                } else {
+                    self.pdf_render_state.visible_page_indexes.clone()
+                };
                 let highlighted_page = snapshot
                     .highlighted_sentence_idx
                     .and_then(|sentence_idx| {
@@ -2931,6 +3038,8 @@ impl LanternLeafApp {
                 self.pdf_render_state.last_viewport_trigger = Some(trigger);
                 self.pdf_render_state.last_viewport_update = Some(Instant::now());
                 self.pdf_render_state.last_updated = Some(Instant::now());
+                #[cfg(not(target_arch = "wasm32"))]
+                self.request_authoritative_pdf_renders(&source_path, &plan);
                 return;
             }
         }

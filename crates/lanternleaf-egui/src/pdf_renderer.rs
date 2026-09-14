@@ -103,13 +103,25 @@ impl NativePdfRenderer {
         self.render_for_target(source_path, page_index, RenderTarget::TextLayer)
     }
 
-    pub(crate) fn page_count(&self, source_path: &Path) -> Result<usize, NativePdfRendererError> {
+    pub(crate) fn page_metadata(&self, source_path: &Path) -> Result<Vec<PdfPageDimension>, NativePdfRendererError> {
         let document = self.pdfium.load_pdf_from_file(source_path, None)?;
-        let count = document.pages().len() as usize;
-        if count == 0 {
+        let pages = document.pages();
+        if pages.is_empty() {
             return Err(NativePdfRendererError::PageIndexOutOfBounds(0));
         }
-        Ok(count)
+        (0..pages.len())
+            .map(|index| {
+                let page = pages.get(index)?;
+                Ok(PdfPageDimension {
+                    width: page.width().value.abs().max(1.0),
+                    height: page.height().value.abs().max(1.0),
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn page_count(&self, source_path: &Path) -> Result<usize, NativePdfRendererError> {
+        Ok(self.page_metadata(source_path)?.len())
     }
 
     fn render_for_target(
@@ -490,10 +502,18 @@ pub(crate) struct PdfRenderResult {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PdfMetadata {
     pub page_count: usize,
+    pub page_dimensions: Vec<PdfPageDimension>,
     pub worker_thread: thread::ThreadId,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PdfPageDimension {
+    pub width: f32,
+    pub height: f32,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -562,10 +582,11 @@ impl PdfNativeService {
                         let result = match renderer.as_ref() {
                             Some(renderer) => validate_pdf_source(&request.source)
                                 .and_then(|()| {
-                                    renderer.page_count(&request.source).map_err(|err| format!("{err:?}"))
+                                    renderer.page_metadata(&request.source).map_err(|err| format!("{err:?}"))
                                 })
-                                .map(|page_count| PdfMetadata {
-                                    page_count,
+                                .map(|page_dimensions| PdfMetadata {
+                                    page_count: page_dimensions.len(),
+                                    page_dimensions,
                                     worker_thread,
                                 }),
                             None => Err("native PDF service is unavailable".to_string()),
@@ -645,6 +666,14 @@ impl PdfNativeService {
             .map_err(|_| "native PDF metadata request stopped".to_string())?
     }
 
+    pub(crate) fn metadata_async(&self, source: PathBuf) -> mpsc::Receiver<Result<PdfMetadata, String>> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        if self.metadata_tx.send(PdfMetadataRequest { source, reply: reply_tx }).is_ok() {
+            self.scheduler.1.notify_one();
+        }
+        reply_rx
+    }
+
     fn submit_render(&self, key: PdfRenderKey, priority: PdfRequestPriority) -> bool {
         let (lock, wake) = &*self.scheduler;
         let submitted = lock
@@ -720,6 +749,10 @@ impl PdfRenderWorker {
 
     pub(crate) fn request(&mut self, key: PdfRenderKey, priority: PdfRequestPriority) -> bool {
         self.service.submit_render(key, priority)
+    }
+
+    pub(crate) fn request_metadata(&self, source: PathBuf) -> mpsc::Receiver<Result<PdfMetadata, String>> {
+        self.service.metadata_async(source)
     }
 
     pub(crate) fn drain(&mut self) -> Vec<PdfRenderResult> {
@@ -939,6 +972,8 @@ mod tests {
         thread::sleep(Duration::from_millis(50));
         let metadata = service.metadata(valid.clone()).expect("native page count");
         assert_eq!(metadata.page_count, 2);
+        assert_eq!(metadata.page_dimensions.len(), 2);
+        assert!(metadata.page_dimensions.iter().all(|dimension| dimension.width > 0.0 && dimension.height > 0.0));
         assert!(service.metadata(invalid).is_err());
 
         let mut worker = PdfRenderWorker::from_service(service);
