@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-14 after Goal 0019 A7 director source/CI acceptance.
+Updated: 2026-09-14 after Goal 0019 A7 real-desktop acceptance and Goal 0020 promotion.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -113,26 +113,36 @@ Preserve the existing ordinary Windows voice backend. Goal 0011 remains a dorman
 
 ## Goal 0019 / Gate 3 — native PDF visual stability
 
-**PHYSICAL QA NEXT — A7 SOURCE/CI ACCEPTED**
+**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-A1-A3 established the native Pdfium/egui rendering surface, real presentation-scale zoom, current-priority scheduling, stale-safe source/page/size ownership, and deterministic current-page-pinned texture residency. A4 removed Quack-check/transcript recovery from the visual-open critical path. A5 added truthful native PDF page-domain ownership. A6 consolidated metadata and rasterization behind one authoritative `PdfNativeService` / one native Pdfium owner and added detached-effect panic terminalization.
+After seven implementation/review attempts, the native Pdfium/egui visual foundation is physically proven on Windows.
 
-A7 fixes the remaining idle-service liveness defect by returning from an empty raster wait to top-level request arbitration after one bounded wait, so metadata submitted after the service has settled idle is serviced promptly. The regression probe now deliberately covers `start -> idle -> metadata -> raster -> idle -> metadata` through the same native worker and validates malformed input as failure. The duplicate PDF container precheck is bounded to a small header and at most 64 KiB of tail data.
+Accepted behavior includes: visual-first PDF open independent of Quack-check/transcript/OCR prerequisites; one authoritative shared `PdfNativeService` / one native Pdfium owner; truthful native page count and PDF page-domain navigation; actual native raster presentation; real presentation-scale zoom; newest-current scheduling; stale source/page/zoom rejection; deterministic current-page-pinned residency; bounded header/tail precheck; effect panic terminalization; and all heavy/native PDF work off the egui/render thread.
 
-Hosted Windows workflow `34867657265` passed `native-workspace` and `hosted-renderer-probe`, including the deliberate idle lifecycle probe.
+The real Caliberate PDF `725-13e8b7a0.pdf` opened successfully and reported `Page 13 / 638`; Next and Previous navigation worked; aggressive ordinary PDF browsing remained usable; and representative EPUB behavior remained green.
 
-Director acceptance: `docs/work/reviews/0019-a7-director-acceptance.md`.
+Real-desktop acceptance: `docs/work/reviews/0019-a7-real-desktop-acceptance.md`.
 
-Goal 0019 remains open until the narrow real-desktop sequence passes: actual page 1 visible, believable native page count >1, Next reaches page 2, Prev returns to page 1. Only then continue broader zoom/scroll/resize/source-switch testing.
+## Goal 0020 — continuous native PDF viewport and practical zoom
+
+**READY NEXT — CORE VISUAL REFINEMENT BEFORE GATE 4**
+
+Physical Goal-0019 QA clarified that the desired production PDF UX is continuous scrolling across a virtualized native page stack, not the temporary one-page-at-a-time surface.
+
+The current zoom policy is also a conservative fixed scaffold (`75%, 90%, 100%, 110%, 125%, 150%, 175%`). Goal 0020 promotes a broader practical zoom model with Fit width, Fit page, Reset/100%, and substantially wider bounded manual zoom.
+
+The existing PDF planning substrate already models multiple visible page indexes, overscan, priority pages, and viewport-aware eviction. Goal 0020 must connect those primitives to the production egui presentation while preserving the single Pdfium owner, off-render-thread work, immediate scrolling, stale safety, bounded residency, explicit page identity, and EPUB regressions.
+
+Contract: `docs/work/ready/0020-continuous-pdf-viewport-and-zoom.md`.
 
 ## Gate 4 — PDF text/TTS/highlight synchronization
 
-**FUTURE CORE PRODUCT GATE**
+**FUTURE CORE PRODUCT GATE — AFTER GOAL 0020**
 
-After Gate 3: integrate canonical sentence/page mapping, geometry confidence/overlays, jump/follow behavior, OCR/degraded modes, first-sample playback integration, representative regression corpus, and the hostile-PDF recovery capabilities represented by Quack-check. Gate 4 recovery must remain subordinate to the visual reader rather than blocking it.
+After the continuous viewport is trustworthy: integrate canonical sentence/page mapping, geometry confidence/overlays, jump/follow behavior, OCR/degraded modes, first-sample playback integration, representative regression corpus, and the hostile-PDF recovery capabilities represented by Quack-check. Gate 4 recovery must remain subordinate to the visual reader rather than blocking it.
 
 ## Workflow status
 
-**NO CODEX GOAL AUTHORIZED — PHYSICAL GOAL 0019 A7 RECHECK NEXT**
+**GOAL 0020 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
 
-Goal 0019 remains open pending the narrow physical PDF recheck. Do not start another Codex Goal unless that recheck exposes a new defect or the director explicitly promotes the next repository goal. Goals 0015, 0017, and 0018 remain queued; Goal 0011 remains deferred.
+Goal 0019 is closed. Goal 0020 is the only ready macro-goal. Goals 0015, 0017, and 0018 remain queued; Goal 0011 remains deferred. Do not start Gate 4 until the continuous PDF viewport is accepted.
