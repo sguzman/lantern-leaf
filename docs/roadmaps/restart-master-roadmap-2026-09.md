@@ -78,15 +78,15 @@ A lower-severity residual under severe letter-spacing/font-scaling edits is queu
 
 ### Goal 0010 — Caliberate catalog covers + provider availability UX
 
-**STATUS: A6 REJECTED BEFORE HUMAN QA — A7 CORRECTION READY**
+**STATUS: A7 DIRECTOR-ACCEPTED + INTEGRATED — FOCUSED REAL-DESKTOP QA PENDING**
 
-A6 fixed the earlier global busy-scope leak and added explicit book-identified terminal cover outcomes, retryable provider-unavailable state, current-main synchronization, post-change sibling Caliberate tests, and successful Windows CI. It is still not integrated.
+The explicit Caliberate cover contract and lazy catalog path are now integrated in both repositories. LanternLeaf carries `has_cover`, requests only visible/near-visible covers, bounds in-flight work to four, keeps network/disk/decode work off the render thread, and presents intentional loading/no-cover/provider-unavailable/fetch-error states. Caliberate serves `/api/v1/books/{id}/cover` without requiring full-book materialization.
 
-Director review found one remaining completion-order race. The egui starter filters all cover-completion events through one global last-request-id watermark even though the dispatcher executes independent cover effects on separate worker threads. Out-of-order completion can therefore discard a valid lower-ID terminal event for another book and strand that row in `Loading cover…`.
+A6 added explicit book-identified terminal cover outcomes. A7 removes the last global completion-order assumption: ownership/freshness is per book and request ID, so independent books may finish in arbitrary order while stale same-book completions cannot overwrite newer retry state. Manual and automatic ensure paths now share the bounded/coalesced scheduler.
 
-A7 must use per-book request ownership/freshness or an equivalent model: different books may complete in arbitrary order, stale older same-book completions may not clobber newer retry state, and only the currently owned request may clear/replace that book's pending state. The manual `Ensure thumbnail` path must also share the bounded/coalesced ownership path so repeated clicks cannot bypass the cover concurrency bound.
+LanternLeaf implementation `54e22c172745171b084221a6f80465e3f6ffe77d` passed Windows baseline run `34793890003`, including native-workspace and hosted-renderer-probe jobs. The LanternLeaf and Caliberate worker lineages have been fast-forward integrated to `main`.
 
-Required tests explicitly cover higher-ID-first completion across two books, stale same-book completion after a newer retry, and duplicate/manual dispatch bounding. See `docs/work/reviews/0010-a6-director-rejection.md`.
+One focused human pass remains: verify covers before first open, no rows stuck forever on loading, intentional missing-cover state, provider-down/restart recovery without restarting LanternLeaf, bounded manual ensure, and preservation of representative Caliberate open/TTS behavior. See `docs/work/reviews/0010-a7-director-acceptance.md`.
 
 ### Goal 0015 — highlight viewport-band reflow polish
 
