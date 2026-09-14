@@ -1030,9 +1030,11 @@ fn open_source_from_path(
         events.push(AppEvent::PdfTranscriptionProgress(
             lanternleaf_app::contracts::PdfTranscriptionEvent {
                 request_id,
-                phase: "started".to_string(),
+                phase: "deferred".to_string(),
                 source_path: source_path.to_string_lossy().to_string(),
-                message: None,
+                message: Some(
+                    "Native PDF visual open does not wait for transcript recovery; text/TTS recovery is deferred.".to_string(),
+                ),
             },
         ));
     }
@@ -1085,9 +1087,12 @@ fn open_source_from_path(
         events.push(AppEvent::PdfTranscriptionProgress(
             lanternleaf_app::contracts::PdfTranscriptionEvent {
                 request_id,
-                phase: "finished".to_string(),
+                phase: "complete".to_string(),
                 source_path: source_path.to_string_lossy().to_string(),
-                message: None,
+                message: Some(
+                    "PDF opened visually; transcript recovery is unavailable or deferred."
+                        .to_string(),
+                ),
             },
         ));
     }

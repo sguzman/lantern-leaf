@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -120,7 +121,7 @@ pub(super) fn load_source_content(
     }
 
     if is_pdf(path) {
-        return load_pdf_with_quack_check(path, cancel);
+        return load_visual_pdf_source_content(path, cancel);
     }
 
     if is_epub(path) {
@@ -362,6 +363,50 @@ fn is_pdf(path: &Path) -> bool {
             .map(|ext| ext.to_ascii_lowercase()),
         Some(ext) if ext == "pdf"
     )
+}
+
+/// Establish the native visual PDF contract without making text recovery a source-open
+/// prerequisite. Quack-check remains available through its explicit recovery path, but a
+/// readable PDF must be able to reach the native Pdfium reader even when that path is absent.
+fn load_visual_pdf_source_content(
+    path: &Path,
+    cancel: Option<&CancellationToken>,
+) -> Result<SourceContent> {
+    ensure_not_cancelled(cancel, "before_visual_pdf_open")?;
+    let mut file = fs::File::open(path)
+        .with_context(|| format!("Failed to open PDF source {}", path.display()))?;
+    let mut header = [0_u8; 5];
+    file.read_exact(&mut header)
+        .with_context(|| format!("Failed to read PDF header {}", path.display()))?;
+    if &header != b"%PDF-" {
+        anyhow::bail!(
+            "Unreadable PDF source {}: missing PDF header",
+            path.display()
+        );
+    }
+
+    let pdf_geometry_mode = PdfGeometryMode::RenderOnlyNoSync;
+    let pdf_sync_strategy = PdfSyncStrategy::RenderOnly;
+    let pdf_runtime_policy =
+        derive_pdf_runtime_policy(None, pdf_geometry_mode, pdf_sync_strategy, "");
+    info!(
+        path = %path.display(),
+        pdf_geometry_mode = ?pdf_geometry_mode,
+        pdf_sync_strategy = ?pdf_sync_strategy,
+        "Opened readable PDF in visual-first render-only mode; transcript recovery is deferred"
+    );
+    Ok(SourceContent {
+        tts_text: String::new(),
+        reading_markdown: None,
+        reading_html: None,
+        has_structured_markdown: false,
+        pdf_geometry_mode: Some(pdf_geometry_mode),
+        pdf_sync_strategy: Some(pdf_sync_strategy),
+        pdf_classification: None,
+        pdf_runtime_policy: Some(pdf_runtime_policy),
+        pdf_ocr_pipeline: None,
+        structured_document: None,
+    })
 }
 
 fn load_pdf_with_quack_check(
@@ -2957,6 +3002,73 @@ mod tests {
             .expect("clock should be after epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("lanternleaf_pdf_pipeline_{nanos}.pdf"))
+    }
+
+    #[test]
+    fn readable_pdf_enters_visual_mode_without_quack_check() {
+        let path = unique_pdf_path();
+        fs::write(&path, b"%PDF-1.7\nvisual-only-fixture").expect("write PDF fixture");
+
+        let content = load_source_content(&path, None)
+            .expect("a readable PDF must not depend on quack-check availability");
+        assert!(content.tts_text.is_empty());
+        assert_eq!(
+            content.pdf_geometry_mode,
+            Some(PdfGeometryMode::RenderOnlyNoSync)
+        );
+        assert_eq!(content.pdf_sync_strategy, Some(PdfSyncStrategy::RenderOnly));
+        let policy = content
+            .pdf_runtime_policy
+            .expect("visual-only PDFs expose degraded policy state");
+        assert!(!policy.tts_allowed);
+        assert!(!policy.pretty_sync_enabled);
+        assert!(
+            policy
+                .degraded_reasons
+                .iter()
+                .any(|reason| reason == "render_only_mode")
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn local_and_materialized_pdf_paths_share_visual_open_contract() {
+        let local_path = unique_pdf_path();
+        let materialized_path = unique_pdf_path();
+        let bytes = b"%PDF-1.7\nmaterialized-visual-fixture";
+        fs::write(&local_path, bytes).expect("write local PDF fixture");
+        fs::write(&materialized_path, bytes).expect("write materialized PDF fixture");
+
+        let local = load_source_content(&local_path, None).expect("local PDF should open visually");
+        let materialized = load_source_content(&materialized_path, None)
+            .expect("materialized PDF should open visually");
+        assert_eq!(local.pdf_geometry_mode, materialized.pdf_geometry_mode);
+        assert_eq!(local.pdf_sync_strategy, materialized.pdf_sync_strategy);
+        assert_eq!(
+            local
+                .pdf_runtime_policy
+                .as_ref()
+                .map(|policy| policy.text_only_policy),
+            materialized
+                .pdf_runtime_policy
+                .as_ref()
+                .map(|policy| policy.text_only_policy)
+        );
+
+        let _ = fs::remove_file(local_path);
+        let _ = fs::remove_file(materialized_path);
+    }
+
+    #[test]
+    fn missing_or_unreadable_pdf_remains_a_real_open_failure() {
+        let missing = unique_pdf_path();
+        assert!(load_source_content(&missing, None).is_err());
+
+        let invalid = unique_pdf_path();
+        fs::write(&invalid, b"not a PDF").expect("write invalid fixture");
+        assert!(load_source_content(&invalid, None).is_err());
+        let _ = fs::remove_file(invalid);
     }
 
     #[test]

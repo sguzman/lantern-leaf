@@ -2144,6 +2144,27 @@ mod tests {
     }
 
     #[test]
+    fn readable_pdf_session_is_visual_first_when_recovery_is_unavailable() {
+        let path = unique_pdf_source_path();
+        fs::write(&path, b"%PDF-1.7\nvisual-session-fixture").expect("write readable PDF");
+        let normalizer = normalizer::TextNormalizer::default();
+        let session =
+            load_session_for_source(path.clone(), &config::AppConfig::default(), &normalizer)
+                .expect("visual PDF session should not require transcript recovery");
+        let mut session = session;
+        let snapshot = session.snapshot(PanelState::default(), &normalizer);
+        assert_eq!(snapshot.pretty_kind, PrettyKind::Pdf);
+        assert_eq!(snapshot.current_page, 0);
+        assert_eq!(snapshot.total_pages, 1);
+        assert_eq!(
+            snapshot.pdf_sync_strategy,
+            Some(crate::epub_loader::PdfSyncStrategy::RenderOnly)
+        );
+        assert!(snapshot.sentences.is_empty());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn paused_state_is_preserved_when_changing_pages() {
         let normalizer = normalizer::TextNormalizer::default();
         let mut session = build_test_session(&[&["A.", "B."], &["C.", "D."]]);

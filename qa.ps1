@@ -36,6 +36,7 @@ if ($ResetQaState -and (Test-Path $qaRoot)) {
 
 New-Item -ItemType Directory -Force -Path $fixtureRoot, $configRoot, $cacheRoot, $logRoot, $handoffRoot | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $configRoot 'pandoc') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $qaRoot 'scripts\quack-check') | Out-Null
 
 foreach ($file in @('config.toml', 'normalizer.toml', 'abbreviations.toml', 'quack-check.toml')) {
     $destination = Join-Path $configRoot $file
@@ -47,6 +48,7 @@ $filterDestination = Join-Path $configRoot 'pandoc\strip-nontext.lua'
 if (-not (Test-Path $filterDestination)) {
     Copy-Item (Join-Path $repoRoot 'conf\pandoc\strip-nontext.lua') $filterDestination
 }
+Copy-Item (Join-Path $repoRoot 'scripts\quack-check\*') (Join-Path $qaRoot 'scripts\quack-check') -Force
 
 # The library-service config is part of the QA contract, not ambient cwd state.
 $calibreConfig = Join-Path $configRoot 'calibre.toml'
