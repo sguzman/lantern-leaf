@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-14 after Goal 0019 A7 real-desktop acceptance and Goal 0020 promotion.
+Updated: 2026-09-14 after Goal 0020 A1 director rejection and A2 reopening.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -125,15 +125,22 @@ Real-desktop acceptance: `docs/work/reviews/0019-a7-real-desktop-acceptance.md`.
 
 ## Goal 0020 — continuous native PDF viewport and practical zoom
 
-**READY NEXT — CORE VISUAL REFINEMENT BEFORE GATE 4**
+**REOPENED FOR A2 — A1 REJECTED BEFORE HUMAN QA**
 
-Physical Goal-0019 QA clarified that the desired production PDF UX is continuous scrolling across a virtualized native page stack, not the temporary one-page-at-a-time surface.
+A1 correctly moved the Reader toward a continuous page stack and broadened manual zoom, while preserving the native single-Pdfium-owner architecture. Director review found several production blockers before physical QA:
 
-The current zoom policy is also a conservative fixed scaffold (`75%, 90%, 100%, 110%, 125%, 150%, 175%`). Goal 0020 promotes a broader practical zoom model with Fit width, Fit page, Reset/100%, and substantially wider bounded manual zoom.
+- actual continuous visible pages are computed inside the Reader but the canonical viewport planner still receives only `snapshot.current_page`, splitting scheduling/residency ownership;
+- Fit page is hard-coded to `0.72` in production and the correct fit helper is not wired in;
+- high manual zoom lives inside a vertical-only scroll area, so oversized page width is not practically pannable;
+- zoom/resize does not capture/restore a semantic viewport witness, so focal position is not preserved;
+- mixed-page slot geometry is initially guessed and changes when raster textures arrive;
+- all page geometry is rebuilt for `0..total_pages` every frame on egui;
+- the A1 report explicitly left required hosted Windows CI outstanding, yet terminal signaling occurred.
 
-The existing PDF planning substrate already models multiple visible page indexes, overscan, priority pages, and viewport-aware eviction. Goal 0020 must connect those primitives to the production egui presentation while preserving the single Pdfium owner, off-render-thread work, immediate scrolling, stale safety, bounded residency, explicit page identity, and EPUB regressions.
+A2 must preserve the accepted continuous/native direction while unifying viewport-plan ownership, implementing real fit modes and horizontal access, adding production focal anchoring, stabilizing geometry from off-thread native metadata, bounding long-document hot-frame work, and waiting for hosted Windows success before terminalizing.
 
 Contract: `docs/work/ready/0020-continuous-pdf-viewport-and-zoom.md`.
+Director rejection: `docs/work/reviews/0020-a1-director-rejection.md`.
 
 ## Gate 4 — PDF text/TTS/highlight synchronization
 
@@ -143,6 +150,6 @@ After the continuous viewport is trustworthy: integrate canonical sentence/page 
 
 ## Workflow status
 
-**GOAL 0020 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
+**GOAL 0020 A2 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
 
-Goal 0019 is closed. Goal 0020 is the only ready macro-goal. Goals 0015, 0017, and 0018 remain queued; Goal 0011 remains deferred. Do not start Gate 4 until the continuous PDF viewport is accepted.
+Goal 0019 is closed. Goal 0020 remains the only ready repository goal, now as A2. Goals 0015, 0017, and 0018 remain queued; Goal 0011 remains deferred. Do not request human PDF QA or start Gate 4 until A2 passes director source/CI review.
