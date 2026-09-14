@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-14 after Goal 0019 A6 director rejection and A7 reopening.
+Updated: 2026-09-14 after Goal 0019 A7 director source/CI acceptance.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -113,16 +113,17 @@ Preserve the existing ordinary Windows voice backend. Goal 0011 remains a dorman
 
 ## Goal 0019 / Gate 3 — native PDF visual stability
 
-**READY NEXT — REOPENED FOR A7 BEFORE HUMAN QA**
+**PHYSICAL QA NEXT — A7 SOURCE/CI ACCEPTED**
 
-A1-A3 established the native Pdfium/egui rendering surface, real presentation-scale zoom, current-priority scheduling, stale-safe source/page/size ownership, and deterministic current-page-pinned texture residency. A4 removed Quack-check/transcript recovery from the visual-open critical path. A5 added truthful native PDF page-domain ownership. A6 corrected the duplicate-Pdfium-owner topology by sharing one native service between metadata and raster work and added detached-effect panic terminalization.
+A1-A3 established the native Pdfium/egui rendering surface, real presentation-scale zoom, current-priority scheduling, stale-safe source/page/size ownership, and deterministic current-page-pinned texture residency. A4 removed Quack-check/transcript recovery from the visual-open critical path. A5 added truthful native PDF page-domain ownership. A6 consolidated metadata and rasterization behind one authoritative `PdfNativeService` / one native Pdfium owner and added detached-effect panic terminalization.
 
-A6 is nevertheless rejected before another desktop pass because its worker wait loop can lose metadata liveness after the service has become idle: metadata is polled only outside an inner raster-scheduler wait loop, while that inner loop wakes/timeouts and re-waits without returning to metadata polling when no raster key exists. The normal production lifetime `start -> idle -> user opens PDF` can therefore strand source opening exactly as before even though native ownership is now singular.
+A7 fixes the remaining idle-service liveness defect by returning from an empty raster wait to top-level request arbitration after one bounded wait, so metadata submitted after the service has settled idle is serviced promptly. The regression probe now deliberately covers `start -> idle -> metadata -> raster -> idle -> metadata` through the same native worker and validates malformed input as failure. The duplicate PDF container precheck is bounded to a small header and at most 64 KiB of tail data.
 
-A7 owns the narrow liveness correction: make idle metadata wakeups reliable, preserve one Pdfium owner, add explicit `start -> idle -> metadata -> raster -> idle -> metadata` regression coverage, and replace the current full-file PDF container precheck with bounded header/tail validation or the native parse path.
+Hosted Windows workflow `34867657265` passed `native-workspace` and `hosted-renderer-probe`, including the deliberate idle lifecycle probe.
 
-Contract: `docs/work/ready/0019-native-pdf-visual-stability.md`.
-Review: `docs/work/reviews/0019-a6-director-rejection.md`.
+Director acceptance: `docs/work/reviews/0019-a7-director-acceptance.md`.
+
+Goal 0019 remains open until the narrow real-desktop sequence passes: actual page 1 visible, believable native page count >1, Next reaches page 2, Prev returns to page 1. Only then continue broader zoom/scroll/resize/source-switch testing.
 
 ## Gate 4 — PDF text/TTS/highlight synchronization
 
@@ -132,6 +133,6 @@ After Gate 3: integrate canonical sentence/page mapping, geometry confidence/ove
 
 ## Workflow status
 
-**GOAL 0019 A7 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
+**NO CODEX GOAL AUTHORIZED — PHYSICAL GOAL 0019 A7 RECHECK NEXT**
 
-Goal 0019 remains open. A7 is the only authorized ready macro-goal. Goals 0015, 0017, and 0018 remain queued; Goal 0011 remains deferred. Do not request another human PDF recheck until A7 passes director source/CI review and is integrated to `main`.
+Goal 0019 remains open pending the narrow physical PDF recheck. Do not start another Codex Goal unless that recheck exposes a new defect or the director explicitly promotes the next repository goal. Goals 0015, 0017, and 0018 remain queued; Goal 0011 remains deferred.
