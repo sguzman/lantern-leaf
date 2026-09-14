@@ -117,9 +117,7 @@ fn normalize_config(mut cfg: AppConfig) -> AppConfig {
 #[cfg(test)]
 mod tests {
     use super::parse_config;
-    use crate::config::{
-        AppConfig, BookReaderOverrides, FontFamily, PrettyUiConfig, TtsBackend,
-    };
+    use crate::config::{AppConfig, BookReaderOverrides, FontFamily, PrettyUiConfig, TtsBackend};
 
     #[test]
     fn omitted_tts_backend_uses_platform_default() {
@@ -207,6 +205,9 @@ mod tests {
         assert_eq!(effective_reset.margin_horizontal, 37);
         assert_eq!(effective_reset.pretty.base_font_scale, 1.25);
         assert_eq!(effective_reset.tts_backend, TtsBackend::Windows);
-        assert_eq!(effective_reset.windows_voice_id.as_deref(), Some("book-a-voice"));
+        assert_eq!(
+            effective_reset.windows_voice_id.as_deref(),
+            Some("book-a-voice")
+        );
     }
 }

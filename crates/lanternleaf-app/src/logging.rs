@@ -337,6 +337,7 @@ fn event_name(event: &AppEvent) -> &'static str {
         AppEvent::CalibreCoverCompleted(_) => "CalibreCoverCompleted",
         AppEvent::TtsStateUpdated(_) => "TtsStateUpdated",
         AppEvent::PdfTranscriptionProgress(_) => "PdfTranscriptionProgress",
+        AppEvent::PdfEmbeddedTextCompleted(_) => "PdfEmbeddedTextCompleted",
         AppEvent::LogLevelUpdated(_) => "LogLevelUpdated",
         AppEvent::NotificationRaised { .. } => "NotificationRaised",
         AppEvent::NotificationDismissed { .. } => "NotificationDismissed",

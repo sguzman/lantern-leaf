@@ -1479,6 +1479,8 @@ sentence_text = "legacy bookmark entry"
 
         let artifact = PdfRenderPrecomputedState {
             version: 0,
+            extraction_revision: "test-revision".to_string(),
+            source_identity: "test-identity".to_string(),
             page_texts: vec!["Page one".to_string(), "Page two".to_string()],
             sentence_page_hints: vec![
                 PdfSentencePageHint { page_idx: Some(0) },
@@ -1492,10 +1494,12 @@ sentence_text = "legacy bookmark entry"
         let loaded = load_pdf_render_precomputed_state(&source)
             .expect("pdf render precompute artifact should load");
 
-        assert_eq!(loaded.version, 1);
+        assert_eq!(loaded.version, 2);
         assert_eq!(loaded.page_texts, artifact.page_texts);
         assert_eq!(loaded.sentence_page_hints, artifact.sentence_page_hints);
         assert_eq!(loaded.source, artifact.source);
+        assert_eq!(loaded.extraction_revision, artifact.extraction_revision);
+        assert_eq!(loaded.source_identity, artifact.source_identity);
 
         cleanup_source_and_cache(&source);
     }

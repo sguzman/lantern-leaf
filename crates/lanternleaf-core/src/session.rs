@@ -438,7 +438,12 @@ impl ReaderSession {
         }
         let page_texts: Vec<String> = page_texts
             .into_iter()
-            .map(|page| page.replace("\r\n", "\n").replace('\r', "\n").trim().to_string())
+            .map(|page| {
+                page.replace("\r\n", "\n")
+                    .replace('\r', "\n")
+                    .trim()
+                    .to_string()
+            })
             .collect();
         self.tts_text = page_texts.join("\n\n");
         self.pages = page_texts.clone();
@@ -3458,13 +3463,15 @@ mod tests {
             vec![Vec::new()],
         );
         session.set_pdf_page_count(2);
-        session.adopt_pdf_embedded_text(
-            vec![
-                "First native page. Search needle.".to_string(),
-                "Second native page for TTS.".to_string(),
-            ],
-            &normalizer,
-        ).expect("page-aligned native text should be adopted");
+        session
+            .adopt_pdf_embedded_text(
+                vec![
+                    "First native page. Search needle.".to_string(),
+                    "Second native page for TTS.".to_string(),
+                ],
+                &normalizer,
+            )
+            .expect("page-aligned native text should be adopted");
         session.set_search_query("needle".to_string(), &normalizer);
         let snapshot = session.snapshot(PanelState::default(), &normalizer);
         assert_eq!(snapshot.total_pages, 2);

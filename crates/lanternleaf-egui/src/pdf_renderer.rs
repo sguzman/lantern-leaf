@@ -5,11 +5,11 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     convert::TryFrom,
     hash::{Hash, Hasher},
-    path::{Path, PathBuf},
     io::{Read, Seek, SeekFrom},
+    path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, Condvar, Mutex, OnceLock, Weak,
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver},
     },
     thread::{self, JoinHandle},
@@ -103,7 +103,10 @@ impl NativePdfRenderer {
         self.render_for_target(source_path, page_index, RenderTarget::TextLayer)
     }
 
-    pub(crate) fn page_metadata(&self, source_path: &Path) -> Result<Vec<PdfPageDimension>, NativePdfRendererError> {
+    pub(crate) fn page_metadata(
+        &self,
+        source_path: &Path,
+    ) -> Result<Vec<PdfPageDimension>, NativePdfRendererError> {
         let document = self.pdfium.load_pdf_from_file(source_path, None)?;
         let pages = document.pages();
         if pages.is_empty() {
@@ -239,15 +242,23 @@ fn assess_pdf_text(pages: &[String]) -> (bool, Option<String>) {
     }
     let nonempty = pages.iter().filter(|page| !page.trim().is_empty()).count();
     let chars = pages.iter().map(|page| page.chars().count()).sum::<usize>();
-    let replacement = pages.iter().filter(|page| page.contains('\u{FFFD}')).count();
+    let replacement = pages
+        .iter()
+        .filter(|page| page.contains('\u{FFFD}'))
+        .count();
     let controls = pages
         .iter()
         .flat_map(|page| page.chars())
         .filter(|ch| ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'))
         .count();
-    let mut normalized = pages.iter().map(|page| page.trim().to_string()).collect::<Vec<_>>();
+    let mut normalized = pages
+        .iter()
+        .map(|page| page.trim().to_string())
+        .collect::<Vec<_>>();
     normalized.sort();
-    let duplicate_pages = normalized.windows(2).any(|pair| pair[0] == pair[1] && !pair[0].is_empty());
+    let duplicate_pages = normalized
+        .windows(2)
+        .any(|pair| pair[0] == pair[1] && !pair[0].is_empty());
     if nonempty * 2 < pages.len() || chars < 16 {
         return (false, Some("insufficient_page_coverage".to_string()));
     }
@@ -266,17 +277,30 @@ mod embedded_text_tests {
 
     #[test]
     fn trust_gate_accepts_meaningful_page_aligned_text() {
-        assert_eq!(assess_pdf_text(&[
-            "The first native page contains real embedded text.".into(),
-            "The second native page contains another paragraph.".into(),
-        ]), (true, None));
+        assert_eq!(
+            assess_pdf_text(&[
+                "The first native page contains real embedded text.".into(),
+                "The second native page contains another paragraph.".into(),
+            ]),
+            (true, None)
+        );
     }
 
     #[test]
     fn trust_gate_rejects_empty_image_only_and_garbage_text() {
         assert_eq!(assess_pdf_text(&[String::new(), String::new()]).0, false);
-        assert_eq!(assess_pdf_text(&["\u{FFFD}\u{FFFD}\u{FFFD}".into(), "".into()]).0, false);
-        assert_eq!(assess_pdf_text(&["same page text repeated".into(), "same page text repeated".into()]).0, false);
+        assert_eq!(
+            assess_pdf_text(&["\u{FFFD}\u{FFFD}\u{FFFD}".into(), "".into()]).0,
+            false
+        );
+        assert_eq!(
+            assess_pdf_text(&[
+                "same page text repeated".into(),
+                "same page text repeated".into()
+            ])
+            .0,
+            false
+        );
     }
 }
 
@@ -675,7 +699,7 @@ impl PdfNativeService {
 
         #[cfg(not(test))]
         {
-        static SERVICE: OnceLock<PdfNativeService> = OnceLock::new();
+            static SERVICE: OnceLock<PdfNativeService> = OnceLock::new();
             SERVICE.get_or_init(Self::start_owned).clone()
         }
     }
@@ -705,7 +729,9 @@ impl PdfNativeService {
                         let result = match renderer.as_ref() {
                             Some(renderer) => validate_pdf_source(&request.source)
                                 .and_then(|()| {
-                                    renderer.page_metadata(&request.source).map_err(|err| format!("{err:?}"))
+                                    renderer
+                                        .page_metadata(&request.source)
+                                        .map_err(|err| format!("{err:?}"))
                                 })
                                 .map(|page_dimensions| PdfMetadata {
                                     page_count: page_dimensions.len(),
@@ -720,7 +746,11 @@ impl PdfNativeService {
                     if let Ok(request) = text_rx.try_recv() {
                         let result = match renderer.as_ref() {
                             Some(renderer) => validate_pdf_source(&request.source)
-                                .and_then(|()| renderer.extract_embedded_text(&request.source).map_err(|err| format!("{err:?}")))
+                                .and_then(|()| {
+                                    renderer
+                                        .extract_embedded_text(&request.source)
+                                        .map_err(|err| format!("{err:?}"))
+                                })
                                 .map(|page_texts| {
                                     let assessment = assess_pdf_text(&page_texts);
                                     PdfEmbeddedText {
@@ -813,9 +843,19 @@ impl PdfNativeService {
             .map_err(|_| "native PDF metadata request stopped".to_string())?
     }
 
-    pub(crate) fn metadata_async(&self, source: PathBuf) -> mpsc::Receiver<Result<PdfMetadata, String>> {
+    pub(crate) fn metadata_async(
+        &self,
+        source: PathBuf,
+    ) -> mpsc::Receiver<Result<PdfMetadata, String>> {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
-        if self.metadata_tx.send(PdfMetadataRequest { source, reply: reply_tx }).is_ok() {
+        if self
+            .metadata_tx
+            .send(PdfMetadataRequest {
+                source,
+                reply: reply_tx,
+            })
+            .is_ok()
+        {
             self.scheduler.1.notify_one();
         }
         reply_rx
@@ -828,7 +868,16 @@ impl PdfNativeService {
         revision: u64,
     ) -> mpsc::Receiver<Result<PdfEmbeddedText, String>> {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
-        if self.text_tx.send(PdfTextRequest { source, generation, revision, reply: reply_tx }).is_ok() {
+        if self
+            .text_tx
+            .send(PdfTextRequest {
+                source,
+                generation,
+                revision,
+                reply: reply_tx,
+            })
+            .is_ok()
+        {
             self.scheduler.1.notify_one();
         }
         reply_rx
@@ -869,14 +918,19 @@ fn validate_pdf_source(source: &Path) -> Result<(), String> {
     const PDF_TAIL_CHECK_BYTES: u64 = 64 * 1024;
     let mut file = std::fs::File::open(source).map_err(|err| err.to_string())?;
     let mut header = [0u8; 5];
-    file.read_exact(&mut header).map_err(|err| err.to_string())?;
+    file.read_exact(&mut header)
+        .map_err(|err| err.to_string())?;
     let length = file.metadata().map_err(|err| err.to_string())?.len();
     let tail_length = length.min(PDF_TAIL_CHECK_BYTES);
     file.seek(SeekFrom::End(-(tail_length as i64)))
         .map_err(|err| err.to_string())?;
     let mut tail = vec![0u8; tail_length as usize];
     file.read_exact(&mut tail).map_err(|err| err.to_string())?;
-    if &header != b"%PDF-" || !tail.windows(b"%%EOF".len()).any(|window| window == b"%%EOF") {
+    if &header != b"%PDF-"
+        || !tail
+            .windows(b"%%EOF".len())
+            .any(|window| window == b"%%EOF")
+    {
         return Err("source is not a complete PDF document".to_string());
     }
     Ok(())
@@ -893,13 +947,23 @@ impl PdfRenderWorker {
         #[cfg(test)]
         {
             let service = PdfNativeService::test_stub();
-            return (Self { service: service.clone() }, service);
+            return (
+                Self {
+                    service: service.clone(),
+                },
+                service,
+            );
         }
 
         #[cfg(not(test))]
         {
-        let service = PdfNativeService::start();
-            (Self { service: service.clone() }, service)
+            let service = PdfNativeService::start();
+            (
+                Self {
+                    service: service.clone(),
+                },
+                service,
+            )
         }
     }
 
@@ -911,7 +975,10 @@ impl PdfRenderWorker {
         self.service.submit_render(key, priority)
     }
 
-    pub(crate) fn request_metadata(&self, source: PathBuf) -> mpsc::Receiver<Result<PdfMetadata, String>> {
+    pub(crate) fn request_metadata(
+        &self,
+        source: PathBuf,
+    ) -> mpsc::Receiver<Result<PdfMetadata, String>> {
         self.service.metadata_async(source)
     }
 
@@ -921,7 +988,8 @@ impl PdfRenderWorker {
         generation: u64,
         revision: u64,
     ) -> mpsc::Receiver<Result<PdfEmbeddedText, String>> {
-        self.service.embedded_text_async(source, generation, revision)
+        self.service
+            .embedded_text_async(source, generation, revision)
     }
 
     pub(crate) fn drain(&mut self) -> Vec<PdfRenderResult> {
@@ -1183,7 +1251,12 @@ mod tests {
         let metadata = service.metadata(valid.clone()).expect("native page count");
         assert_eq!(metadata.page_count, 2);
         assert_eq!(metadata.page_dimensions.len(), 2);
-        assert!(metadata.page_dimensions.iter().all(|dimension| dimension.width > 0.0 && dimension.height > 0.0));
+        assert!(
+            metadata
+                .page_dimensions
+                .iter()
+                .all(|dimension| dimension.width > 0.0 && dimension.height > 0.0)
+        );
         let text = service
             .embedded_text_async(valid.clone(), 7, 3)
             .recv_timeout(Duration::from_secs(3))

@@ -145,6 +145,25 @@ pub struct PdfTranscriptionEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
+pub struct PdfEmbeddedTextEvent {
+    #[ts(type = "number")]
+    pub request_id: u64,
+    pub source_path: String,
+    #[ts(type = "number")]
+    pub generation: u64,
+    #[ts(type = "number")]
+    pub revision: u64,
+    #[ts(type = "number")]
+    pub page_count: usize,
+    pub page_texts: Vec<String>,
+    pub worker_thread: String,
+    pub terminal: String,
+    pub accepted: bool,
+    pub degraded_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct LogLevelEvent {
     #[ts(type = "number")]
     pub request_id: u64,

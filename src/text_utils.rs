@@ -513,9 +513,8 @@ struct AbbreviationTokenSet {
 #[cfg(test)]
 mod tests {
     use super::{
-        load_abbreviation_tokens_from_paths, AbbreviationTokenSet, load_abbreviation_tokens,
-        split_sentences,
-        split_sentences_with_abbreviations,
+        AbbreviationTokenSet, load_abbreviation_tokens, load_abbreviation_tokens_from_paths,
+        split_sentences, split_sentences_with_abbreviations,
     };
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};

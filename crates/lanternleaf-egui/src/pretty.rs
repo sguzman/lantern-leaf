@@ -108,7 +108,10 @@ pub fn resolve_image_path(src_raw: &str, images: &[ReaderImageRef]) -> Option<Pa
             || normalize_image_key(&img.raw_path) == requested
             || normalize_image_key(&img.local_path) == requested
             || normalize_image_key(&img.normalized_path) == requested
-            || img.aliases.iter().any(|alias| normalize_image_key(alias) == requested)
+            || img
+                .aliases
+                .iter()
+                .any(|alias| normalize_image_key(alias) == requested)
     }) {
         return Some(PathBuf::from(&found.local_path));
     }
@@ -116,7 +119,10 @@ pub fn resolve_image_path(src_raw: &str, images: &[ReaderImageRef]) -> Option<Pa
 }
 
 fn normalize_image_key(raw: &str) -> String {
-    let reference = raw.split(|character| character == '#' || character == '?').next().unwrap_or(raw);
+    let reference = raw
+        .split(|character| character == '#' || character == '?')
+        .next()
+        .unwrap_or(raw);
     let decoded = percent_decode_image_ref(reference);
     let mut components = Vec::new();
     for component in decoded.trim().replace('\\', "/").split('/') {
@@ -465,7 +471,10 @@ pub fn markdown_to_blocks(
                             None,
                         );
                     } else {
-                        warn!(src, "Markdown image could not be resolved; showing placeholder");
+                        warn!(
+                            src,
+                            "Markdown image could not be resolved; showing placeholder"
+                        );
                         images_count += 1;
                         finish_block_markdown(
                             &mut blocks,
@@ -769,7 +778,11 @@ pub fn structured_to_blocks(
         canonicalize_structured_blocks(&mut local);
         let mut visual_cursor = 0usize;
         for (subblock_index, block) in local.iter_mut().enumerate() {
-            let text_len = block.spans.iter().map(|span| span.text.len()).sum::<usize>()
+            let text_len = block
+                .spans
+                .iter()
+                .map(|span| span.text.len())
+                .sum::<usize>()
                 + block
                     .table
                     .as_ref()
@@ -787,7 +800,9 @@ pub fn structured_to_blocks(
                 .filter(|sentence| sentence.block_id == source.block_id)
                 .filter_map(|sentence| {
                     let start = sentence.source_start.max(visual_cursor);
-                    let end = sentence.source_end.min(visual_cursor.saturating_add(text_len));
+                    let end = sentence
+                        .source_end
+                        .min(visual_cursor.saturating_add(text_len));
                     (start < end).then_some(PrettySourceSentenceRange {
                         canonical_display_id: sentence.canonical_display_id,
                         text_start: start.saturating_sub(visual_cursor),
@@ -829,11 +844,7 @@ fn canonicalize_structured_blocks(blocks: &mut [PrettyBlock]) {
     }
 }
 
-fn canonicalize_span_text(
-    span: &mut PrettySpan,
-    started: &mut bool,
-    pending_space: &mut bool,
-) {
+fn canonicalize_span_text(span: &mut PrettySpan, started: &mut bool, pending_space: &mut bool) {
     let raw = std::mem::take(&mut span.text);
     let mut canonical = String::new();
     for ch in raw.chars() {
@@ -1670,19 +1681,23 @@ mod tests {
             .iter()
             .find(|block| block.source_block_id == Some(2))
             .expect("source block after HR");
-        assert!(after
-            .source_sentence_ranges
-            .iter()
-            .any(|range| range.canonical_display_id == 1 && range.text_start == 0));
+        assert!(
+            after
+                .source_sentence_ranges
+                .iter()
+                .any(|range| range.canonical_display_id == 1 && range.text_start == 0)
+        );
         let table = blocks
             .iter()
             .find(|block| block.source_block_id == Some(4))
             .expect("table source block");
         assert!(matches!(table.kind, PrettyBlockKind::Table));
-        assert!(table
-            .source_sentence_ranges
-            .iter()
-            .any(|range| range.canonical_display_id == 2));
+        assert!(
+            table
+                .source_sentence_ranges
+                .iter()
+                .any(|range| range.canonical_display_id == 2)
+        );
         let mapped_ids = blocks
             .iter()
             .flat_map(|block| block.source_sentence_ranges.iter())
@@ -1741,7 +1756,10 @@ mod tests {
                     .map(move |range| (block_index, range))
             })
             .collect::<Vec<_>>();
-        assert!(segments.len() >= 2, "inline image should preserve multiple text segments");
+        assert!(
+            segments.len() >= 2,
+            "inline image should preserve multiple text segments"
+        );
         let mut rendered = String::new();
         for (block_index, range) in segments {
             let text = blocks[block_index]

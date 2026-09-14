@@ -1,6 +1,4 @@
 #[cfg(not(target_arch = "wasm32"))]
-pub mod shell;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod app;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod constants;
@@ -20,6 +18,8 @@ pub mod pdf_subsystem;
 mod pdf_viewport;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod pretty;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod shell;
 
 #[cfg(target_arch = "wasm32")]
 pub mod web_client;
