@@ -467,10 +467,9 @@ struct LanternLeafApp {
     starter_calibre_last_query: String,
     starter_calibre_last_sort: CalibreSort,
     starter_calibre_last_count: usize,
-    calibre_cover_pending: HashSet<u64>,
+    calibre_cover_ownership: CalibreCoverOwnership,
     calibre_cover_retry_after: HashMap<u64, Instant>,
     calibre_cover_failures: HashMap<u64, String>,
-    last_calibre_cover_event_request_id: u64,
     starter_browser_tab_query: String,
     starter_browser_tabs_force_refresh: bool,
     starter_browser_tab_id_input: String,
@@ -481,6 +480,56 @@ struct LanternLeafApp {
     windows_voice_catalog_error: Option<String>,
     frame_count: u64,
     slow_frame_count: u64,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct CalibreCoverOwnership {
+    pending: HashMap<u64, u64>,
+    last_consumed: HashMap<u64, u64>,
+}
+
+impl CalibreCoverOwnership {
+    pub(crate) fn clear(&mut self) {
+        self.pending.clear();
+        self.last_consumed.clear();
+    }
+
+    pub(crate) fn in_flight(&self) -> usize {
+        self.pending.len()
+    }
+
+    pub(crate) fn is_pending(&self, book_id: u64) -> bool {
+        self.pending.contains_key(&book_id)
+    }
+
+    pub(crate) fn claim(&mut self, book_id: u64, request_id: u64, limit: usize) -> bool {
+        if self.pending.contains_key(&book_id) || self.pending.len() >= limit {
+            return false;
+        }
+        self.pending.insert(book_id, request_id);
+        true
+    }
+
+    pub(crate) fn accept_completion(&mut self, book_id: u64, request_id: u64) -> bool {
+        if self
+            .last_consumed
+            .get(&book_id)
+            .is_some_and(|last| request_id <= *last)
+        {
+            return false;
+        }
+        self.last_consumed.insert(book_id, request_id);
+        if self.pending.get(&book_id).copied() != Some(request_id) {
+            return false;
+        }
+        self.pending.remove(&book_id);
+        true
+    }
+
+    #[cfg(test)]
+    fn replace_for_retry(&mut self, book_id: u64, request_id: u64) {
+        self.pending.insert(book_id, request_id);
+    }
 }
 
 struct StarterViewModel<'a> {
@@ -984,10 +1033,9 @@ impl LanternLeafApp {
             starter_calibre_last_query: String::new(),
             starter_calibre_last_sort: CalibreSort::Title,
             starter_calibre_last_count: 0,
-            calibre_cover_pending: HashSet::new(),
+            calibre_cover_ownership: CalibreCoverOwnership::default(),
             calibre_cover_retry_after: HashMap::new(),
             calibre_cover_failures: HashMap::new(),
-            last_calibre_cover_event_request_id: 0,
             starter_browser_tab_query: String::new(),
             starter_browser_tabs_force_refresh: false,
             starter_browser_tab_id_input: String::new(),
@@ -1109,10 +1157,9 @@ impl LanternLeafApp {
             starter_calibre_last_query: String::new(),
             starter_calibre_last_sort: CalibreSort::Title,
             starter_calibre_last_count: 0,
-            calibre_cover_pending: HashSet::new(),
+            calibre_cover_ownership: CalibreCoverOwnership::default(),
             calibre_cover_retry_after: HashMap::new(),
             calibre_cover_failures: HashMap::new(),
-            last_calibre_cover_event_request_id: 0,
             starter_browser_tab_query: String::new(),
             starter_browser_tabs_force_refresh: false,
             starter_browser_tab_id_input: String::new(),

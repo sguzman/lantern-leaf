@@ -215,7 +215,7 @@ impl LanternLeafApp {
                     self.execute_command(AppCommand::LoadCalibreBooks {
                         force_refresh: self.starter_calibre_force_refresh,
                     });
-                    self.calibre_cover_pending.clear();
+                    self.calibre_cover_ownership.clear();
                     self.calibre_cover_retry_after.clear();
                     self.calibre_cover_failures.clear();
                 }
@@ -250,13 +250,12 @@ impl LanternLeafApp {
                 return;
             }
             for event in model.calibre_cover_events {
-                if event.request_id <= self.last_calibre_cover_event_request_id {
+                if !self
+                    .calibre_cover_ownership
+                    .accept_completion(event.book_id, event.request_id)
+                {
                     continue;
                 }
-                self.last_calibre_cover_event_request_id = self
-                    .last_calibre_cover_event_request_id
-                    .max(event.request_id);
-                self.calibre_cover_pending.remove(&event.book_id);
                 match event.outcome.as_str() {
                     "loaded" | "cover_unavailable" => {
                         self.calibre_cover_retry_after.remove(&event.book_id);
@@ -275,12 +274,6 @@ impl LanternLeafApp {
                             .insert(event.book_id, "Cover fetch/decode failed".to_string());
                         self.calibre_cover_retry_after.remove(&event.book_id);
                     }
-                }
-            }
-            for book in model.calibre_books {
-                if book.cover_thumbnail.is_some() {
-                    self.calibre_cover_pending.remove(&book.id);
-                    self.calibre_cover_retry_after.remove(&book.id);
                 }
             }
             let query = self.starter_calibre_query.trim().to_lowercase();
@@ -345,7 +338,7 @@ impl LanternLeafApp {
                         let book = &model.calibre_books[self.starter_calibre_view[row]];
                         let book_id = book.id;
                         let cover_path = book.cover_thumbnail.clone();
-                        let cover_pending = self.calibre_cover_pending.contains(&book_id);
+                        let cover_pending = self.calibre_cover_ownership.is_pending(book_id);
                         let retry_blocked = self
                             .calibre_cover_retry_after
                             .get(&book_id)
@@ -355,12 +348,9 @@ impl LanternLeafApp {
                             && cover_path.is_none()
                             && !cover_pending
                             && !retry_blocked
-                            && self.calibre_cover_pending.len() < 4
+                            && self.calibre_cover_ownership.in_flight() < 4
                         {
-                            self.calibre_cover_pending.insert(book_id);
-                            self.execute_command(AppCommand::EnsureCalibreThumbnail {
-                                id: book_id,
-                            });
+                            self.execute_calibre_thumbnail(book_id);
                         }
                         ui.separator();
                         ui.horizontal_top(|ui| {
@@ -415,11 +405,16 @@ impl LanternLeafApp {
                                             book: book.clone(),
                                         });
                                     }
-                                    if ui.button("Ensure thumbnail").clicked() {
+                                    if ui
+                                        .add_enabled(
+                                            !cover_pending
+                                                && self.calibre_cover_ownership.in_flight() < 4,
+                                            egui::Button::new("Ensure thumbnail"),
+                                        )
+                                        .clicked()
+                                    {
                                         trace!(id = book.id, "Starter ensure Calibre thumbnail");
-                                        self.execute_command(AppCommand::EnsureCalibreThumbnail {
-                                            id: book.id,
-                                        });
+                                        self.execute_calibre_thumbnail(book.id);
                                     }
                                 });
                             });
@@ -689,6 +684,40 @@ impl LanternLeafApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::CalibreCoverOwnership;
+
+    #[test]
+    fn cover_completions_are_owned_per_book_not_by_global_request_order() {
+        let mut ownership = CalibreCoverOwnership::default();
+        assert!(ownership.claim(10, 100, 4));
+        assert!(ownership.claim(11, 101, 4));
+
+        assert!(ownership.accept_completion(11, 101));
+        assert!(ownership.accept_completion(10, 100));
+        assert_eq!(ownership.in_flight(), 0);
+    }
+
+    #[test]
+    fn stale_same_book_completion_cannot_clobber_newer_retry() {
+        let mut ownership = CalibreCoverOwnership::default();
+        assert!(ownership.claim(10, 100, 4));
+        ownership.replace_for_retry(10, 102);
+
+        assert!(ownership.accept_completion(10, 102));
+        assert!(!ownership.accept_completion(10, 100));
+        assert_eq!(ownership.in_flight(), 0);
+    }
+
+    #[test]
+    fn repeated_manual_ensure_is_coalesced_and_bounded() {
+        let mut ownership = CalibreCoverOwnership::default();
+        for book_id in 1..=4 {
+            assert!(ownership.claim(book_id, book_id, 4));
+            assert!(!ownership.claim(book_id, book_id + 10, 4));
+        }
+        assert!(!ownership.claim(5, 5, 4));
+        assert_eq!(ownership.in_flight(), 4);
+    }
 
     #[test]
     fn starter_breakpoint_is_stable_and_uses_actual_center_width() {

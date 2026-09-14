@@ -942,10 +942,7 @@ pub fn apply_event(state: &mut AppState, event: AppEvent) {
                 outcome = %event.outcome,
                 "Calibre cover request completed"
             );
-            if let Some(path) = event.thumbnail_path.clone() {
-                state.set_calibre_cover(event.book_id, Some(path));
-            }
-            state.push_calibre_cover_event(event);
+            state.apply_calibre_cover_event(event);
         }
         AppEvent::TtsStateUpdated(event) => {
             if event.request_id < state.runtime_jobs.last_tts_event_request_id {
@@ -1821,6 +1818,47 @@ mod tests {
         assert_eq!(
             state.starter.calibre_books[0].cover_thumbnail.as_deref(),
             Some("thumb.jpg")
+        );
+        assert_eq!(state.runtime_jobs.calibre_cover_events.len(), 1);
+    }
+
+    #[test]
+    fn stale_cover_completion_cannot_replace_newer_same_book_cover() {
+        let mut state = AppState::default();
+        state.set_starter_calibre_books(vec![CalibreBookDto {
+            id: 7,
+            title: "Cover book".to_string(),
+            extension: "epub".to_string(),
+            authors: "Author".to_string(),
+            year: None,
+            file_size_bytes: None,
+            source_path: None,
+            cover_thumbnail: None,
+            has_cover: true,
+        }]);
+        apply_event(
+            &mut state,
+            AppEvent::CalibreCoverCompleted(CalibreCoverEvent {
+                request_id: 42,
+                book_id: 7,
+                outcome: "loaded".to_string(),
+                thumbnail_path: Some("newer.jpg".to_string()),
+                message: None,
+            }),
+        );
+        apply_event(
+            &mut state,
+            AppEvent::CalibreCoverCompleted(CalibreCoverEvent {
+                request_id: 41,
+                book_id: 7,
+                outcome: "loaded".to_string(),
+                thumbnail_path: Some("older.jpg".to_string()),
+                message: None,
+            }),
+        );
+        assert_eq!(
+            state.starter.calibre_books[0].cover_thumbnail.as_deref(),
+            Some("newer.jpg")
         );
         assert_eq!(state.runtime_jobs.calibre_cover_events.len(), 1);
     }

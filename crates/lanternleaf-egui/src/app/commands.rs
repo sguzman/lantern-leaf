@@ -28,6 +28,10 @@ impl LanternLeafApp {
     }
 
     pub(crate) fn execute_command(&mut self, command: AppCommand) {
+        if let AppCommand::EnsureCalibreThumbnail { id } = command {
+            self.execute_calibre_thumbnail(id);
+            return;
+        }
         if matches!(command, AppCommand::CloseReaderSession) {
             self.begin_close_reader();
             return;
@@ -56,6 +60,31 @@ impl LanternLeafApp {
         }
         if is_tts_command {
             self.apply_tts_command_if_needed(&command);
+        }
+    }
+
+    pub(crate) fn execute_calibre_thumbnail(&mut self, book_id: u64) {
+        const MAX_IN_FLIGHT: usize = 4;
+        if self.calibre_cover_ownership.is_pending(book_id)
+            || self.calibre_cover_ownership.in_flight() >= MAX_IN_FLIGHT
+        {
+            trace!(book_id, "Coalescing bounded Calibre cover request");
+            return;
+        }
+        let plan = self
+            .runtime
+            .plan_command(AppCommand::EnsureCalibreThumbnail { id: book_id });
+        if !self
+            .calibre_cover_ownership
+            .claim(book_id, plan.request_id, MAX_IN_FLIGHT)
+        {
+            return;
+        }
+        self.apply_local_events(&plan);
+        self.log_plan(&plan);
+        self.last_plan = Some(plan);
+        if let Some(plan) = &self.last_plan {
+            self.dispatch_effects(plan);
         }
     }
 

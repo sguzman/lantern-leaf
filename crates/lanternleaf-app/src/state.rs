@@ -6,8 +6,8 @@ use crate::contracts::{
 };
 use crate::pipeline::{PersistenceOutcome, PersistenceTrigger};
 use lanternleaf_core::{epub_loader, session};
-use std::sync::Arc;
 use std::time::Instant;
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OperationState {
@@ -163,6 +163,7 @@ pub struct RuntimeJobState {
     pub source_open_event: Option<SourceOpenEvent>,
     pub calibre_load_event: Option<CalibreLoadEvent>,
     pub calibre_cover_events: Vec<CalibreCoverEvent>,
+    pub last_calibre_cover_request_by_book: HashMap<u64, u64>,
     pub pdf_transcription_event: Option<PdfTranscriptionEvent>,
     pub log_level_event: Option<LogLevelEvent>,
     pub tts_state_subscribed: bool,
@@ -249,6 +250,25 @@ pub struct RuntimeJobPatch {
 }
 
 impl AppState {
+    pub fn apply_calibre_cover_event(&mut self, event: CalibreCoverEvent) -> bool {
+        if self
+            .runtime_jobs
+            .last_calibre_cover_request_by_book
+            .get(&event.book_id)
+            .is_some_and(|last| event.request_id <= *last)
+        {
+            return false;
+        }
+        self.runtime_jobs
+            .last_calibre_cover_request_by_book
+            .insert(event.book_id, event.request_id);
+        if let Some(path) = event.thumbnail_path.clone() {
+            self.set_calibre_cover(event.book_id, Some(path));
+        }
+        self.push_calibre_cover_event(event);
+        true
+    }
+
     pub fn update_runtime_log_level(&mut self, level: impl Into<String>) {
         self.app_shell.runtime_log_level = level.into();
     }
