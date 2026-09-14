@@ -78,13 +78,15 @@ A lower-severity residual under severe letter-spacing/font-scaling edits is queu
 
 ### Goal 0010 — Caliberate catalog covers + provider availability UX
 
-**STATUS: A5 REJECTED BEFORE HUMAN QA — A6 CORRECTION READY**
+**STATUS: A6 REJECTED BEFORE HUMAN QA — A7 CORRECTION READY**
 
-A5 proved the intended broad shape: an explicit Caliberate cover route, `has_cover` propagation, bounded visible-row lazy loading, off-render-thread request/decode work, and intentional placeholders. It is not integrated.
+A6 fixed the earlier global busy-scope leak and added explicit book-identified terminal cover outcomes, retryable provider-unavailable state, current-main synchronization, post-change sibling Caliberate tests, and successful Windows CI. It is still not integrated.
 
-Director review found that per-cover requests incorrectly share the full-catalog `CalibreLoad` boolean scope and lack an explicit book-identified completion path. Successful requests can leave the global busy flag set, while provider errors, endpoint/no-cover outcomes, and decode failures can leave rows stuck indefinitely as `Loading cover…`.
+Director review found one remaining completion-order race. The egui starter filters all cover-completion events through one global last-request-id watermark even though the dispatcher executes independent cover effects on separate worker threads. Out-of-order completion can therefore discard a valid lower-ID terminal event for another book and strand that row in `Loading cover…`.
 
-A6 must preserve the useful A5 architecture while adding concurrency-safe per-cover terminal outcomes, proper retry/unavailable/error state transitions, current-main synchronization in both LanternLeaf and Caliberate, post-change Caliberate cover-route tests, and completed Windows CI before success signaling. See `docs/work/reviews/0010-a5-director-rejection.md`.
+A7 must use per-book request ownership/freshness or an equivalent model: different books may complete in arbitrary order, stale older same-book completions may not clobber newer retry state, and only the currently owned request may clear/replace that book's pending state. The manual `Ensure thumbnail` path must also share the bounded/coalesced ownership path so repeated clicks cannot bypass the cover concurrency bound.
+
+Required tests explicitly cover higher-ID-first completion across two books, stale same-book completion after a newer retry, and duplicate/manual dispatch bounding. See `docs/work/reviews/0010-a6-director-rejection.md`.
 
 ### Goal 0015 — highlight viewport-band reflow polish
 

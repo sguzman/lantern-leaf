@@ -91,7 +91,31 @@ Preserve A5's explicit Caliberate cover route, `has_cover` propagation, bounded 
 - synchronize current `sguzman/caliberate` `main`, replay the minimal cover endpoint, add targeted post-change cover-route/content tests, and run the relevant Caliberate suite after the change;
 - wait for required LanternLeaf Windows CI success before terminal signaling.
 
-Do not request human QA during A6. The director reviews both repository branches first.
+A6 implemented these pieces, but director review found one remaining concurrency flaw; see A7 below.
+
+## Director correction A7
+
+A6 is rejected before human QA; see `docs/work/reviews/0010-a6-director-rejection.md`.
+
+Preserve A6's explicit `CalibreCoverCompleted` event seam, book identity, terminal outcome taxonomy, retry behavior, current-main synchronization, Caliberate endpoint/tests, and successful Windows CI. Correct only the remaining completion-ownership race and manual bypass:
+
+- do **not** use one global `last_calibre_cover_event_request_id` watermark for multiple independent cover requests;
+- independent worker effects can complete out of request-id order, so valid completions for different books must be processed regardless of global request-id ordering;
+- track request freshness/ownership per book (or an equivalent concurrency-safe model) so an older completion for the same book cannot overwrite a newer retry;
+- only the currently owned request may clear/replace that book's pending state;
+- every started current request must leave pending with a terminal visible state;
+- the `Ensure thumbnail` user action must use the same pending/concurrency ownership path or be disabled/coalesced while a request is pending, so manual clicks cannot bypass the bounded in-flight limit;
+- keep all cover network/disk/decode work off the egui/render thread.
+
+Required deterministic tests:
+
+1. start cover requests for two different books with request IDs A < B;
+2. deliver B's completion first and A's completion second;
+3. prove **both** completions are consumed and both books leave pending correctly;
+4. for one book, start a newer retry before an older request completes, deliver the newer completion, then deliver the stale older completion and prove the stale event cannot clobber the newer state;
+5. prove repeated/manual ensure cannot create duplicate or unbounded concurrent work for the same visible catalog path.
+
+Do not redesign or rework the sibling Caliberate endpoint unless a new concrete defect is found there. Re-run LanternLeaf focused/workspace/Windows gates and wait for required CI success before terminal signaling. Do not request human QA during A7; the director reviews first.
 
 ## Non-goals
 
@@ -103,8 +127,8 @@ Do not request human QA during A6. The director reviews both repository branches
 
 ## Repository handoff
 
-Use branch `codex/0010-caliberate-catalog-reliability`.
+Continue branch `codex/0010-caliberate-catalog-reliability` and the existing Goal 0010 Codex session. This is a correction/follow-up, **not a new macro-goal and not a reason to start a new Codex session**.
 
-Synchronize current director `main`, move this goal `ready -> active`, re-arm the watcher, inspect the real Caliberate API contract first, then implement only the smallest explicit cross-repository/provider changes required. Run repository and Windows gates, write/update `docs/work/reports/0010.md`, terminalize only on full success or a true cross-repository escalation, push before signaling terminal state, and restore the shared checkout to `main`.
+Synchronize current director `main`, move this goal `ready -> active`, re-arm the watcher, implement A7 narrowly on top of the accepted A6 foundation, run repository and Windows gates, update `docs/work/reports/0010.md`, terminalize only on full success, push before signaling terminal state, and restore the shared checkout to `main`.
 
-Do not request human QA during implementation. The director will review the pushed branch first.
+Do not request human QA during implementation. The director will review the pushed A7 branch first.

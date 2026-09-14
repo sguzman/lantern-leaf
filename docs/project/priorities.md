@@ -6,7 +6,7 @@ These priorities are ordered by current verified evidence. Historical attempt de
 
 **COMPLETE**
 
-Reproducible Windows build/check/test, native egui launch, repo-native `deps.ps1` / `qa.ps1`, Windows CI, separate renderer probe, and Scoop dependency convention are established.
+Reproducible Windows build/check/test, native-egui launch, repo-native `deps.ps1` / `qa.ps1`, Windows CI, separate renderer probe, and Scoop dependency convention are established.
 
 ## P1 — Backend-neutral TTS + Windows speech
 
@@ -61,13 +61,15 @@ A minor residual under severe text-metric edits is split to Goal 0015 rather tha
 
 ## P2.10 — Goal 0010: Caliberate catalog covers + provider availability UX
 
-**A5 REJECTED BEFORE HUMAN QA — A6 CORRECTION IS THE ACTIVE PRIORITY**
+**A6 REJECTED BEFORE HUMAN QA — A7 CORRECTION IS THE ACTIVE PRIORITY**
 
-Preserve A5's explicit Caliberate cover contract, `has_cover` propagation, bounded four-request visible-row scheduling, off-GUI-thread request/decode work, and intentional placeholders.
+Preserve A6's explicit Caliberate cover contract, `has_cover` propagation, explicit book-identified terminal outcomes, bounded automatic visible-row scheduling, off-GUI-thread request/decode work, retry semantics, targeted sibling Caliberate tests, and passed Windows CI.
 
-A6 must repair per-cover completion ownership. Independent thumbnail requests must not share the full-catalog boolean `CalibreLoad` scope; every started request must leave pending state with a book-identified terminal outcome. Provider-unavailable, endpoint/no-cover, and fetch/decode failures must become intentional retry/unavailable/error states rather than permanent `Loading cover…`.
+A7 must repair the remaining event-order race: concurrent cover effects run on independent worker threads, but the UI currently uses one global `last_calibre_cover_event_request_id` watermark. A higher-ID completion arriving first can cause a valid lower-ID completion for another book to be dropped, stranding that book in pending/loading state.
 
-A6 must also synchronize current `main` in LanternLeaf and Caliberate, add and run post-change Caliberate cover endpoint tests, preserve Goal 0014/0015 lifecycle state, and wait for required Windows CI success before terminal signaling. See `docs/work/reviews/0010-a5-director-rejection.md`.
+Use per-book request ownership/freshness or an equivalent concurrency-safe model. Different books must complete in arbitrary order; stale older completions for the same book must not overwrite newer retry state; only the currently owned request may clear/replace that book's pending state. The manual `Ensure thumbnail` action must use the same bounded/coalesced ownership path rather than bypassing the four-request bound.
+
+Required tests must explicitly deliver two books' completions out of order and exercise a stale same-book completion after a newer retry. See `docs/work/reviews/0010-a6-director-rejection.md`.
 
 Do not resurrect the withdrawn fake materialization defect from the test where Caliberate itself was not running.
 

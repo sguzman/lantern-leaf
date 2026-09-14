@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-13 after Goal 0010 A5 director rejection and A6 correction promotion.
+Updated: 2026-09-13 after Goal 0010 A6 director rejection and A7 correction promotion.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -73,15 +73,15 @@ Implementation `430e9c1` and Windows baseline run `34768445726` are the accepted
 
 ## Goal 0010 — Caliberate catalog covers / provider availability UX
 
-**A5 REJECTED BEFORE HUMAN QA — A6 CORRECTION READY**
+**A6 REJECTED BEFORE HUMAN QA — A7 CORRECTION READY**
 
-A5 established a promising foundation: explicit Caliberate cover endpoint support, `has_cover` propagation, bounded visible-row lazy scheduling, off-render-thread network/disk/decode work, and intentional placeholder text. The sibling Caliberate branch added a minimal `/api/v1/books/{id}/cover` sidecar route.
+A6 successfully repaired the A5 global Calibre busy-scope problem and added an explicit book-identified `CalibreCoverCompleted` seam with loaded / cover-unavailable / provider-unavailable / fetch-decode-error outcomes. It also synchronized both repositories, preserved the accepted Goal 0014/0015 lifecycle state, added post-change Caliberate cover tests, and passed LanternLeaf Windows CI run `34778760376`.
 
-Director review found blocking completion-state defects before integration. Per-cover requests incorrectly use the global `CalibreLoad` boolean scope; a successful cached-books response does not clear that scope, and provider failure / endpoint 404 / decode failure can leave local cover IDs permanently pending as `Loading cover…`. The UI is also watching full-catalog `calibre_load_event` for thumbnail failure even though `EnsureCalibreThumbnail` does not emit that event.
+Director review found one remaining blocking concurrency defect. The egui starter consumes concurrent cover completions using one global `last_calibre_cover_event_request_id` watermark. The effect dispatcher launches independent effects on separate worker threads, so request completions can arrive out of order. If a higher request ID completes first, a later valid completion for another book with a lower request ID is discarded, which can leave that book stuck in the pending/`Loading cover…` state despite a real terminal result.
 
-A5 also started from stale LanternLeaf lifecycle docs and terminalized while required Windows CI run `34777773736` was still in progress. The sibling Caliberate tests cited in the report were run before the cover endpoint push rather than after it.
+A7 must replace this global ordering assumption with per-book request ownership/freshness (or an equivalent concurrency-safe model), including protection against stale same-book retries overwriting newer state. The visible `Ensure thumbnail` action must also use the same bounded ownership path or be coalesced/disabled while pending so manual clicks cannot bypass cover concurrency bounds.
 
-A6 must preserve the useful A5 architecture but add an explicit book-identified terminal cover outcome, concurrency-safe pending ownership, correct retry/unavailable/error states, current-main synchronization in both repositories, post-change Caliberate endpoint tests, and completed Windows CI before success signaling. See `docs/work/reviews/0010-a5-director-rejection.md` and the correction section in `docs/work/ready/0010-caliberate-catalog-reliability.md`.
+See `docs/work/reviews/0010-a6-director-rejection.md` and the A7 correction section in `docs/work/ready/0010-caliberate-catalog-reliability.md`.
 
 The earlier `42866` open failure remains withdrawn as evidence of a LanternLeaf materialization defect because Caliberate was not running during that attempt.
 
@@ -105,6 +105,6 @@ Gate 3 native PDF visual stability remains future work and is not currently auth
 
 ## Workflow status
 
-**GOAL 0010 A6 READY**
+**GOAL 0010 A7 READY**
 
-Goal 0014 is closed. Goal 0010 remains the single authorized macro-goal, now as an A6 correction. Goal 0015 is queued minor polish; Goal 0011 remains deferred; PDF work remains future.
+Goal 0014 is closed. Goal 0010 remains the single authorized macro-goal, now as an A7 correction in the existing Codex session. Goal 0015 is queued minor polish; Goal 0011 remains deferred; PDF work remains future.
