@@ -2,13 +2,13 @@
 
 ## Current state
 
-**REOPENED FOR A6 DIRECTOR CORRECTION — DO NOT REQUEST HUMAN QA YET**
+**REOPENED FOR A7 DIRECTOR CORRECTION — DO NOT REQUEST HUMAN QA YET**
 
-A1-A3 established the native Pdfium/egui renderer, real presentation-scale zoom, current-priority scheduling, stale-safe ownership, and deterministic texture residency. A4 removed Quack-check/transcript recovery as a prerequisite for visual open. A5 added truthful native PDF page-domain ownership, but the first real-desktop A5 recheck exposed a deeper production-lifetime defect: the app can create two independent Pdfium owners/bindings, and an unexpected effect-thread panic can strand the shell forever in `SourceLoading`.
+A1-A3 established the native Pdfium/egui renderer, real presentation-scale zoom, current-priority scheduling, stale-safe ownership, and deterministic texture residency. A4 removed Quack-check/transcript recovery as a prerequisite for visual open. A5 added truthful native PDF page-domain ownership. A6 correctly consolidated Gate-3 Pdfium work behind one shared native service and added effect panic containment, but director review found an idle-worker wakeup bug that can still strand source opening forever.
 
-Read `docs/work/reviews/0019-a5-real-desktop-rejection.md` before implementation.
+Read `docs/work/reviews/0019-a6-director-rejection.md` before implementation.
 
-Continue the existing report lineage on `docs/work/reports/0019.md`.
+Continue the existing report lineage in `docs/work/reports/0019.md`.
 
 ## Outcome remains unchanged
 
@@ -19,85 +19,72 @@ A valid local/materialized PDF must enter the Reader without transcript/OCR prer
 ## Accepted architecture to preserve
 
 - Native Rust + egui + native/bundled Pdfium only. No WebView, pdf.js, browser DOM, Tauri, or React production fallback.
-- Visual PDF open is independent of Quack-check, Python, Docling, OCR, and transcript recovery.
+- Visual PDF open remains independent of Quack-check, Python, Docling, OCR, and transcript recovery.
 - Preserve explicit native PDF page-domain ownership from A5.
-- Preserve source/generation/page/render-size identity, stale-result rejection, duplicate coalescing, newest-current render priority, real presentation-scale zoom, bounded/quantized raster dimensions, and deterministic viewport-aware texture residency.
-- Preserve current-page pinning and bounded residency.
-- Preserve source switching safety.
+- Preserve A6's **single authoritative `PdfNativeService` / single native Pdfium owner** for metadata and rasterization. Do not regress to a second binding or renderer on an effect thread.
+- Preserve source/generation/page/render-size identity, stale-result rejection, duplicate coalescing, newest-current render priority, real presentation-scale zoom, bounded/quantized raster dimensions, deterministic viewport-aware texture residency, current-page pinning, and source-switch safety.
+- Preserve A6 detached-effect panic terminalization.
 
-## A6 blocking correction — one native Pdfium owner
+## A7 blocking correction — idle metadata liveness
 
-### 1. One Pdfium owner/service for the process
+### 1. Fix the native-service wait topology
 
-Refactor the native PDF runtime so LanternLeaf has one authoritative process-wide native PDF service/worker that owns Pdfium initialization and all Pdfium calls required by Gate 3.
+The A6 worker checks `metadata_rx.try_recv()` only before entering an inner raster-scheduler wait loop. That inner loop never returns to metadata polling when no raster key exists; a metadata notification or 10 ms timeout simply wakes and waits again.
 
-That single owner must handle at least:
+This breaks the normal production lifetime `service starts -> becomes idle -> user opens PDF -> metadata request`.
 
-- native open/parse validation;
-- native page-count metadata;
-- page rasterization/bitmap conversion;
-- renderer-side native cache state where appropriate.
+Refactor request arbitration so an already-idle native service always services a newly-arrived metadata request promptly without requiring a raster request to kick the worker.
 
-Do **not** construct a fresh `NativePdfRenderer` or fresh `Pdfium` binding on the source-open effect thread merely to obtain metadata.
+A single typed native request queue is acceptable and may be preferable, provided current source-open metadata cannot sit indefinitely behind stale/nearby raster work. If retaining separate metadata/raster structures, the wait loop must explicitly re-check metadata before sleeping again and must not lose notifications.
 
-Pdfium/native calls must be serialized through the owner/service. A typed cloneable handle may be shared by the effect layer and egui PDF presentation, but ownership of the native object itself remains singular.
+### 2. Preserve one native owner
 
-### 2. Metadata request/result contract
+All Pdfium initialization, parse/open validation, native page-count lookup, and rasterization remain serialized through the one shared native owner/service.
 
-Source opening must request PDF metadata through the shared native service and receive a bounded typed result off the UI thread.
+Do not solve A7 by creating another `NativePdfRenderer`, another Pdfium binding, or doing native work on egui.
 
-A successful metadata result must include truthful native page count and parse/open validity sufficient for A5 page-domain ownership.
+### 3. Bounded current-open priority
 
-A malformed/native-open failure must return a normal source-open error event rather than panic or hang.
+Metadata for the source currently being opened must have bounded priority over obsolete nearby raster backlog. Repeated source opens and source switching must not leak stale metadata or imagery.
 
-Metadata/current-open work must have suitable priority so opening the current PDF cannot wait indefinitely behind stale/nearby raster requests.
+### 4. Keep failures terminal
 
-### 3. Keep visual-first semantics
+Malformed/native-open failure returns a normal terminal source-open error. The detached effect panic boundary remains intact. A dead/stopped native service must produce a bounded failure rather than eternal `SourceLoading`.
 
-Do not reintroduce Quack-check/transcript/OCR work into visual source open. Once a provider/local path exists, native visual ownership depends only on the native PDF service for Gate 3.
+### 5. Make container precheck bounded
 
-### 4. No heavy work on egui
+`validate_pdf_source()` currently reads the full PDF merely to test `%PDF-` and `%%EOF`. Replace that with a bounded header/tail check or rely on the authoritative native parse path. Do not impose an O(file-size) duplicate read before Pdfium parses a large PDF.
 
-Pdfium initialization, library binding, PDF open/validation, metadata lookup, rasterization, bitmap conversion, filesystem-heavy work, transcript recovery, and OCR remain off the egui/render thread.
-
-The UI thread may submit bounded requests, consume results, upload bounded textures, and compose immediate-mode presentation only.
-
-### 5. Effect panic containment
-
-`EffectDispatcher` currently executes effects in detached threads. Wrap effect execution in a bounded panic boundary so an unexpected panic cannot silently terminate a worker task and leave product state stuck forever.
-
-A panic must be converted into a terminal `CommandFailed`/appropriate operation failure event with bounded diagnostics. Preserve ordinary result/error handling.
-
-This resilience boundary does **not** replace the single-Pdfium-owner correction.
+This work remains off the UI thread either way.
 
 ## Deterministic acceptance coverage
 
 Add tests proving at minimum:
 
-1. the production native PDF service is initialized once and can serve metadata then raster requests through the same owner;
-2. with that service already alive, a real valid multi-page PDF returns native page count and then renders page 1 successfully;
-3. repeated source opens do not attempt a second Pdfium binding/owner and do not hang;
-4. switching between two PDFs cannot leak stale metadata/page imagery;
-5. malformed/header-only input returns a terminal source-open failure;
-6. visual-only PDF still opens with Quack-check/scripts/Python/Docling/OCR unavailable;
-7. PDF Next/Prev/SetPage and `ReaderSnapshot.total_pages` remain native-page-domain correct;
-8. accepted A1-A5 zoom/scheduler/stale/residency tests remain green;
-9. a synthetic panic inside detached effect execution yields a terminal failure event rather than an eternal in-progress state;
+1. **production idle lifecycle:** start the actual shared native service, deliberately wait long enough for its worker to settle idle, then request metadata for a real valid multi-page PDF and require bounded completion;
+2. after that metadata result, raster page 1 through the same owner and verify success/thread identity;
+3. **repeated idle cycle:** metadata succeeds, service returns idle, then a second metadata request succeeds without any raster request being needed to wake it;
+4. repeated PDF opens do not create a second Pdfium owner/binding and do not hang;
+5. source switching cannot leak stale metadata/page imagery;
+6. malformed/header-only input returns a terminal failure;
+7. visual-only PDF still opens with Quack-check/scripts/Python/Docling/OCR unavailable;
+8. PDF Next/Prev/SetPage and `ReaderSnapshot.total_pages` remain native-page-domain correct;
+9. accepted A1-A6 zoom/scheduler/stale/residency/panic-boundary tests remain green;
 10. representative EPUB/non-PDF/TTS behavior remains green.
 
-The native lifecycle test must exercise the production ownership topology. An isolated helper that creates its own renderer is not sufficient evidence.
+The idle-lifecycle regression must remove the startup race that allowed A6 CI to pass: insert a deterministic delay or explicit idle witness before the first metadata request.
 
 ## Required validation
 
-Before terminalizing A6:
+Before terminalizing A7:
 
-- focused shared-PDF-service / source-open / page-domain / renderer tests;
+- focused shared-PDF-service idle-liveness / source-open / page-domain / renderer tests;
 - `cargo test -p lanternleaf-egui` plus relevant app/core tests;
-- `cargo test --workspace`;
+- `cargo test --workspace -- --test-threads=1`;
 - `cargo check --workspace`;
 - native Windows build and repo-native QA preparation;
 - hosted Windows baseline success including `native-workspace` and `hosted-renderer-probe`;
-- hosted/native probe must cover shared-service metadata + raster lifecycle, not only isolated renderer construction;
+- hosted/native probe must include the deliberate `start -> idle -> metadata -> raster -> idle -> metadata` production lifecycle;
 - `git diff --check`;
 - no human QA request during implementation.
 
@@ -113,12 +100,12 @@ The next human pass remains deliberately narrow:
 
 ## Explicit non-goals
 
-Do not expand A6 into Gate 4 PDF TTS/highlighting/text geometry/OCR quality, text selection/copy parity, Goal 0015, Goal 0017, Goal 0018, Natural/HD voices, or unrelated UI work.
+Do not expand A7 into Gate 4 PDF TTS/highlighting/text geometry/OCR quality, text selection/copy parity, Goal 0015, Goal 0017, Goal 0018, Natural/HD voices, or unrelated UI work.
 
 ## Repository handoff
 
 - Repository goal: `0019-native-pdf-visual-stability`
 - Branch: continue/recreate `codex/0019-native-pdf-visual-stability` from current director `main` as the normal Codex workflow requires.
 - This is a correction continuation under the same repository goal ID.
-- Move this file `ready -> active`, re-arm the normal watcher, implement A6, update `docs/work/reports/0019.md`, validate, terminalize to `done/`, push before signaling, and restore the shared checkout to `main`.
+- Move this file `ready -> active`, re-arm the normal watcher, implement A7, update `docs/work/reports/0019.md`, validate, terminalize to `done/`, push before signaling, and restore the shared checkout to `main`.
 - Do not request human QA. The director reviews first.
