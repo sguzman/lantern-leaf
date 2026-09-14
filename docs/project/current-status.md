@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-13 after Goal 0010 A7 director acceptance and integration for focused real-desktop QA.
+Updated: 2026-09-14 after Goal 0010 real-desktop closure and Goal 0016 promotion.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -41,13 +41,11 @@ The large real Caliberate EPUB opens quickly, remains responsive, speaks through
 
 **COMPLETE — AUTOMATED + REAL-DESKTOP ACCEPTED**
 
-Stable audible TTS, no unsolicited duplicate ordinary lines, correct pretty/text-only spoken-sentence highlight/follow, portable Zira inheritance, per-book voice persistence, transactional Piper rejection/recovery, and accepted Close book / Safe Quit lifecycle are real-desktop accepted.
+Stable audible TTS, no unsolicited duplicate ordinary lines, correct pretty/text-only spoken-sentence highlight/follow, portable Zira inheritance, per-book voice persistence, transactional Piper rejection/recovery, Close Book, and Safe Quit are accepted.
 
 ## Goal 0012 — pretty presentation controls and inline images
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
-
-Goal 0012 is closed.
 
 Accepted presentation/image behavior includes literal margins, presentation geometry invalidation, scrollable settings, working word/letter spacing, readable tables/TOCs, restrained blockquotes, explicit font fallback state, inline EPUB imagery, bounded off-render-thread pretty/image work, and durable canonical spoken highlighting/follow after geometry changes.
 
@@ -61,35 +59,42 @@ Implementation `58ae9de` uses actual center width, a deterministic `1120px` two-
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-Goal 0014 is closed.
-
-A2 established generalized semantic anchoring across presentation reflow. A3 fixed the remaining high-severity multi-frame instability by retaining one last-stable semantic viewport witness across an edit burst, avoiding recapture from unstable intermediate geometry, keeping bounded virtualization in the anchor neighborhood, reconciling after measured geometry is available, preserving pending TTS-follow precedence, and yielding to explicit user wheel/drag input.
+A3 removed the high-severity multi-frame reflow instability by retaining one last-stable semantic viewport witness across an edit burst, avoiding recapture from unstable intermediate geometry, keeping bounded virtualization in the anchor neighborhood, reconciling after measured geometry is available, preserving pending TTS-follow precedence, and yielding to explicit user wheel/drag input.
 
 Final physical Windows evidence: no more instant violent distant-area jerks; horizontal-margin changes behave beautifully; rapid presentation edits feel much calmer; canonical highlight ownership remains correct; and binding media max-width/max-height behavior is physically verified.
 
-A lower-severity residual remains under severe cumulative text-metric edits such as aggressive letter spacing and font scaling: the visible highlight can drift farther than desired before normal auto-follow restores it. This is queued separately as Goal 0015 and does not keep Goal 0014 open. See `docs/work/reviews/0014-a3-real-desktop-acceptance.md`.
-
-Implementation `430e9c1` and Windows baseline run `34768445726` are the accepted A3 implementation/CI evidence.
+A lower-severity residual remains under severe cumulative text-metric edits such as aggressive letter spacing and font scaling. This is queued separately as Goal 0015 and does not keep Goal 0014 open.
 
 ## Goal 0010 — Caliberate catalog covers / provider availability UX
 
-**A7 DIRECTOR-ACCEPTED + INTEGRATED — FOCUSED REAL-DESKTOP QA PENDING**
+**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-Goal 0010 now has the intended provider/cover architecture plus the A7 concurrency correction. Caliberate exposes the explicit `/api/v1/books/{id}/cover` provider contract; LanternLeaf propagates `has_cover`, loads covers lazily only for visible/near-visible rows, keeps network/disk/decode work off the UI thread, distinguishes loading/no-cover/provider-unavailable/fetch-error states, and never materializes an EPUB merely to obtain a thumbnail.
+Goal 0010 is closed.
 
-A6 introduced explicit book-identified `CalibreCoverCompleted` terminal outcomes. A7 replaced the remaining global completion watermark with per-book request ownership/freshness. Different books may now finish in arbitrary order, stale older same-book completions cannot overwrite newer retry state, and automatic plus manual `Ensure thumbnail` paths share the same four-request bounded/coalesced ownership path.
+Caliberate exposes the explicit `/api/v1/books/{id}/cover` provider contract; LanternLeaf propagates `has_cover`, lazily fetches covers for visible/near-visible rows, keeps network/disk/decode work off the UI thread, distinguishes intentional cover states, and never materializes an EPUB merely to obtain a thumbnail.
 
-LanternLeaf implementation `54e22c172745171b084221a6f80465e3f6ffe77d` passed Windows baseline run `34793890003`, including both native-workspace and hosted-renderer-probe jobs. The Goal 0010 terminal branch was fast-forward integrated to LanternLeaf `main` at `fb02dde145e881a04c6052fba0baa2aff6e579db` before the director acceptance record. The sibling Caliberate endpoint/test lineage was fast-forward integrated to Caliberate `main` at `3799ccac03ce05404700efbbf33e489aa965f757`.
+A6 introduced explicit book-identified `CalibreCoverCompleted` terminal outcomes. A7 replaced the remaining global completion watermark with per-book request ownership/freshness, so unrelated books may finish in arbitrary order, stale same-book completions cannot overwrite newer retries, and automatic plus manual thumbnail requests share the bounded/coalesced path.
 
-One focused physical Windows pass remains: covers before first open, no permanent `Loading cover…` rows, intentional no-cover state, provider-down classification and recovery after restart, bounded manual ensure behavior, and representative existing Caliberate open/TTS regression. See `docs/work/reviews/0010-a7-director-acceptance.md`.
+Real Windows closure verified real covers before first open, lazy cover population during scroll, extremely fast representative EPUB opens, and preservation of EPUB TTS / pretty-reader / visual-settings behavior. The physical pass also exposed two separate starter-state continuity defects now owned by Goal 0016. See `docs/work/reviews/0010-a7-real-desktop-acceptance.md`.
 
 The earlier `42866` open failure remains withdrawn as evidence of a LanternLeaf materialization defect because Caliberate was not running during that attempt.
+
+## Goal 0016 — starter library live-state continuity
+
+**READY NEXT**
+
+Real-desktop Goal 0010 QA exposed two same-session starter-state defects:
+
+- on a cold/incompatible catalog cache, LanternLeaf can look empty while it walks the real 105,570-book Caliberate catalog in the provider's supported 500-row pages;
+- a successfully opened source is durably persisted as a recent, but the current in-memory Recents panel does not update until an explicit reload/restart.
+
+Goal 0016 will make the large catalog useful progressively/cache-first while preserving truthful partial-loading state and stale-request ownership, and will refresh/update Recents after successful opens without inventing a second persistence model. All catalog/network/disk/decode work remains off the render thread. Contract: `docs/work/ready/0016-starter-library-live-state-continuity.md`.
 
 ## Goal 0015 — highlight viewport-band reflow polish
 
 **QUEUED — MINOR POLISH**
 
-Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow without inventing permanent highlight pinning or fighting user scrolling. Do not prioritize ahead of Goal 0010 closure unless new evidence makes it materially disruptive.
+Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow without permanent highlight pinning or fighting user scrolling. Goal 0016 takes precedence because it is ordinary library/startup usability exposed by current physical QA.
 
 ## Windows Natural/HD voices
 
@@ -99,12 +104,12 @@ Preserve the existing ordinary Windows voice backend. Goal 0011 remains a dorman
 
 ## PDF
 
-**CORE CONTRACTS REPAIRED; NATIVE VISUAL STABILITY FUTURE**
+**CORE CONTRACTS EXIST; NATIVE VISUAL STABILITY AND PDF TTS/HIGHLIGHT REMAIN FUTURE GATES**
 
-Gate 3 native PDF visual stability remains future work and is not currently authorized while the near-term non-PDF sequence proceeds.
+Current physical behavior is not accepted as a working PDF reader. Gate 3 is native PDF visual stability; Gate 4 is PDF text/TTS/highlight synchronization. They are not regressions from Goal 0010 and are not part of Goal 0016.
 
 ## Workflow status
 
-**HUMAN QA GATE ACTIVE — GOAL 0010 A7**
+**GOAL 0016 READY NEXT**
 
-Goal 0010 A7 is director-accepted and integrated in both LanternLeaf and Caliberate. No new Codex Goal is authorized right now. Goal 0015 is queued minor polish; Goal 0011 remains deferred; PDF work remains future.
+Goal 0010 is closed. Goal 0016 is the one ready implementation goal. Goal 0015 remains queued minor polish; Goal 0011 remains deferred; PDF work remains later unless the director/user reprioritizes after Goal 0016.
