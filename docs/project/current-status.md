@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-14 after Goal 0022 A3 director rejection and A4 reopening.
+Updated: 2026-09-14 after Goal 0022 A4 director rejection and A5 reopening.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -133,7 +133,7 @@ Real-desktop acceptance: `docs/work/reviews/0020-a3-real-desktop-acceptance.md`.
 
 ## Gate 4 — PDF text/TTS/highlight synchronization
 
-**ACTIVE NEXT CORE PRODUCT GATE — GOAL 0022 A4 READY**
+**ACTIVE NEXT CORE PRODUCT GATE — GOAL 0022 A5 READY**
 
 The Gate-4 architecture remains native-first and recovery-isolated. Quack-check is **not** trusted as baseline infrastructure and cannot block visual open. The accepted recovery boundary is documented in `docs/architecture/pdf-text-recovery-boundary-2026-09.md`.
 
@@ -147,24 +147,22 @@ The standalone `sguzman/quack-check` repository is not a runtime dependency. Goa
 
 ### Goal 0022 — native PDF embedded-text/TTS trustworthy path
 
-**READY A4 — A1/A2/A3 REJECTED BEFORE HUMAN QA**
+**READY A5 — A1/A2/A3/A4 REJECTED BEFORE HUMAN QA**
 
-A3 successfully corrected important A2 failures: trusted text promotes the canonical PDF policy to Text-only/search/TTS while exact visual sync stays disabled; Current and Nearby raster work both preempt background text; native extraction uses bounded eight-page chunks; and fresh hosted Windows validation is green.
+A4 fixed the explicit A3 blockers: cache load/parse moved off egui, FullText search became document-wide with native-page navigation, UI-facing native request enqueue became nonblocking, Current/Nearby raster preemption remained intact, bounded eight-page extraction remained intact, and fresh hosted Windows validation is green.
 
-Director review still found four blocking production issues before physical QA:
+Director review still found two blocking adoption-boundary defects:
 
-- warm native-text cache load/parse still runs synchronously from `update_pdf_render_state()` on the egui frame;
-- the new “bounded snapshot” merely calls `snapshot_internal(..., count_construction=false)` and still performs document-scale stats/vector work on egui;
-- `PdfSearchPolicy::FullText` is advertised while the implementation still searches only the current page;
-- UI-facing `metadata_async()` / `embedded_text_async()` still use blocking bounded-channel `send()` calls and can stall the caller under saturation.
+- the worker builds the final runtime `ReaderSnapshot` from a clone of mutable live session state captured before asynchronous preparation, so user changes made while preparation runs can be overwritten by a stale snapshot at commit time;
+- live adoption still returns a full document-wide canonical sentence `Vec<String>` and A4 discards it with `Ok(_)` on egui, causing O(document) string destruction on the render thread.
 
-A4 therefore owns fully off-thread cache lookup, a genuinely bounded adoption/runtime patch with no document-scale snapshot path, real document-wide native-PDF search with page provenance/navigation, and nonblocking UI-facing native request submission.
+A5 therefore owns a shared immutable prepared PDF text document/state boundary, preservation of live mutable state at commit time, a genuinely bounded runtime patch/projection, and elimination of document-scale allocation/clone/drop work from egui.
 
 Authoritative contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
-A3 rejection: `docs/work/reviews/0022-a3-director-rejection.md`.
+A4 rejection: `docs/work/reviews/0022-a4-director-rejection.md`.
 
 ## Workflow status
 
-**GOAL 0022 A4 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
+**GOAL 0022 A5 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
 
-No human QA is authorized for A3. Goals 0015, 0017, 0018, and 0021 remain queued. Goal 0011 remains deferred. Exact native PDF spoken overlays/follow come after Goal 0022. Hostile-PDF Quack-check/Docling/OCR recovery comes only after the native trustworthy-text path is physically accepted.
+No human QA is authorized for A4. Goals 0015, 0017, 0018, and 0021 remain queued. Goal 0011 remains deferred. Exact native PDF spoken overlays/follow come after Goal 0022. Hostile-PDF Quack-check/Docling/OCR recovery comes only after the native trustworthy-text path is physically accepted.
