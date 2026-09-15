@@ -1,7 +1,8 @@
 use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use lanternleaf_app::contracts::{
-    PdfEmbeddedTextEvent, PdfEmbeddedTextPreparedEvent, ReaderSnapshot,
+    PdfEmbeddedTextEvent, PdfEmbeddedTextPreparedEvent, PdfEmbeddedTextSearchReconciledEvent,
+    ReaderSnapshot,
 };
 use lanternleaf_app::pipeline::{
     AppCommand, AppEvent, DispatchPlan, PersistenceOutcome, PersistenceTrigger, PlannedEffect,
@@ -245,6 +246,10 @@ impl LanternLeafApp {
                     self.apply_prepared_pdf_embedded_text_event(prepared);
                 }
             }
+            if let AppEvent::PdfEmbeddedTextSearchReconciled(reconciled) = &mut event {
+                self.apply_reconciled_pdf_search_event(reconciled);
+                continue;
+            }
             match &event {
                 _ if refresh_recents_after_persistence(&event) => {
                     trace!("Refreshing starter Recents after successful source persistence");
@@ -445,9 +450,10 @@ impl LanternLeafApp {
         let prepared = Arc::clone(&event.prepared);
         let mut adoption_error = None;
         let mut reader = None;
+        let mut search_reconciliation = None;
         let adopted = if let Ok(mut session) = self.effect_session.lock() {
             if let Some(session) = session.as_mut() {
-                match session.apply_prepared_pdf_embedded_text(prepared) {
+                match session.apply_prepared_pdf_embedded_text(Arc::clone(&prepared)) {
                     Ok(_) => {
                         let panels = self
                             .runtime
@@ -456,7 +462,11 @@ impl LanternLeafApp {
                             .session
                             .map(|state| state.panels)
                             .unwrap_or_default();
-                        reader = Some(session.snapshot(panels, &self.normalizer));
+                        let query = session.search_query_for_preparation().to_string();
+                        let query_revision = session.search_query_revision();
+                        search_reconciliation = Some((query, query_revision));
+                        reader =
+                            Some(session.snapshot_enriched_pdf_bounded(panels, &self.normalizer));
                         true
                     }
                     Err(error) => {
@@ -483,9 +493,74 @@ impl LanternLeafApp {
             self.push_status(format!("Native PDF text adoption failed: {error}"));
         }
         if adopted {
+            if let Some((query, query_revision)) = search_reconciliation {
+                let event_tx = self.effect_dispatcher.event_tx();
+                let prepared = Arc::clone(&prepared);
+                let source_path = event.source_path.clone();
+                let generation = event.generation;
+                let request_id = self.runtime.next_request_id();
+                std::thread::spawn(move || {
+                    let matches = Arc::new(
+                        lanternleaf_core::session::ReaderSession::search_matches_for_prepared_document(
+                            &prepared,
+                            &query,
+                        ),
+                    );
+                    let _ = event_tx.send(AppEvent::PdfEmbeddedTextSearchReconciled(
+                        PdfEmbeddedTextSearchReconciledEvent {
+                            request_id,
+                            source_path,
+                            generation,
+                            query_revision,
+                            query,
+                            matches,
+                        },
+                    ));
+                });
+            }
             self.push_status(format!(
                 "Native PDF embedded text accepted ({} pages; worker {}; prepared {})",
                 event.page_count, event.worker_thread, event.preparation_thread
+            ));
+        }
+    }
+
+    fn apply_reconciled_pdf_search_event(
+        &mut self,
+        event: &mut PdfEmbeddedTextSearchReconciledEvent,
+    ) {
+        let current_generation = self.pdf_generation;
+        if self.current_pdf_path.as_deref() != Some(PathBuf::from(&event.source_path).as_path())
+            || event.generation != current_generation
+        {
+            return;
+        }
+        let mut reader = None;
+        if let Ok(mut session) = self.effect_session.lock()
+            && let Some(session) = session.as_mut()
+            && session.apply_search_reconciliation(
+                event.query_revision,
+                &event.query,
+                Arc::clone(&event.matches),
+                &self.normalizer,
+            )
+        {
+            let panels = self
+                .runtime
+                .state_snapshot()
+                .session
+                .session
+                .map(|state| state.panels)
+                .unwrap_or_default();
+            reader = Some(session.snapshot_enriched_pdf_bounded(panels, &self.normalizer));
+        }
+        if let Some(reader) = reader {
+            self.runtime.apply_event(AppEvent::ReaderUpdated(
+                lanternleaf_app::contracts::ReaderStateEvent {
+                    request_id: event.request_id,
+                    action: "pdf_embedded_search_reconciled".to_string(),
+                    reader,
+                },
             ));
         }
     }

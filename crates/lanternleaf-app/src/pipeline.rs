@@ -1,9 +1,9 @@
 use crate::contracts::{
     BootstrapState, BridgeError, BrowserTabsHealth, BrowserTabsTab, BrowserTabsWindow,
     CalibreBookDto, CalibreCoverEvent, CalibreLoadEvent, LogLevelEvent, OpenSourceResult,
-    PdfEmbeddedTextEvent, PdfEmbeddedTextPreparedEvent, PdfTranscriptionEvent,
-    ReaderPlaybackStateEvent, ReaderStateEvent, RecentBook, SessionState, SessionStateEvent,
-    SourceOpenEvent, TtsStateEvent, UiMode,
+    PdfEmbeddedTextEvent, PdfEmbeddedTextPreparedEvent, PdfEmbeddedTextSearchReconciledEvent,
+    PdfTranscriptionEvent, ReaderPlaybackStateEvent, ReaderStateEvent, RecentBook, SessionState,
+    SessionStateEvent, SourceOpenEvent, TtsStateEvent, UiMode,
 };
 use crate::logging::{command_span, event_span};
 use crate::state::{
@@ -417,6 +417,7 @@ pub enum AppEvent {
     PdfTranscriptionProgress(PdfTranscriptionEvent),
     PdfEmbeddedTextCompleted(PdfEmbeddedTextEvent),
     PdfEmbeddedTextPrepared(PdfEmbeddedTextPreparedEvent),
+    PdfEmbeddedTextSearchReconciled(PdfEmbeddedTextSearchReconciledEvent),
     LogLevelUpdated(LogLevelEvent),
     NotificationRaised {
         request_id: u64,
@@ -1030,7 +1031,9 @@ pub fn apply_event(state: &mut AppState, event: AppEvent) {
                 clear_scope(state, OperationScope::ReaderCommand);
             }
         }
-        AppEvent::PdfEmbeddedTextCompleted(_) | AppEvent::PdfEmbeddedTextPrepared(_) => {}
+        AppEvent::PdfEmbeddedTextCompleted(_)
+        | AppEvent::PdfEmbeddedTextPrepared(_)
+        | AppEvent::PdfEmbeddedTextSearchReconciled(_) => {}
         AppEvent::LogLevelUpdated(event) => {
             if event.request_id < state.runtime_jobs.last_log_level_event_request_id {
                 warn!(
@@ -1249,6 +1252,7 @@ mod tests {
                 show_stats: false,
                 show_tts: true,
             },
+            pdf_document_handle: None,
         }
     }
 
@@ -1630,7 +1634,7 @@ mod tests {
                 can_seek_next: true,
                 progress_pct: 0.5,
             },
-            stats: make_reader_snapshot().stats,
+            stats: make_reader_snapshot().stats.clone(),
             updated_at: 0,
         };
         apply_event(

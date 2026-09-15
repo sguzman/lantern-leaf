@@ -177,6 +177,16 @@ pub struct PdfEmbeddedTextPreparedEvent {
     pub prepared: Arc<session::PreparedPdfEmbeddedText>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PdfEmbeddedTextSearchReconciledEvent {
+    pub request_id: u64,
+    pub source_path: String,
+    pub generation: u64,
+    pub query_revision: u64,
+    pub query: String,
+    pub matches: Arc<Vec<usize>>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct LogLevelEvent {

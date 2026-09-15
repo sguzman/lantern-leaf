@@ -126,6 +126,7 @@ impl ReaderSession {
             highlighted_audio_idx: None,
             text_only_mode: false,
             search_query: String::new(),
+            search_query_revision: 0,
             search_matches: Vec::new().into(),
             selected_search_match: None,
             pdf_sentence_page_hints: Vec::new(),

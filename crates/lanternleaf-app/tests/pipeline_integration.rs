@@ -103,6 +103,7 @@ fn make_reader_snapshot(source_path: &str) -> session::ReaderSnapshot {
             show_stats: false,
             show_tts: true,
         },
+        pdf_document_handle: None,
     }
 }
 

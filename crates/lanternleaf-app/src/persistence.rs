@@ -733,6 +733,7 @@ mod tests {
                 show_stats: false,
                 show_tts: true,
             },
+            pdf_document_handle: None,
         }
     }
 

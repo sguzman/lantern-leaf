@@ -4145,6 +4145,7 @@ mod tests {
                 sentences_read_up_to_current_position: 0,
             },
             panels: PanelState::default(),
+            pdf_document_handle: None,
         }
     }
 

@@ -716,6 +716,7 @@ mod tests {
                 show_stats: false,
                 show_tts: true,
             },
+            pdf_document_handle: None,
         }
     }
 
@@ -765,7 +766,7 @@ mod tests {
                 can_seek_next: true,
                 progress_pct: 0.9,
             },
-            stats: make_reader_snapshot().stats,
+            stats: make_reader_snapshot().stats.clone(),
             updated_at: 0,
         });
 
