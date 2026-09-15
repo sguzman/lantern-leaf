@@ -1832,6 +1832,71 @@ mod tests {
     }
 
     #[test]
+    fn simulated_runtime_burst_seeks_are_monotonic_across_pdf_pages() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let runtime = TtsRuntime::new_with_mode(normalizer.clone(), TtsRuntimeMode::Simulated);
+        let mut burst_session = session::ReaderSession::from_pages_for_test(
+            PathBuf::from("/tmp/burst-seek.pdf"),
+            "burst-seek.pdf".to_string(),
+            vec![
+                "First page sentence zero. First page sentence one.".to_string(),
+                String::new(),
+                "Later page sentence two. Later page sentence three.".to_string(),
+            ],
+            vec![
+                vec![
+                    "First page sentence zero.".to_string(),
+                    "First page sentence one.".to_string(),
+                ],
+                Vec::new(),
+                vec![
+                    "Later page sentence two.".to_string(),
+                    "Later page sentence three.".to_string(),
+                ],
+            ],
+        );
+        burst_session.set_pdf_page_count(3);
+        runtime.set_session(Some(burst_session));
+        let _ = runtime.apply_command(TtsCommand::PlayFromPageStart);
+        let mut forward = Vec::new();
+        for _ in 0..5 {
+            let view = runtime
+                .apply_command(TtsCommand::SeekNext)
+                .expect("next view");
+            forward.push((view.current_page, view.tts.current_sentence_idx));
+        }
+        assert_eq!(
+            forward,
+            vec![
+                (0, Some(1)),
+                (2, Some(0)),
+                (2, Some(1)),
+                (2, Some(1)),
+                (2, Some(1))
+            ]
+        );
+
+        let mut backward = Vec::new();
+        for _ in 0..5 {
+            let view = runtime
+                .apply_command(TtsCommand::SeekPrev)
+                .expect("previous view");
+            backward.push((view.current_page, view.tts.current_sentence_idx));
+        }
+        assert_eq!(
+            backward,
+            vec![
+                (2, Some(0)),
+                (0, Some(1)),
+                (0, Some(0)),
+                (0, Some(0)),
+                (0, Some(0))
+            ]
+        );
+        let _ = normalizer;
+    }
+
+    #[test]
     fn tts_runtime_emits_progress_events() {
         let normalizer = normalizer::TextNormalizer::default();
         let runtime = TtsRuntime::new_with_mode(normalizer, TtsRuntimeMode::Simulated);

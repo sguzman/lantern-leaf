@@ -436,6 +436,12 @@ struct LanternLeafApp {
     search_query_draft: String,
     search_query_draft_source: Option<String>,
     search_query_draft_dirty: bool,
+    tts_settings_draft_source: Option<String>,
+    tts_speed_draft: f32,
+    tts_volume_draft: f32,
+    tts_settings_draft_dirty: bool,
+    tts_settings_last_submitted: Option<(u32, u32)>,
+    tts_settings_drag_active: bool,
     last_plan: Option<DispatchPlan>,
     auto_scroll_state: AutoScrollState,
     text_only_override: Option<bool>,
@@ -1004,6 +1010,32 @@ pub(crate) fn reconcile_search_query_draft(
     }
 }
 
+pub(crate) fn reconcile_tts_settings_draft(
+    source: &mut Option<String>,
+    speed: &mut f32,
+    volume: &mut f32,
+    dirty: &mut bool,
+    authoritative_source: Option<&str>,
+    authoritative_speed: f32,
+    authoritative_volume: f32,
+) {
+    if source.as_deref() != authoritative_source {
+        *source = authoritative_source.map(str::to_owned);
+        *speed = authoritative_speed;
+        *volume = authoritative_volume;
+        *dirty = false;
+        return;
+    }
+    if !*dirty {
+        *speed = authoritative_speed;
+        *volume = authoritative_volume;
+    } else if (*speed - authoritative_speed).abs() < f32::EPSILON
+        && (*volume - authoritative_volume).abs() < f32::EPSILON
+    {
+        *dirty = false;
+    }
+}
+
 impl LanternLeafApp {
     const OVERLAY_EVICTION_SNACK_DURATION: Duration = Duration::from_secs(5);
     #[cfg(not(target_arch = "wasm32"))]
@@ -1058,6 +1090,12 @@ impl LanternLeafApp {
             search_query_draft: String::new(),
             search_query_draft_source: None,
             search_query_draft_dirty: false,
+            tts_settings_draft_source: None,
+            tts_speed_draft: 1.0,
+            tts_volume_draft: 1.0,
+            tts_settings_draft_dirty: false,
+            tts_settings_last_submitted: None,
+            tts_settings_drag_active: false,
             last_plan: None,
             auto_scroll_state: AutoScrollState::default(),
             text_only_override: None,
@@ -1215,6 +1253,12 @@ impl LanternLeafApp {
             search_query_draft: String::new(),
             search_query_draft_source: None,
             search_query_draft_dirty: false,
+            tts_settings_draft_source: None,
+            tts_speed_draft: 1.0,
+            tts_volume_draft: 1.0,
+            tts_settings_draft_dirty: false,
+            tts_settings_last_submitted: None,
+            tts_settings_drag_active: false,
             last_plan: None,
             auto_scroll_state: AutoScrollState::default(),
             text_only_override: None,
@@ -1894,6 +1938,20 @@ impl LanternLeafApp {
                         return;
                     }
                 };
+                if self.tts_settings_draft_source.as_deref()
+                    != Some(snapshot.source_path.as_str())
+                {
+                    self.tts_settings_last_submitted = None;
+                }
+                reconcile_tts_settings_draft(
+                    &mut self.tts_settings_draft_source,
+                    &mut self.tts_speed_draft,
+                    &mut self.tts_volume_draft,
+                    &mut self.tts_settings_draft_dirty,
+                    Some(snapshot.source_path.as_str()),
+                    snapshot.settings.tts_speed,
+                    snapshot.settings.tts_volume,
+                );
                 let settings = &snapshot.settings;
                 ui.horizontal(|ui| {
                     ui.label(format!("Theme: {:?}", settings.theme));
@@ -2246,39 +2304,44 @@ impl LanternLeafApp {
                         "pause_after_sentence",
                     );
                 }
-                let mut tts_speed = settings.tts_speed;
-                if ui
-                    .add(
-                        Slider::new(&mut tts_speed, 0.5..=2.5)
-                            .text("TTS speed")
-                            .suffix("x"),
-                    )
-                    .changed()
-                {
-                    self.apply_reader_settings_patch(
-                        ReaderSettingsPatch {
-                            tts_speed: Some(tts_speed),
-                            ..Default::default()
-                        },
-                        "tts_speed",
-                    );
+                let speed_response = ui.add(
+                    Slider::new(&mut self.tts_speed_draft, 0.5..=2.5)
+                        .text("TTS speed")
+                        .suffix("x"),
+                );
+                let volume_response = ui.add(
+                    Slider::new(&mut self.tts_volume_draft, 0.0..=2.0)
+                        .text("TTS volume")
+                        .suffix("x"),
+                );
+                if speed_response.changed() || volume_response.changed() {
+                    self.tts_settings_draft_dirty = true;
                 }
-                let mut tts_volume = settings.tts_volume;
-                if ui
-                    .add(
-                        Slider::new(&mut tts_volume, 0.0..=2.0)
-                            .text("TTS volume")
-                            .suffix("x"),
-                    )
-                    .changed()
+                let pointer_down = ui.input(|input| input.pointer.primary_down());
+                self.tts_settings_drag_active |= speed_response.dragged()
+                    || volume_response.dragged()
+                    || (pointer_down && (speed_response.changed() || volume_response.changed()));
+                let commit = (self.tts_settings_drag_active && !pointer_down)
+                    || ((speed_response.changed() || volume_response.changed())
+                        && !speed_response.dragged()
+                        && !volume_response.dragged());
+                let target = (self.tts_speed_draft.to_bits(), self.tts_volume_draft.to_bits());
+                if self.tts_settings_draft_dirty
+                    && commit
+                    && self.tts_settings_last_submitted != Some(target)
+                    && (self.tts_speed_draft.to_bits() != settings.tts_speed.to_bits()
+                        || self.tts_volume_draft.to_bits() != settings.tts_volume.to_bits())
                 {
                     self.apply_reader_settings_patch(
                         ReaderSettingsPatch {
-                            tts_volume: Some(tts_volume),
+                            tts_speed: Some(self.tts_speed_draft),
+                            tts_volume: Some(self.tts_volume_draft),
                             ..Default::default()
                         },
-                        "tts_volume",
+                        "tts_settings",
                     );
+                    self.tts_settings_last_submitted = Some(target);
+                    self.tts_settings_drag_active = false;
                 }
                 ui.horizontal(|ui| {
                     ui.label("TTS backend");
@@ -3621,6 +3684,18 @@ impl eframe::App for LanternLeafApp {
             "Prepared lightweight egui state projection"
         );
         let reader_snapshot = snapshot.reader_document.snapshot.as_deref();
+        let reader_source = reader_snapshot.map(|reader| reader.source_path.clone());
+        if self.last_reader_source != reader_source {
+            self.pretty_page_cache_key = None;
+            self.pretty_page_cache_blocks.clear();
+            self.pretty_sentence_targets.clear();
+            self.pretty_block_heights.clear();
+            self.pretty_build_pending = None;
+            self.pretty_geometry_key = None;
+            self.pretty_reflow_transaction = None;
+            self.pretty_stable_witness = None;
+            self.last_reader_source = reader_source;
+        }
         if reader_snapshot.is_none() {
             self.search_panel_open = false;
             self.pending_search_focus = false;
@@ -3628,6 +3703,10 @@ impl eframe::App for LanternLeafApp {
             self.search_query_draft.clear();
             self.search_query_draft_source = None;
             self.search_query_draft_dirty = false;
+            self.tts_settings_draft_source = None;
+            self.tts_settings_draft_dirty = false;
+            self.tts_settings_last_submitted = None;
+            self.tts_settings_drag_active = false;
             self.text_only_override = None;
             self.text_only_toggle_pending = false;
             self.text_only_pending_target = None;
@@ -3773,6 +3852,58 @@ mod tts_repaint_policy_tests {
             "",
         );
         assert!(draft.is_empty());
+        assert!(!dirty);
+    }
+
+    #[test]
+    fn tts_settings_draft_survives_stale_acks_and_coalesces_same_target() {
+        let mut source = None;
+        let mut speed = 1.0;
+        let mut volume = 1.0;
+        let mut dirty = false;
+        super::reconcile_tts_settings_draft(
+            &mut source,
+            &mut speed,
+            &mut volume,
+            &mut dirty,
+            Some("book.epub"),
+            1.0,
+            1.0,
+        );
+        speed = 2.4;
+        volume = 1.7;
+        dirty = true;
+        super::reconcile_tts_settings_draft(
+            &mut source,
+            &mut speed,
+            &mut volume,
+            &mut dirty,
+            Some("book.epub"),
+            1.0,
+            1.0,
+        );
+        assert_eq!((speed, volume), (2.4, 1.7));
+        assert!(dirty);
+        super::reconcile_tts_settings_draft(
+            &mut source,
+            &mut speed,
+            &mut volume,
+            &mut dirty,
+            Some("book.epub"),
+            2.4,
+            1.7,
+        );
+        assert!(!dirty);
+        super::reconcile_tts_settings_draft(
+            &mut source,
+            &mut speed,
+            &mut volume,
+            &mut dirty,
+            Some("new-book.epub"),
+            1.2,
+            0.8,
+        );
+        assert_eq!((speed, volume), (1.2, 0.8));
         assert!(!dirty);
     }
 

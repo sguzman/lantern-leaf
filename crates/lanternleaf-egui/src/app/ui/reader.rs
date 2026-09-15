@@ -1,6 +1,6 @@
 use eframe::egui::{
-    Align, Color32, Context, FontFamily, Frame, Grid, Image, Label, Rect, RichText, ScrollArea,
-    Slider, Stroke, TextEdit, TextFormat, Ui, scroll_area::State as ScrollAreaState,
+    Align, Color32, Context, FontFamily, Frame, Grid, Image, Key, Label, Rect, RichText,
+    ScrollArea, Slider, Stroke, TextEdit, TextFormat, Ui, scroll_area::State as ScrollAreaState,
     text::LayoutJob,
 };
 use lanternleaf_app::contracts::{PrettyKind, ReaderSnapshot};
@@ -1666,6 +1666,11 @@ impl LanternLeafApp {
                         SessionCommand::TtsTogglePlayPause,
                     ));
                 }
+                if ui.button("Start TTS at visible page").clicked() {
+                    self.execute_reader_command(ReaderCommand::Session(
+                        SessionCommand::TtsPlayFromPageStart,
+                    ));
+                }
                 if ui.button("Prev").clicked() {
                     self.execute_reader_command(ReaderCommand::Session(
                         SessionCommand::TtsSeekPrev,
@@ -1709,6 +1714,18 @@ impl LanternLeafApp {
     }
 
     pub(crate) fn render_tts_widget(&mut self, ui: &mut Ui, snapshot: &ReaderSnapshot) {
+        if self.tts_settings_draft_source.as_deref() != Some(snapshot.source_path.as_str()) {
+            self.tts_settings_last_submitted = None;
+        }
+        super::super::reconcile_tts_settings_draft(
+            &mut self.tts_settings_draft_source,
+            &mut self.tts_speed_draft,
+            &mut self.tts_volume_draft,
+            &mut self.tts_settings_draft_dirty,
+            Some(snapshot.source_path.as_str()),
+            snapshot.settings.tts_speed,
+            snapshot.settings.tts_volume,
+        );
         ui.group(|ui| {
             ui.label("TTS controls");
             ui.horizontal_wrapped(|ui| {
@@ -1752,33 +1769,46 @@ impl LanternLeafApp {
             });
             ui.add_space(2.0);
             ui.horizontal_wrapped(|ui| {
-                let mut tts_speed = snapshot.settings.tts_speed;
-                if ui
-                    .add(Slider::new(&mut tts_speed, 0.5..=2.5).text("Speed"))
-                    .changed()
-                {
-                    self.execute_reader_command(ReaderCommand::Session(
-                        SessionCommand::ApplySettings {
-                            patch: ReaderSettingsPatch {
-                                tts_speed: Some(tts_speed),
-                                ..Default::default()
-                            },
-                        },
-                    ));
+                let speed_response =
+                    ui.add(Slider::new(&mut self.tts_speed_draft, 0.5..=2.5).text("Speed"));
+                if speed_response.changed() {
+                    self.tts_settings_draft_dirty = true;
                 }
-                let mut tts_volume = snapshot.settings.tts_volume;
-                if ui
-                    .add(Slider::new(&mut tts_volume, 0.0..=2.0).text("Volume"))
-                    .changed()
+                let volume_response =
+                    ui.add(Slider::new(&mut self.tts_volume_draft, 0.0..=2.0).text("Volume"));
+                if volume_response.changed() {
+                    self.tts_settings_draft_dirty = true;
+                }
+                let pointer_down = ui.input(|input| input.pointer.primary_down());
+                self.tts_settings_drag_active |= speed_response.dragged()
+                    || volume_response.dragged()
+                    || (pointer_down && (speed_response.changed() || volume_response.changed()));
+                let drag_stopped = (self.tts_settings_drag_active && !pointer_down)
+                    || ((speed_response.changed() || volume_response.changed())
+                        && !speed_response.dragged()
+                        && !volume_response.dragged());
+                let target = (
+                    self.tts_speed_draft.to_bits(),
+                    self.tts_volume_draft.to_bits(),
+                );
+                if self.tts_settings_draft_dirty
+                    && drag_stopped
+                    && self.tts_settings_last_submitted != Some(target)
+                    && (self.tts_speed_draft.to_bits() != snapshot.settings.tts_speed.to_bits()
+                        || self.tts_volume_draft.to_bits()
+                            != snapshot.settings.tts_volume.to_bits())
                 {
                     self.execute_reader_command(ReaderCommand::Session(
                         SessionCommand::ApplySettings {
                             patch: ReaderSettingsPatch {
-                                tts_volume: Some(tts_volume),
+                                tts_speed: Some(self.tts_speed_draft),
+                                tts_volume: Some(self.tts_volume_draft),
                                 ..Default::default()
                             },
                         },
                     ));
+                    self.tts_settings_last_submitted = Some(target);
+                    self.tts_settings_drag_active = false;
                 }
             });
             ui.add_space(6.0);
@@ -1920,13 +1950,72 @@ impl LanternLeafApp {
                 query: self.search_query_draft.clone(),
             }));
         }
-        ui.label(format!("Matches: {}", state.reader_ui.search_matches.len()));
+        let match_count = state.reader_ui.search_matches.len();
+        let selected = state.reader_ui.selected_search_match;
+        if match_count == 0 {
+            if self.search_query_draft.trim().is_empty() {
+                ui.label("No query entered");
+            } else {
+                ui.label("No matches");
+            }
+        } else {
+            let selected_number = selected.map(|idx| idx + 1).unwrap_or(0);
+            ui.label(format!("Selected match: {selected_number} / {match_count}"));
+            if let Some(match_idx) =
+                selected.and_then(|idx| state.reader_ui.search_matches.get(idx))
+            {
+                let page = snapshot_page_for_sentence(state, *match_idx);
+                if let Some(page) = page {
+                    ui.label(format!("Native page: {}", page + 1));
+                }
+                let excerpt = state
+                    .reader_document
+                    .snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.canonical_sentences.get(*match_idx))
+                    .map(|text| bounded_search_excerpt(text))
+                    .unwrap_or_else(|| "Excerpt unavailable".to_string());
+                ui.label(format!("Excerpt: {excerpt}"));
+            }
+        }
+        let next_clicked = ui.button("Next match").clicked();
+        let prev_clicked = ui.button("Previous match").clicked();
+        let enter_navigation =
+            response.has_focus() && ui.input(|input| input.key_pressed(Key::Enter));
+        let shift_enter_navigation = response.has_focus()
+            && ui.input(|input| input.key_pressed(Key::Enter) && input.modifiers.shift);
+        if prev_clicked || shift_enter_navigation {
+            self.execute_reader_command(ReaderCommand::Session(SessionCommand::SearchPrev));
+        } else if next_clicked || (enter_navigation && !shift_enter_navigation) {
+            self.execute_reader_command(ReaderCommand::Session(SessionCommand::SearchNext));
+        }
         if ui.button("Focus search").clicked() {
             self.search_panel_open = true;
             self.pending_search_focus = true;
             self.push_status("Search focus requested".to_string());
         }
     }
+}
+
+fn bounded_search_excerpt(text: &str) -> String {
+    const MAX_CHARS: usize = 120;
+    let mut excerpt = text.chars().take(MAX_CHARS).collect::<String>();
+    if text.chars().count() > MAX_CHARS {
+        excerpt.push('…');
+    }
+    excerpt
+}
+
+fn snapshot_page_for_sentence(state: &AppState, sentence_idx: usize) -> Option<usize> {
+    let snapshot = state.reader_document.snapshot.as_ref()?;
+    let mut start = 0usize;
+    for (page, count) in snapshot.page_sentence_counts.iter().copied().enumerate() {
+        if sentence_idx < start.saturating_add(count) {
+            return Some(page);
+        }
+        start = start.saturating_add(count);
+    }
+    None
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

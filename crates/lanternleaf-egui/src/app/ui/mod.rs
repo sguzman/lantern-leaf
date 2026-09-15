@@ -3,7 +3,7 @@ pub(crate) mod reader;
 mod starter;
 
 use eframe::egui::{
-    self, CentralPanel, Color32, Context, RichText, ScrollArea, SidePanel, TopBottomPanel,
+    self, CentralPanel, Color32, Context, Label, RichText, ScrollArea, SidePanel, TopBottomPanel,
 };
 use lanternleaf_app::contracts::{ReaderSnapshot, UiMode};
 use lanternleaf_app::state::AppState;
@@ -241,14 +241,6 @@ impl LanternLeafApp {
                     self.render_starter_content(ui, state);
                 }
             }
-            if let Some(plan) = self.last_plan.as_ref() {
-                ui.separator();
-                ui.label(format!(
-                    "Last command: {} ({} effects)",
-                    plan.action,
-                    plan.effects.len()
-                ));
-            }
         });
     }
 
@@ -266,31 +258,34 @@ impl LanternLeafApp {
     }
 
     pub(crate) fn render_status(&mut self, ctx: &Context) {
-        TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Status log:");
-                for entry in &self.status_log {
-                    ui.label(format!("{} ({:.1}s)", entry.message, entry.age_secs()));
-                }
-                if self.shell_state.screen_lock_active {
-                    ui.colored_label(Color32::YELLOW, "Screen lock active");
-                }
-            });
-            if !self.shell_state.notifications.is_empty() {
-                ui.separator();
+        TopBottomPanel::bottom("status_bar")
+            .exact_height(34.0)
+            .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("Notifications:");
-                    for note in &self.shell_state.notifications {
-                        let color = match note.level {
-                            crate::shell::NotificationLevel::Info => Color32::LIGHT_GRAY,
-                            crate::shell::NotificationLevel::Warn => Color32::YELLOW,
-                            crate::shell::NotificationLevel::Error => Color32::RED,
-                        };
-                        ui.colored_label(color, &note.message);
+                    ui.label("Status:");
+                    if let Some(entry) = self.status_log.last() {
+                        let message = bounded_diagnostic(&entry.message);
+                        ui.add_sized(
+                            [ui.available_width().min(f32::from(message.max_width)), 20.0],
+                            Label::new(message.text).truncate(true),
+                        );
+                    } else {
+                        ui.label("No recent command");
+                    }
+                    if self.shell_state.screen_lock_active {
+                        ui.colored_label(Color32::YELLOW, "Screen lock active");
                     }
                 });
-            }
-        });
+                if let Some(note) = self.shell_state.notifications.last() {
+                    let color = match note.level {
+                        crate::shell::NotificationLevel::Info => Color32::LIGHT_GRAY,
+                        crate::shell::NotificationLevel::Warn => Color32::YELLOW,
+                        crate::shell::NotificationLevel::Error => Color32::RED,
+                    };
+                    let message = bounded_diagnostic(&note.message);
+                    ui.colored_label(color, message.text);
+                }
+            });
     }
 }
 

@@ -155,7 +155,13 @@ impl ReaderSession {
             );
             return;
         }
-        let count = self.current_audio_sentences(normalizer).len();
+        let mut count = self.current_audio_sentences(normalizer).len();
+        if count == 0
+            && self.is_pdf_source()
+            && self.move_to_adjacent_page_with_sentences(1, normalizer)
+        {
+            count = self.current_audio_sentences(normalizer).len();
+        }
         if count == 0 {
             self.tts_state = TtsPlaybackState::Idle;
             return;
