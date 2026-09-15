@@ -106,28 +106,32 @@ After Fit Width/Fit Page, `+/-` should step from the current effective fit perce
 
 ## P4 — Goal 0022: trustworthy native PDF embedded text + TTS
 
-**READY A7 — CURRENT SUBSTANTIVE PRODUCT PRIORITY**
+**A7 DIRECTOR-ACCEPTED + INTEGRATED — REAL-DESKTOP QA IS CURRENT SUBSTANTIVE PRIORITY**
 
-A1 through A6 were rejected before human QA; none is accepted for physical testing.
+A1 through A6 were rejected before human QA. A7 closes the remaining source-level blockers and has been integrated to `main` for physical verification.
 
-A6 fixed the correctness gaps from A5: the shared trusted document now owns later-page/global canonical sentence identity, first-sample identity and final-document exhaustion are covered, current live search is reconciled off-thread with query/source/generation stale safety, and trusted publication has an explicit bounded API. Fresh hosted Windows `native-workspace` and `hosted-renderer-probe` validation passed.
+Accepted A7 architecture/evidence:
 
-A7 owns two remaining director blockers:
+- shared immutable trusted PDF text remains the canonical document-scale model;
+- one process-wide retirement worker replaces per-snapshot OS-thread creation;
+- enriched projection/global identity/TTS page calculations use prepared prefix indexes rather than document-length page scans;
+- global-sentence -> native-page lookup is binary-search based;
+- current live mutable session state remains authoritative at adoption time;
+- live search reconciliation remains off-thread and source/generation/query-revision stale-safe;
+- later-page/global canonical identity, first-sample identity, and final-document exhaustion remain covered;
+- trusted policy enables Text-only, document-wide search, and ordinary Windows TTS while exact visual sentence synchronization remains disabled;
+- visual PDF browsing remains independent of enrichment/cache/search failure;
+- fresh hosted Windows workflow `34973136075` passed `native-workspace` and `hosted-renderer-probe` on substantive A7 commit `9dc06b630eb35b19e725f79d012144450e196957`.
 
-- replace enriched `ReaderSnapshot`/session per-drop `std::thread::spawn()` with one bounded shared off-egui retirement worker/queue so rapid continuous-page ownership, navigation, search, and settings cannot create one OS thread per retired snapshot;
-- make the explicit enriched-PDF projection actually independent of total native page count by using prepared prefix indexes for global sentence bases, before/after-page checks, final-exhaustion checks, TTS display IDs, and global-sentence -> page lookup.
+Final A7 tree was squash-integrated through PR #29 as main commit `f19728157fd683b62c95ec40b72a2bf719202b9f`.
 
 Hard exclusions remain: Quack-check, Python, Docling, OCR, exact sentence overlays, and hostile-PDF recovery.
 
-The visual reader must remain usable before, during, and after text/cache/search enrichment failure.
-
-Authoritative A7 contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
-A6 rejection: `docs/work/reviews/0022-a6-director-rejection.md`.
-Architecture boundary: `docs/architecture/pdf-text-recovery-boundary-2026-09.md`.
+Current next action is focused real-desktop QA using a real text-bearing PDF, then a representative EPUB regression. Director acceptance checklist: `docs/work/reviews/0022-a7-director-acceptance.md`.
 
 ## P4.1 — Native PDF sentence geometry/highlight/follow
 
-**NEXT AFTER GOAL 0022**
+**NEXT ONLY AFTER GOAL 0022 PHYSICAL ACCEPTANCE**
 
 For accepted embedded-text PDFs, build native sentence -> page-relative geometry, spoken overlays, continuous-viewport auto-follow/jump semantics, and explicit confidence downgrade behavior without changing canonical text ownership.
 
