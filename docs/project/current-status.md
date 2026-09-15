@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-15 after Goal 0022 A7 director acceptance and integration.
+Updated: 2026-09-15 after Goal 0022 A8 director rejection and A9 reopening.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -133,7 +133,7 @@ Real-desktop acceptance: `docs/work/reviews/0020-a3-real-desktop-acceptance.md`.
 
 ## Gate 4 — PDF text/TTS/highlight synchronization
 
-**ACTIVE CORE PRODUCT GATE — GOAL 0022 A7 IN REAL-DESKTOP QA**
+**ACTIVE CORE PRODUCT GATE — GOAL 0022 A9 READY**
 
 The Gate-4 architecture remains native-first and recovery-isolated. Quack-check is **not** trusted as baseline infrastructure and cannot block visual open. The accepted recovery boundary is documented in `docs/architecture/pdf-text-recovery-boundary-2026-09.md`.
 
@@ -147,25 +147,32 @@ The standalone `sguzman/quack-check` repository is not a runtime dependency. Goa
 
 ### Goal 0022 — native PDF embedded-text/TTS trustworthy path
 
-**A7 DIRECTOR-ACCEPTED + INTEGRATED — REAL-DESKTOP QA AUTHORIZED**
+**READY A9 — A7 REJECTED IN REAL-DESKTOP QA; A8 REJECTED BEFORE FURTHER HUMAN QA**
 
-A7 closes the A6 lifecycle/boundedness blockers while preserving A6's canonical correctness work:
+A7 physical QA proved the native visual/text foundation while exposing three product defects: inconsistent natural PDF TTS continuation at native page boundaries, a Search panel that disappeared immediately, and rapid Text-only toggling that could corrupt EPUB presentation.
 
-- one process-wide `lanternleaf-pdf-retirement` worker replaces per-snapshot retirement-thread creation;
-- enriched snapshot/session/document retirement hands shared document-scale ownership off the interactive path;
-- trusted PDF global canonical identity, TTS page bases, before/after checks, stats, bookmarks, and global-sentence page lookup use prepared prefix indexes rather than legacy page scans;
-- live search reconciliation remains off-thread and source/generation/query-revision stale-safe;
-- later-page canonical identity, first-sample identity, and true final-document exhaustion remain covered;
-- `snapshot_enriched_pdf_bounded()` remains the explicit current-page-local trusted publication path;
-- visual PDF browsing remains independent of enrichment/cache/search success;
-- exact visual sentence sync remains disabled until real geometry exists.
+A8 source work correctly moved in the right direction:
 
-Substantive A7 commit `9dc06b630eb35b19e725f79d012144450e196957` passed fresh hosted workflow `34973136075` (`native-workspace` and `hosted-renderer-probe`). Final A7 tree was squash-integrated through PR #29 as main commit `f19728157fd683b62c95ec40b72a2bf719202b9f`.
+- `SetTextOnly { enabled }` replaces relative-toggle correctness for the new egui/web path;
+- Search-panel visibility is persistent and separate from the one-shot focus request;
+- a real Search `TextEdit` exists;
+- PDF TTS has an explicit next-non-empty-native-page continuation helper;
+- hosted workflow `34986927340` passed on substantive A8 commit `7c1e04883a67f33d68e355b8280b4abac29706b9`.
 
-Director acceptance: `docs/work/reviews/0022-a7-director-acceptance.md`.
+Director review still rejected A8 because:
+
+- actual Search editor focus is not authoritative for shortcut suppression; after the one-shot focus flag is consumed, typing query keys can also execute reader shortcuts;
+- the Search editor is rebuilt each frame from asynchronously acknowledged `reader_ui.search_query`, so delayed `ReaderUpdated` events can overwrite newer typed characters;
+- the new natural PDF continuation branch lacks a true `TtsRuntimeMode::Simulated` runtime-loop regression, and `apply_tts_sentence_boundary()` still compares a document-global canonical ID against a page-local plan boundary.
+
+A9 owns those corrections while preserving A8's idempotent Text-only semantics and accepted A7 architecture.
+
+Authoritative contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
+A8 rejection: `docs/work/reviews/0022-a8-director-rejection.md`.
+A7 physical rejection: `docs/work/reviews/0022-a7-real-desktop-rejection.md`.
 
 ## Workflow status
 
-**GOAL 0022 A7 — REAL-DESKTOP QA NEXT**
+**GOAL 0022 A9 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
 
-Human QA is now authorized for Goal 0022 A7. Goals 0015, 0017, 0018, and 0021 remain queued. Goal 0011 remains deferred. Exact native PDF spoken overlays/follow come only after Goal 0022 is physically accepted. Hostile-PDF Quack-check/Docling/OCR recovery also remains later, after the native trustworthy-text baseline is physically accepted.
+No human QA is authorized for A8. Goals 0015, 0017, 0018, and 0021 remain queued. Goal 0011 remains deferred. Exact native PDF spoken overlays/follow come only after Goal 0022 is physically accepted. Hostile-PDF Quack-check/Docling/OCR recovery also remains later, after the native trustworthy-text baseline is physically accepted.

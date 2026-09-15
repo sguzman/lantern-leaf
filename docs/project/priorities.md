@@ -100,34 +100,37 @@ Physical QA verified continuous adjacent-page scrolling, extremely responsive ra
 
 ## P3.2 — Goal 0021: fit-to-manual zoom transition polish
 
-**QUEUED — MINOR POLISH**
+**QUEUED — MINOR PDF UX POLISH**
 
 After Fit Width/Fit Page, `+/-` should step from the current effective fit percentage rather than the remembered prior manual level.
 
 ## P4 — Goal 0022: trustworthy native PDF embedded text + TTS
 
-**A7 DIRECTOR-ACCEPTED + INTEGRATED — REAL-DESKTOP QA IS CURRENT SUBSTANTIVE PRIORITY**
+**READY A9 — CURRENT SUBSTANTIVE PRODUCT PRIORITY**
 
-A1 through A6 were rejected before human QA. A7 closes the remaining source-level blockers and has been integrated to `main` for physical verification.
+A7 was the first attempt authorized for physical QA. It preserved the native visual/text foundation but failed physically on natural PDF page-boundary TTS continuation, Search-panel usability, and rapid EPUB Text-only toggling.
 
-Accepted A7 architecture/evidence:
+A8 corrected important pieces and passed fresh hosted Windows workflow `34986927340` on substantive commit `7c1e04883a67f33d68e355b8280b4abac29706b9`:
 
-- shared immutable trusted PDF text remains the canonical document-scale model;
-- one process-wide retirement worker replaces per-snapshot OS-thread creation;
-- enriched projection/global identity/TTS page calculations use prepared prefix indexes rather than document-length page scans;
-- global-sentence -> native-page lookup is binary-search based;
-- current live mutable session state remains authoritative at adoption time;
-- live search reconciliation remains off-thread and source/generation/query-revision stale-safe;
-- later-page/global canonical identity, first-sample identity, and final-document exhaustion remain covered;
-- trusted policy enables Text-only, document-wide search, and ordinary Windows TTS while exact visual sentence synchronization remains disabled;
-- visual PDF browsing remains independent of enrichment/cache/search failure;
-- fresh hosted Windows workflow `34973136075` passed `native-workspace` and `hosted-renderer-probe` on substantive A7 commit `9dc06b630eb35b19e725f79d012144450e196957`.
+- idempotent `SetTextOnly { enabled }` desired-state semantics;
+- persistent Search-panel visibility plus a real `TextEdit`;
+- explicit PDF next-non-empty-page TTS transition;
+- preserved one-Pdfium-owner, bounded-projection, off-egui cache/search/document work, and Goal 0020 visual responsiveness.
 
-Final A7 tree was squash-integrated through PR #29 as main commit `f19728157fd683b62c95ec40b72a2bf719202b9f`.
+A8 is still rejected before further human QA because director source review found:
 
-Hard exclusions remain: Quack-check, Python, Docling, OCR, exact sentence overlays, and hostile-PDF recovery.
+- Search shortcut suppression still follows only the one-shot focus-request flag rather than actual editor focus, so typed query keys can execute reader shortcuts;
+- Search query text is reconstructed every frame from asynchronously acknowledged reader state, creating a lost/flickering-keystroke race;
+- the physical TTS failure path is still not exercised by a real simulated `TtsRuntime` loop regression;
+- `apply_tts_sentence_boundary()` still compares document-global canonical identity against a page-local normalization-plan boundary.
 
-Current next action is focused real-desktop QA using a real text-bearing PDF, then a representative EPUB regression. Director acceptance checklist: `docs/work/reviews/0022-a7-director-acceptance.md`.
+A9 owns those focused corrections. Preserve A8's idempotent Text-only work and all accepted A7 architecture.
+
+Hard exclusions remain: Quack-check, Python, Docling, OCR, exact PDF visual sentence overlays, and hostile-PDF recovery.
+
+Authoritative A9 contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
+A8 director rejection: `docs/work/reviews/0022-a8-director-rejection.md`.
+A7 real-desktop rejection: `docs/work/reviews/0022-a7-real-desktop-rejection.md`.
 
 ## P4.1 — Native PDF sentence geometry/highlight/follow
 
