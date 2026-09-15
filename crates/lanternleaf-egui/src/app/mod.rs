@@ -462,6 +462,8 @@ struct LanternLeafApp {
     persistence_logged: bool,
     last_reader_source: Option<String>,
     last_reader_source_for_persistence: Option<String>,
+    pretty_session_generation: u64,
+    pretty_session_active: bool,
     effect_dispatcher: EffectDispatcher,
     shell_state: ShellState,
     layout_policy: LayoutPolicy,
@@ -1120,6 +1122,8 @@ impl LanternLeafApp {
             persistence_logged: false,
             last_reader_source: None,
             last_reader_source_for_persistence: None,
+            pretty_session_generation: 0,
+            pretty_session_active: false,
             effect_dispatcher,
             shell_state: ShellState::default(),
             layout_policy: LayoutPolicy::default(),
@@ -1283,6 +1287,8 @@ impl LanternLeafApp {
             persistence_logged: false,
             last_reader_source: None,
             last_reader_source_for_persistence: None,
+            pretty_session_generation: 0,
+            pretty_session_active: false,
             effect_dispatcher,
             shell_state: ShellState::default(),
             layout_policy: LayoutPolicy::default(),
@@ -3685,6 +3691,25 @@ impl eframe::App for LanternLeafApp {
         );
         let reader_snapshot = snapshot.reader_document.snapshot.as_deref();
         let reader_source = reader_snapshot.map(|reader| reader.source_path.clone());
+        if reader_snapshot.is_some() && !self.pretty_session_active {
+            self.pretty_session_generation = self.pretty_session_generation.wrapping_add(1);
+            self.pretty_session_active = true;
+            self.pretty_page_cache_key = None;
+            self.pretty_page_cache_blocks.clear();
+            self.pretty_sentence_targets.clear();
+            self.pretty_block_heights.clear();
+            self.pretty_build_pending = None;
+            self.pretty_reflow_transaction = None;
+        } else if reader_snapshot.is_none() && self.pretty_session_active {
+            self.pretty_session_generation = self.pretty_session_generation.wrapping_add(1);
+            self.pretty_session_active = false;
+            self.pretty_page_cache_key = None;
+            self.pretty_page_cache_blocks.clear();
+            self.pretty_sentence_targets.clear();
+            self.pretty_block_heights.clear();
+            self.pretty_build_pending = None;
+            self.pretty_reflow_transaction = None;
+        }
         if self.last_reader_source != reader_source {
             self.pretty_page_cache_key = None;
             self.pretty_page_cache_blocks.clear();
@@ -4195,6 +4220,7 @@ mod tests {
         snapshot.page_sentence_counts = vec![1].into();
         let key = PrettyPageCacheKey {
             source_path: snapshot.source_path.clone(),
+            session_generation: 0,
             page: 0,
             pretty_kind: snapshot.pretty_kind,
             text_only: false,
@@ -4221,6 +4247,29 @@ mod tests {
         assert_eq!(result.key, key);
         assert!(!result.blocks.is_empty());
         drop(request_tx);
+    }
+
+    #[test]
+    fn stale_same_source_pretty_result_is_rejected_after_session_reopen() {
+        let old = PrettyPageCacheKey {
+            source_path: "same.epub".to_string(),
+            session_generation: 4,
+            page: 0,
+            pretty_kind: PrettyKind::Html,
+            text_only: false,
+        };
+        let reopened = PrettyPageCacheKey {
+            session_generation: 5,
+            ..old.clone()
+        };
+        assert!(!LanternLeafApp::pretty_build_result_is_current(
+            Some(&reopened),
+            &old
+        ));
+        assert!(LanternLeafApp::pretty_build_result_is_current(
+            Some(&reopened),
+            &reopened
+        ));
     }
 
     #[test]

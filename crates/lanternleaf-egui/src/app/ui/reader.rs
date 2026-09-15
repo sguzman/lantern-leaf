@@ -1561,6 +1561,7 @@ impl LanternLeafApp {
     fn refresh_pretty_cache(&mut self, snapshot: &ReaderSnapshot) {
         let key = PrettyPageCacheKey {
             source_path: snapshot.source_path.clone(),
+            session_generation: self.pretty_session_generation,
             page: if snapshot.pretty_kind == PrettyKind::Html {
                 0
             } else {
@@ -1593,7 +1594,10 @@ impl LanternLeafApp {
     fn poll_pretty_builds(&mut self) -> bool {
         let mut completed = false;
         while let Ok(result) = self.pretty_build_rx.try_recv() {
-            if self.pretty_build_pending.as_ref() != Some(&result.key) {
+            if !Self::pretty_build_result_is_current(
+                self.pretty_build_pending.as_ref(),
+                &result.key,
+            ) {
                 continue;
             }
             self.pretty_page_cache_blocks = result.blocks;
@@ -1604,6 +1608,13 @@ impl LanternLeafApp {
             completed = true;
         }
         completed
+    }
+
+    pub(crate) fn pretty_build_result_is_current(
+        pending: Option<&PrettyPageCacheKey>,
+        result: &PrettyPageCacheKey,
+    ) -> bool {
+        pending == Some(result)
     }
 
     fn pretty_block_heights_for(

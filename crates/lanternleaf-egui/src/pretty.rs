@@ -89,6 +89,7 @@ pub struct PrettyImage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrettyPageCacheKey {
     pub source_path: String,
+    pub session_generation: u64,
     pub page: usize,
     pub pretty_kind: lanternleaf_app::contracts::PrettyKind,
     pub text_only: bool,

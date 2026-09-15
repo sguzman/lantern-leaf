@@ -33,6 +33,7 @@ pub enum TtsRuntimeMode {
 pub struct SimulatedBoundaryDriver {
     pending: Mutex<VecDeque<tts::TtsSentenceBoundary>>,
     output: Mutex<Option<mpsc::Sender<tts::TtsSentenceBoundary>>>,
+    output_history: Mutex<Vec<(u64, mpsc::Sender<tts::TtsSentenceBoundary>)>>,
     paused: AtomicBool,
     generation: AtomicU64,
 }
@@ -83,12 +84,33 @@ impl SimulatedBoundaryDriver {
             return false;
         }
         if let Ok(mut guard) = self.output.lock() {
-            *guard = Some(output);
+            *guard = Some(output.clone());
+        }
+        if let Ok(mut history) = self.output_history.lock() {
+            history.push((generation, output));
+            if history.len() > 4 {
+                history.remove(0);
+            }
         }
         if let Ok(mut queue) = self.pending.lock() {
             *queue = boundaries.into_iter().collect();
         }
         true
+    }
+
+    #[cfg(test)]
+    fn emit_stale_previous(&self, boundary: tts::TtsSentenceBoundary) -> bool {
+        let sender = self.output_history.lock().ok().and_then(|history| {
+            history
+                .iter()
+                .rev()
+                .nth(1)
+                .map(|(_, sender)| sender.clone())
+        });
+        sender.is_some_and(|sender| {
+            let _ = sender.send(boundary);
+            true
+        })
     }
 }
 
@@ -1894,6 +1916,173 @@ mod tests {
             ]
         );
         let _ = normalizer;
+    }
+
+    #[test]
+    fn async_simulated_runtime_rejects_stale_seek_boundaries_and_preserves_identity() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let runtime = TtsRuntime::new_with_mode(normalizer.clone(), TtsRuntimeMode::Simulated);
+        let driver = runtime
+            .simulated_boundary_driver()
+            .expect("simulated runtime exposes its boundary driver");
+        let mut reader = session::ReaderSession::from_pages_for_test(
+            PathBuf::from("/tmp/a11-burst-seek.pdf"),
+            "a11-burst-seek.pdf".to_string(),
+            vec![
+                "Zero. One.".to_string(),
+                String::new(),
+                "Two. Three.".to_string(),
+            ],
+            vec![
+                vec!["Zero.".to_string(), "One.".to_string()],
+                Vec::new(),
+                vec!["Two.".to_string(), "Three.".to_string()],
+            ],
+        );
+        reader.set_pdf_page_count(3);
+        runtime.set_session(Some(reader));
+
+        fn wait_for_sentence(
+            runtime: &TtsRuntime,
+            driver: &SimulatedBoundaryDriver,
+            expected: usize,
+        ) -> TtsCursor {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut latest = None;
+            while Instant::now() < deadline {
+                let _ = driver.emit_next();
+                latest = runtime
+                    .snapshot()
+                    .map(|snapshot| (snapshot.current_page, snapshot.highlighted_canonical_idx));
+                if let Some(event) = runtime
+                    .collect_events()
+                    .into_iter()
+                    .find(|event| event.kind == TtsRuntimeEventKind::SentenceStarted)
+                    && event
+                        .cursor
+                        .is_some_and(|cursor| cursor.canonical_display_idx == Some(expected))
+                {
+                    return event.cursor.expect("cursor checked above");
+                }
+                thread::yield_now();
+            }
+            panic!("timed out waiting for canonical sentence {expected}; latest={latest:?}");
+        }
+
+        assert!(runtime.submit_command(TtsCommand::PlayFromPageStart));
+        let first = wait_for_sentence(&runtime, &driver, 0);
+        assert_eq!((first.page, first.audio_idx), (0, Some(0)));
+
+        let expected_forward = [(1, 0), (2, 2), (3, 2)];
+        for (expected_id, expected_page) in expected_forward {
+            assert!(runtime.submit_command(TtsCommand::SeekNext));
+            let cursor_deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < cursor_deadline {
+                if runtime
+                    .snapshot()
+                    .is_some_and(|snapshot| snapshot.highlighted_canonical_idx == Some(expected_id))
+                {
+                    break;
+                }
+                thread::yield_now();
+            }
+            let snapshot = runtime
+                .snapshot()
+                .expect("worker-path seek must retain a live session");
+            assert_eq!(snapshot.current_page, expected_page);
+            assert_eq!(snapshot.highlighted_canonical_idx, Some(expected_id));
+            let _ = driver.emit_next();
+            let _ = runtime.collect_events();
+        }
+
+        assert!(
+            driver.emit_stale_previous(tts::TtsSentenceBoundary {
+                audio_idx: 0,
+                canonical_display_id: 0,
+            }),
+            "the superseded playback generation must have a channel for the deliberately delayed stale event"
+        );
+        thread::sleep(Duration::from_millis(20));
+        assert_eq!(
+            runtime
+                .snapshot()
+                .and_then(|snapshot| snapshot.highlighted_canonical_idx),
+            Some(3),
+            "a stale first sample from the superseded generation must not replay sentence zero"
+        );
+
+        for expected_id in [2, 1, 0] {
+            assert!(runtime.submit_command(TtsCommand::SeekPrev));
+            let cursor_deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < cursor_deadline {
+                if runtime
+                    .snapshot()
+                    .is_some_and(|snapshot| snapshot.highlighted_canonical_idx == Some(expected_id))
+                {
+                    break;
+                }
+                thread::yield_now();
+            }
+            let snapshot = runtime
+                .snapshot()
+                .expect("worker-path previous seek must retain a live session");
+            assert_eq!(snapshot.highlighted_canonical_idx, Some(expected_id));
+            let _ = driver.emit_next();
+            let _ = runtime.collect_events();
+        }
+
+        assert!(runtime.submit_command(TtsCommand::SeekPrev));
+        thread::sleep(Duration::from_millis(20));
+        assert_eq!(
+            runtime
+                .snapshot()
+                .and_then(|snapshot| snapshot.highlighted_canonical_idx),
+            Some(0),
+            "beginning clamp must not replay or underflow"
+        );
+    }
+
+    #[test]
+    fn async_simulated_runtime_seek_path_has_epub_parity() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let runtime = TtsRuntime::new_with_mode(normalizer, TtsRuntimeMode::Simulated);
+        let driver = runtime
+            .simulated_boundary_driver()
+            .expect("simulated runtime exposes its boundary driver");
+        runtime.set_session(Some(build_test_session(&[&[
+            "Epub zero.",
+            "Epub one.",
+            "Epub two.",
+        ]])));
+        assert!(runtime.submit_command(TtsCommand::Play));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut observed = Vec::new();
+        while observed.len() < 3 && Instant::now() < deadline {
+            let _ = driver.emit_next();
+            observed.extend(
+                runtime
+                    .collect_events()
+                    .into_iter()
+                    .filter(|event| event.kind == TtsRuntimeEventKind::SentenceStarted)
+                    .filter_map(|event| {
+                        event.cursor.and_then(|cursor| cursor.canonical_display_idx)
+                    }),
+            );
+            thread::yield_now();
+        }
+        assert_eq!(observed, vec![0, 1, 2]);
+        assert!(runtime.submit_command(TtsCommand::SeekPrev));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if runtime
+                .snapshot()
+                .is_some_and(|snapshot| snapshot.tts.current_sentence_idx == Some(1))
+            {
+                return;
+            }
+            thread::yield_now();
+        }
+        panic!("EPUB worker-path SeekPrev did not settle on the prior sentence");
     }
 
     #[test]
