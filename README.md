@@ -1,4 +1,4 @@
-# LanternLeaf
+# 🔵 LanternLeaf
 
 Rust desktop reader for EPUB/TXT/Markdown with synchronized TTS playback, sentence highlighting, bookmark persistence, and a starter library flow (recent books + Calibre).
 
