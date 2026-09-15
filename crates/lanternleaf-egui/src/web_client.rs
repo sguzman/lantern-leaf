@@ -14,8 +14,8 @@ use eframe::egui;
 use lanternleaf_core::session::{PrettyKind, ReaderSnapshot, SessionCommand, TtsPlaybackState};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, trace, warn};
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 use web_sys::{
     Document, Element, ErrorEvent, HtmlAudioElement, HtmlDivElement, MessageEvent, WebSocket,
 };
@@ -32,14 +32,19 @@ enum ClientEvent {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ServerEvent {
-    Snapshot { snapshot: ReaderSnapshot },
+    Snapshot {
+        snapshot: ReaderSnapshot,
+    },
     TtsBatch {
         batch_id: String,
         page: usize,
         start_idx: usize,
         items: Vec<TtsBatchItem>,
     },
-    Error { code: String, message: String },
+    Error {
+        code: String,
+        message: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -129,7 +134,11 @@ impl WebClientApp {
             let loc = window.location();
             let protocol = loc.protocol().unwrap_or_else(|_| "http:".to_string());
             let host = loc.host().unwrap_or_else(|_| "localhost".to_string());
-            let ws_scheme = if protocol.starts_with("https") { "wss" } else { "ws" };
+            let ws_scheme = if protocol.starts_with("https") {
+                "wss"
+            } else {
+                "ws"
+            };
             format!("{ws_scheme}://{host}{url}")
         };
 
@@ -167,12 +176,11 @@ impl WebClientApp {
         onerror.forget();
 
         let state_close = self.ws_state.clone();
-        let onclose = Closure::<dyn FnMut(web_sys::CloseEvent)>::new(
-            move |_e: web_sys::CloseEvent| {
+        let onclose =
+            Closure::<dyn FnMut(web_sys::CloseEvent)>::new(move |_e: web_sys::CloseEvent| {
                 warn!("WebSocket closed");
                 state_close.borrow_mut().connected = false;
-            },
-        );
+            });
         ws.set_onclose(Some(onclose.as_ref().unchecked_ref()));
         onclose.forget();
 
@@ -289,7 +297,11 @@ impl WebClientApp {
                 self.ws_state.borrow_mut().server_url = server_url;
             }
             ui.separator();
-            ui.label(if connected { "connected" } else { "disconnected" });
+            ui.label(if connected {
+                "connected"
+            } else {
+                "disconnected"
+            });
             if let Some(err) = last_error {
                 ui.separator();
                 ui.colored_label(egui::Color32::RED, err);
@@ -439,7 +451,11 @@ impl eframe::App for WebClientApp {
 
         let (connected, last_error, snapshot) = {
             let state = self.ws_state.borrow();
-            (state.connected, state.last_error.clone(), state.snapshot.clone())
+            (
+                state.connected,
+                state.last_error.clone(),
+                state.snapshot.clone(),
+            )
         };
 
         if snapshot.is_some() && self.mode != UiMode::Reader {
@@ -506,12 +522,14 @@ impl eframe::App for WebClientApp {
                                     let selected = highlight_idx == Some(idx);
                                     let mut text = egui::RichText::new(sentence);
                                     if selected {
-                                        text =
-                                            text.background_color(egui::Color32::from_rgb(60, 80, 130));
+                                        text = text
+                                            .background_color(egui::Color32::from_rgb(60, 80, 130));
                                     }
                                     if ui.selectable_label(selected, text).clicked() {
                                         self.send(&ClientEvent::SessionCommand {
-                                            command: SessionCommand::SentenceClick { sentence_idx: idx },
+                                            command: SessionCommand::SentenceClick {
+                                                sentence_idx: idx,
+                                            },
                                         });
                                         self.send(&ClientEvent::SessionCommand {
                                             command: SessionCommand::TtsPlayFromHighlight,
@@ -582,7 +600,9 @@ impl PrettyDom {
                 self.last_anchor_idx = None;
             }
         } else {
-            div.set_inner_html("<div style=\"padding: 16px;\">No HTML available for this source.</div>");
+            div.set_inner_html(
+                "<div style=\"padding: 16px;\">No HTML available for this source.</div>",
+            );
             self.last_html_hash = 0;
             self.last_anchor_idx = None;
         }
@@ -616,11 +636,7 @@ impl PrettyDom {
             return existing.clone();
         }
 
-        let div: HtmlDivElement = document
-            .create_element("div")
-            .unwrap()
-            .dyn_into()
-            .unwrap();
+        let div: HtmlDivElement = document.create_element("div").unwrap().dyn_into().unwrap();
         div.set_id("lanternleaf_pretty_dom");
         let style = div.style();
         let _ = style.set_property("z-index", "10");

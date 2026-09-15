@@ -671,7 +671,15 @@ fn structured_document_from_html(
                     .map(|parent| {
                         matches!(
                             parent.name(),
-                            "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "p" | "li" | "blockquote" | "table"
+                            "h1" | "h2"
+                                | "h3"
+                                | "h4"
+                                | "h5"
+                                | "h6"
+                                | "p"
+                                | "li"
+                                | "blockquote"
+                                | "table"
                         )
                     })
                     .unwrap_or(false);
@@ -698,7 +706,8 @@ fn structured_document_from_html(
             if !plain_text.is_empty() && !matches!(tag, "img" | "hr") {
                 let local_sentences = crate::text_utils::split_sentences(&plain_text);
                 let mut source_cursor = 0usize;
-                for (local_sentence_index, display_text) in local_sentences.into_iter().enumerate() {
+                for (local_sentence_index, display_text) in local_sentences.into_iter().enumerate()
+                {
                     let display_text = display_text.trim().to_string();
                     if display_text.is_empty() {
                         continue;
@@ -740,7 +749,11 @@ fn structured_document_from_html(
     } else {
         canonical_text.join("\n\n")
     };
-    let coverage = if sentences.is_empty() { 1.0 } else { sentences.len() as f32 / sentences.len() as f32 };
+    let coverage = if sentences.is_empty() {
+        1.0
+    } else {
+        sentences.len() as f32 / sentences.len() as f32
+    };
     tracing::info!(
         chapters = chapters.len(),
         canonical_sentences = sentences.len(),
@@ -749,11 +762,15 @@ fn structured_document_from_html(
         coverage,
         "Built canonical sentence provenance in one structured source traversal"
     );
-    (tts_text, crate::epub_loader::StructuredDocument { blocks, sentences })
+    (
+        tts_text,
+        crate::epub_loader::StructuredDocument { blocks, sentences },
+    )
 }
 
 fn structured_epub_chapters(html: &str) -> Vec<(usize, String)> {
-    let selector = Selector::parse("section[data-ll-epub-chapter]").expect("valid EPUB chapter selector");
+    let selector =
+        Selector::parse("section[data-ll-epub-chapter]").expect("valid EPUB chapter selector");
     let document = Html::parse_fragment(html);
     let mut chapters = document
         .select(&selector)

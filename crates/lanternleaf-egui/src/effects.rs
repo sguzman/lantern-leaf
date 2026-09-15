@@ -1,6 +1,6 @@
 use eframe::egui;
-use std::path::PathBuf;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Instant;
@@ -173,8 +173,9 @@ impl EffectDispatcher {
                     {
                         let error = BridgeError {
                             code: "effect_panicked".to_string(),
-                            message: "A runtime effect worker panicked; the operation was terminated."
-                                .to_string(),
+                            message:
+                                "A runtime effect worker panicked; the operation was terminated."
+                                    .to_string(),
                         };
                         emit_failure_progress(
                             &failure_effect,
@@ -1543,7 +1544,10 @@ mod tests {
             }
             event
         });
-        assert!(terminal.is_some(), "effect panic must terminalize operation");
+        assert!(
+            terminal.is_some(),
+            "effect panic must terminalize operation"
+        );
     }
 
     struct TestConfigService {

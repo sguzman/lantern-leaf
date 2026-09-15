@@ -29,14 +29,14 @@ fn make_reader_snapshot(source_path: &str) -> session::ReaderSnapshot {
         tts_current_sentence_text: None,
         page_text: "page".to_string(),
         sentences: vec!["sentence".to_string()],
-        canonical_sentences: vec!["sentence".to_string()],
-        page_sentence_counts: vec![1],
-        sentence_anchor_map: vec![Some(0)],
+        canonical_sentences: vec!["sentence".to_string()].into(),
+        page_sentence_counts: vec![1].into(),
+        sentence_anchor_map: vec![Some(0)].into(),
         structured_document: None,
         highlighted_canonical_idx: Some(0),
         highlighted_sentence_idx: Some(0),
         search_query: String::new(),
-        search_matches: vec![0],
+        search_matches: vec![0].into(),
         selected_search_match: Some(0),
         settings: session::ReaderSettingsView {
             theme: config::ThemeMode::Day,
@@ -103,6 +103,7 @@ fn make_reader_snapshot(source_path: &str) -> session::ReaderSnapshot {
             show_stats: false,
             show_tts: true,
         },
+        pdf_document_handle: None,
     }
 }
 

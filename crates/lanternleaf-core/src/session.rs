@@ -6,8 +6,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, OnceLock};
+#[cfg(test)]
+use std::thread::ThreadId;
 use std::time::Instant;
 use ts_rs::TS;
 
@@ -22,6 +27,69 @@ pub use document_loading::{
 };
 
 const BASE_WPM: f64 = 170.0;
+
+#[cfg(test)]
+static PDF_DEFERRED_DROP_THREADS: OnceLock<Mutex<Vec<ThreadId>>> = OnceLock::new();
+#[cfg(test)]
+static PDF_ENRICHED_LINEAR_SCAN_GUARD: AtomicUsize = AtomicUsize::new(0);
+
+struct PdfRetirementPayload {
+    document: Option<Arc<PreparedPdfEmbeddedText>>,
+    canonical_sentences: Arc<Vec<String>>,
+    page_sentence_counts: Arc<Vec<usize>>,
+    search_matches: Arc<Vec<usize>>,
+}
+
+static PDF_RETIREMENT_TX: OnceLock<Sender<PdfRetirementPayload>> = OnceLock::new();
+
+fn pdf_retirement_sender() -> &'static Sender<PdfRetirementPayload> {
+    PDF_RETIREMENT_TX.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<PdfRetirementPayload>();
+        std::thread::Builder::new()
+            .name("lanternleaf-pdf-retirement".to_string())
+            .spawn(move || {
+                while let Ok(payload) = rx.recv() {
+                    let PdfRetirementPayload {
+                        document,
+                        canonical_sentences,
+                        page_sentence_counts,
+                        search_matches,
+                    } = payload;
+                    drop((
+                        document,
+                        canonical_sentences,
+                        page_sentence_counts,
+                        search_matches,
+                    ));
+                    #[cfg(test)]
+                    record_pdf_deferred_drop();
+                }
+            })
+            .expect("start PDF retirement worker");
+        tx
+    })
+}
+
+fn retire_pdf_payload(payload: PdfRetirementPayload) {
+    // The worker is process-scoped and never shuts down during ordinary app
+    // lifetime, so this handoff cannot fall back to document-scale destruction
+    // on the caller/render thread.
+    let _ = pdf_retirement_sender().send(payload);
+}
+
+#[cfg(test)]
+fn record_pdf_deferred_drop() {
+    PDF_DEFERRED_DROP_THREADS
+        .get_or_init(|| Mutex::new(Vec::new()))
+        .lock()
+        .expect("drop probe lock")
+        .push(std::thread::current().id());
+}
+
+#[cfg(test)]
+fn record_enriched_linear_scan_fallback() {
+    PDF_ENRICHED_LINEAR_SCAN_GUARD.fetch_add(1, Ordering::SeqCst);
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq, TS)]
 #[ts(export)]
@@ -176,21 +244,43 @@ pub struct ReaderSnapshot {
     pub tts_current_sentence_text: Option<String>,
     pub page_text: String,
     pub sentences: Vec<String>,
-    pub canonical_sentences: Vec<String>,
-    pub page_sentence_counts: Vec<usize>,
-    pub sentence_anchor_map: Vec<Option<usize>>,
+    pub canonical_sentences: Arc<Vec<String>>,
+    pub page_sentence_counts: Arc<Vec<usize>>,
+    pub sentence_anchor_map: Arc<Vec<Option<usize>>>,
     #[serde(skip)]
     #[ts(skip)]
     pub structured_document: Option<Arc<crate::epub_loader::StructuredDocument>>,
     pub highlighted_canonical_idx: Option<usize>,
     pub highlighted_sentence_idx: Option<usize>,
     pub search_query: String,
-    pub search_matches: Vec<usize>,
+    pub search_matches: Arc<Vec<usize>>,
     pub selected_search_match: Option<usize>,
     pub settings: ReaderSettingsView,
     pub tts: ReaderTtsView,
     pub stats: ReaderStats,
     pub panels: PanelState,
+    #[serde(skip)]
+    #[ts(skip)]
+    pub pdf_document_handle: Option<Arc<PreparedPdfEmbeddedText>>,
+}
+
+impl Drop for ReaderSnapshot {
+    fn drop(&mut self) {
+        let Some(document) = self.pdf_document_handle.take() else {
+            return;
+        };
+        let canonical_sentences =
+            std::mem::replace(&mut self.canonical_sentences, Arc::new(Vec::new()));
+        let page_sentence_counts =
+            std::mem::replace(&mut self.page_sentence_counts, Arc::new(Vec::new()));
+        let search_matches = std::mem::replace(&mut self.search_matches, Arc::new(Vec::new()));
+        retire_pdf_payload(PdfRetirementPayload {
+            document: Some(document),
+            canonical_sentences,
+            page_sentence_counts,
+            search_matches,
+        });
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -305,8 +395,13 @@ pub struct ReaderSession {
     highlighted_audio_idx: Option<usize>,
     pub text_only_mode: bool,
     search_query: String,
-    search_matches: Vec<usize>,
+    search_query_revision: u64,
+    search_matches: Arc<Vec<usize>>,
     selected_search_match: Option<usize>,
+    pdf_sentence_page_hints: Vec<usize>,
+    pdf_sentence_page_local_indices: Vec<usize>,
+    /// Shared immutable native PDF text state. Mutable page/cursor/settings state stays here.
+    pdf_text_document: Option<Arc<PreparedPdfEmbeddedText>>,
     tts_state: TtsPlaybackState,
     current_plan_page: Option<usize>,
     current_plan_display_start: usize,
@@ -315,7 +410,87 @@ pub struct ReaderSession {
     snapshot_constructions: Arc<AtomicUsize>,
 }
 
+impl Drop for ReaderSession {
+    fn drop(&mut self) {
+        let Some(document) = self.pdf_text_document.take() else {
+            return;
+        };
+        retire_pdf_payload(PdfRetirementPayload {
+            document: Some(document),
+            canonical_sentences: Arc::new(Vec::new()),
+            page_sentence_counts: Arc::new(Vec::new()),
+            search_matches: Arc::new(Vec::new()),
+        });
+    }
+}
+
+/// Immutable document-scale work prepared away from the egui thread before a
+/// native PDF session is updated.  The UI commit only swaps these already-built
+/// vectors into the live session.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PreparedPdfEmbeddedText {
+    pub pages: Arc<Vec<String>>,
+    pub tts_text: Arc<String>,
+    pub canonical_sentences: Arc<Vec<String>>,
+    pub page_sentences: Arc<Vec<Vec<String>>>,
+    pub page_sentence_counts: Arc<Vec<usize>>,
+    pub page_word_counts: Arc<Vec<usize>>,
+    pub sentence_anchor_maps: Arc<Vec<Vec<Option<usize>>>>,
+    pub sentence_page_hints: Arc<Vec<usize>>,
+    pub sentence_page_local_indices: Arc<Vec<usize>>,
+    pub search_matches: Arc<Vec<usize>>,
+    pub search_query: String,
+    pub page_word_prefix_sums: Arc<Vec<usize>>,
+    pub page_sentence_prefix_sums: Arc<Vec<usize>>,
+}
+
 impl ReaderSession {
+    pub(super) fn pdf_text_document(&self) -> Option<&PreparedPdfEmbeddedText> {
+        self.pdf_text_document.as_deref()
+    }
+
+    pub(super) fn active_page_sentences(&self) -> &[Vec<String>] {
+        self.pdf_text_document
+            .as_deref()
+            .map(|document| document.page_sentences.as_slice())
+            .unwrap_or(self.raw_page_sentences.as_slice())
+    }
+
+    pub(super) fn active_page_sentence_counts(&self) -> &[usize] {
+        self.pdf_text_document
+            .as_deref()
+            .map(|document| document.page_sentence_counts.as_slice())
+            .unwrap_or(self.page_sentence_counts.as_slice())
+    }
+
+    pub(super) fn active_page_word_counts(&self) -> &[usize] {
+        self.pdf_text_document
+            .as_deref()
+            .map(|document| document.page_word_counts.as_slice())
+            .unwrap_or(self.page_word_counts.as_slice())
+    }
+
+    pub(super) fn active_page_text(&self, page: usize) -> Option<&str> {
+        self.pdf_text_document
+            .as_deref()
+            .map(|document| document.pages.get(page).map(String::as_str))
+            .unwrap_or_else(|| self.pages.get(page).map(String::as_str))
+    }
+
+    pub(super) fn active_pdf_sentence_page_hints(&self) -> &[usize] {
+        self.pdf_text_document
+            .as_deref()
+            .map(|document| document.sentence_page_hints.as_slice())
+            .unwrap_or(self.pdf_sentence_page_hints.as_slice())
+    }
+
+    pub(super) fn active_pdf_sentence_page_local_indices(&self) -> &[usize] {
+        self.pdf_text_document
+            .as_deref()
+            .map(|document| document.sentence_page_local_indices.as_slice())
+            .unwrap_or(self.pdf_sentence_page_local_indices.as_slice())
+    }
+
     pub fn structured_document(&self) -> Option<&crate::epub_loader::StructuredDocument> {
         self.structured_document.as_deref()
     }
@@ -330,12 +505,25 @@ impl ReaderSession {
         self.global_display_idx().or(self.highlighted_canonical_idx)
     }
 
+    pub fn search_query_revision(&self) -> u64 {
+        self.search_query_revision
+    }
+
     /// Whether the canonical document still has a display sentence after the
     /// current first-sample identity. This is intentionally lightweight and is
     /// used by the TTS runtime when a bounded normalization window is exhausted.
     pub fn has_canonical_sentence_after_current(&self) -> bool {
+        let total = self
+            .pdf_text_document
+            .as_deref()
+            .and_then(|document| document.page_sentence_prefix_sums.last().copied())
+            .unwrap_or_else(|| {
+                #[cfg(test)]
+                record_enriched_linear_scan_fallback();
+                self.active_page_sentence_counts().iter().sum()
+            });
         self.highlighted_canonical_idx()
-            .is_some_and(|idx| idx.saturating_add(1) < self.page_sentence_counts.iter().sum())
+            .is_some_and(|idx| idx.saturating_add(1) < total)
     }
 
     /// Lightweight constructor for test-only sessions without IO.
@@ -383,8 +571,12 @@ impl ReaderSession {
             highlighted_audio_idx: None,
             text_only_mode: false,
             search_query: String::new(),
-            search_matches: Vec::new(),
+            search_query_revision: 0,
+            search_matches: Arc::new(Vec::new()),
             selected_search_match: None,
+            pdf_sentence_page_hints: Vec::new(),
+            pdf_sentence_page_local_indices: Vec::new(),
+            pdf_text_document: None,
             tts_state: TtsPlaybackState::Paused,
             current_plan_page: None,
             current_plan_display_start: 0,
@@ -416,6 +608,151 @@ impl ReaderSession {
         let page_count = page_count.max(1);
         self.pdf_page_count = Some(page_count);
         self.current_page = self.current_page.min(page_count - 1);
+    }
+
+    /// Atomically adopts trusted native PDF page text without changing the native page domain.
+    /// The visual PDF surface remains the owner of geometry; this only enables canonical
+    /// text-only, search, and TTS behavior on the same page indices.
+    pub fn adopt_pdf_embedded_text(
+        &mut self,
+        page_texts: Vec<String>,
+        _normalizer: &normalizer::TextNormalizer,
+    ) -> Result<(), String> {
+        if !self.is_pdf_source() {
+            return Err("embedded PDF text requires a PDF session".to_string());
+        }
+        let page_count = self.pdf_page_count.unwrap_or(page_texts.len().max(1));
+        if page_texts.len() != page_count {
+            return Err(format!(
+                "embedded text page count {} does not match native page count {page_count}",
+                page_texts.len()
+            ));
+        }
+        let prepared = Self::prepare_pdf_embedded_text(
+            page_texts,
+            &self.search_query,
+            self.pdf_search_allowed(),
+        )?;
+        self.apply_prepared_pdf_embedded_text(Arc::new(prepared))
+    }
+
+    /// Build the complete canonical PDF text payload without touching a live
+    /// session. Callers should run this on the effect/native worker thread.
+    pub fn prepare_pdf_embedded_text(
+        page_texts: Vec<String>,
+        search_query: &str,
+        search_allowed: bool,
+    ) -> Result<PreparedPdfEmbeddedText, String> {
+        let page_texts: Vec<String> = page_texts
+            .into_iter()
+            .map(|page| {
+                page.replace("\r\n", "\n")
+                    .replace('\r', "\n")
+                    .trim()
+                    .to_string()
+            })
+            .collect();
+        let page_sentences: Vec<Vec<String>> = page_texts
+            .iter()
+            .map(|page| text_utils::split_sentences(page))
+            .collect();
+        let page_sentence_counts = page_sentences.iter().map(Vec::len).collect::<Vec<_>>();
+        let page_word_counts: Vec<usize> = page_texts
+            .iter()
+            .map(|page| page.split_whitespace().count())
+            .collect();
+        let sentence_anchor_maps = page_sentences
+            .iter()
+            .map(|sentences| (0..sentences.len()).map(Some).collect())
+            .collect();
+        let sentence_page_hints = page_sentences
+            .iter()
+            .enumerate()
+            .flat_map(|(page_idx, sentences)| std::iter::repeat_n(page_idx, sentences.len()))
+            .collect::<Vec<_>>();
+        let sentence_page_local_indices = page_sentences
+            .iter()
+            .flat_map(|sentences| 0..sentences.len())
+            .collect::<Vec<_>>();
+        let mut search_matches = Vec::new();
+        let query = search_query.trim();
+        if search_allowed && !query.is_empty() {
+            let regex = Regex::new(query).ok();
+            let query_lower = query.to_ascii_lowercase();
+            for (idx, sentence) in page_sentences.iter().flatten().enumerate() {
+                let matched = regex
+                    .as_ref()
+                    .map(|regex| regex.is_match(sentence))
+                    .unwrap_or_else(|| sentence.to_ascii_lowercase().contains(&query_lower));
+                if matched {
+                    search_matches.push(idx);
+                }
+            }
+        }
+        let page_word_prefix_sums = prefix_sums(&page_word_counts);
+        let page_sentence_prefix_sums = prefix_sums(&page_sentence_counts);
+        Ok(PreparedPdfEmbeddedText {
+            tts_text: Arc::new(page_texts.join("\n\n")),
+            canonical_sentences: Arc::new(page_sentences.iter().flatten().cloned().collect()),
+            pages: Arc::new(page_texts),
+            page_sentences: Arc::new(page_sentences),
+            page_sentence_counts: Arc::new(page_sentence_counts),
+            page_word_counts: Arc::new(page_word_counts),
+            sentence_anchor_maps: Arc::new(sentence_anchor_maps),
+            sentence_page_hints: Arc::new(sentence_page_hints),
+            sentence_page_local_indices: Arc::new(sentence_page_local_indices),
+            search_matches: Arc::new(search_matches),
+            search_query: query.to_string(),
+            page_word_prefix_sums: Arc::new(page_word_prefix_sums),
+            page_sentence_prefix_sums: Arc::new(page_sentence_prefix_sums),
+        })
+    }
+
+    /// Bounded live-session commit for a payload prepared by a worker.
+    pub fn apply_prepared_pdf_embedded_text(
+        &mut self,
+        prepared: Arc<PreparedPdfEmbeddedText>,
+    ) -> Result<(), String> {
+        if !self.is_pdf_source() {
+            return Err("embedded PDF text requires a PDF session".to_string());
+        }
+        let page_count = self.pdf_page_count.unwrap_or(prepared.pages.len().max(1));
+        if prepared.pages.len() != page_count {
+            return Err(format!(
+                "embedded text page count {} does not match native page count {page_count}",
+                prepared.pages.len()
+            ));
+        }
+        let old_document = self.pdf_text_document.replace(Arc::clone(&prepared));
+        if let Some(old_document) = old_document {
+            retire_pdf_payload(PdfRetirementPayload {
+                document: Some(old_document),
+                canonical_sentences: Arc::new(Vec::new()),
+                page_sentence_counts: Arc::new(Vec::new()),
+                search_matches: Arc::new(Vec::new()),
+            });
+        }
+        self.current_page = self.current_page.min(page_count.saturating_sub(1));
+        self.current_plan_page = None;
+        self.current_plan = None;
+        if self.search_query.trim() == prepared.search_query.trim() {
+            self.search_matches = Arc::clone(&prepared.search_matches);
+        } else {
+            self.search_matches = Arc::new(Vec::new());
+            self.selected_search_match = None;
+        }
+        self.pdf_runtime_policy = Some(crate::epub_loader::PdfRuntimePolicySummary {
+            text_only_policy: crate::epub_loader::PdfTextOnlyPolicy::FullText,
+            sentence_highlight_policy: crate::epub_loader::PdfSentenceHighlightPolicy::Disabled,
+            search_policy: crate::epub_loader::PdfSearchPolicy::FullText,
+            bookmark_policy: crate::epub_loader::PdfBookmarkPolicy::CanonicalText,
+            tts_allowed: true,
+            pretty_sync_enabled: false,
+            exact_sentence_sync: false,
+            explanation: "Trusted native embedded text is available; exact visual sentence geometry is not available yet.".to_string(),
+            degraded_reasons: Vec::new(),
+        });
+        Ok(())
     }
 
     pub(crate) fn page_domain_len(&self) -> usize {
@@ -1165,6 +1502,14 @@ impl ReaderSession {
         )
     }
 
+    pub fn pdf_search_allowed_for_preparation(&self) -> bool {
+        self.pdf_search_allowed()
+    }
+
+    pub fn search_query_for_preparation(&self) -> &str {
+        &self.search_query
+    }
+
     fn pdf_tts_allowed(&self) -> bool {
         self.pdf_runtime_policy_ref()
             .map(|value| value.tts_allowed)
@@ -1228,14 +1573,88 @@ impl ReaderSession {
         panels: PanelState,
         normalizer: &normalizer::TextNormalizer,
     ) -> ReaderSnapshot {
+        self.snapshot_internal(panels, normalizer)
+    }
+
+    pub fn snapshot_enriched_pdf_bounded(
+        &mut self,
+        panels: PanelState,
+        normalizer: &normalizer::TextNormalizer,
+    ) -> ReaderSnapshot {
+        let document = Arc::clone(
+            self.pdf_text_document
+                .as_ref()
+                .expect("PDF enrichment snapshot requires prepared text"),
+        );
+        let stats = self.stats(normalizer);
+        let tts = self.tts_view(normalizer, stats.tts_progress_pct);
+        let page_text = self
+            .active_page_text(self.current_page)
+            .unwrap_or_default()
+            .to_string();
+        let sentences = self.current_sentences(normalizer);
+        ReaderSnapshot {
+            source_path: self.source_path_str(),
+            source_name: self.source_name.clone(),
+            current_page: self.current_page,
+            total_pages: self.pdf_page_count.unwrap_or(document.pages.len()),
+            text_only_mode: self.text_only_mode,
+            has_structured_markdown: self.has_structured_markdown,
+            pretty_kind: PrettyKind::Pdf,
+            pdf_geometry_mode: self.pdf_geometry_mode,
+            pdf_sync_strategy: self.pdf_sync_strategy,
+            pdf_classification: self.pdf_classification.clone(),
+            pdf_runtime_policy: self.pdf_runtime_policy.clone(),
+            pdf_ocr_alignment: self.pdf_ocr_alignment.clone(),
+            pdf_ocr_pipeline: self.pdf_ocr_pipeline.clone(),
+            images: Vec::new(),
+            tts_text_page: page_text.clone(),
+            reading_markdown_page: None,
+            reading_html_page: None,
+            tts_current_sentence_text: tts
+                .current_sentence_idx
+                .and_then(|idx| sentences.get(idx))
+                .cloned(),
+            page_text,
+            sentences,
+            canonical_sentences: Arc::clone(&document.canonical_sentences),
+            page_sentence_counts: Arc::clone(&document.page_sentence_counts),
+            sentence_anchor_map: Arc::new(self.current_sentence_anchor_map()),
+            structured_document: self.structured_document.clone(),
+            highlighted_canonical_idx: self.highlighted_canonical_idx(),
+            highlighted_sentence_idx: self.current_highlight_idx(),
+            search_query: self.search_query.clone(),
+            search_matches: Arc::clone(&self.search_matches),
+            selected_search_match: self.selected_search_match,
+            settings: self.settings_view(),
+            tts,
+            stats,
+            panels,
+            pdf_document_handle: Some(document),
+        }
+    }
+
+    fn snapshot_internal(
+        &mut self,
+        panels: PanelState,
+        normalizer: &normalizer::TextNormalizer,
+    ) -> ReaderSnapshot {
+        if self.pdf_text_document.is_some() {
+            return self.snapshot_enriched_pdf_bounded(panels, normalizer);
+        }
         self.snapshot_constructions.fetch_add(1, Ordering::SeqCst);
         let snapshot_started = Instant::now();
-        let sentences = self.current_sentences(normalizer);
-        let canonical_sentences = self
-            .raw_page_sentences
-            .iter()
-            .flat_map(|page| page.iter().cloned())
-            .collect();
+        let sentences = if self.is_pdf_source() && !self.raw_page_sentences.is_empty() {
+            self.raw_page_sentences.iter().flatten().cloned().collect()
+        } else {
+            self.current_sentences(normalizer)
+        };
+        let canonical_sentences = Arc::new(
+            self.raw_page_sentences
+                .iter()
+                .flat_map(|page| page.iter().cloned())
+                .collect(),
+        );
         let sentence_anchor_map = self.current_sentence_anchor_map();
         let anchor_hits = sentence_anchor_map
             .iter()
@@ -1329,23 +1748,25 @@ impl ReaderSession {
             page_text: tts_text_page,
             sentences,
             canonical_sentences,
-            page_sentence_counts: self.page_sentence_counts.clone(),
-            sentence_anchor_map,
+            page_sentence_counts: Arc::new(self.page_sentence_counts.clone()),
+            sentence_anchor_map: Arc::new(sentence_anchor_map),
             structured_document: self.structured_document.clone(),
             highlighted_canonical_idx: self.highlighted_canonical_idx(),
             highlighted_sentence_idx,
             search_query: self.search_query.clone(),
-            search_matches: self.search_matches.clone(),
+            search_matches: Arc::clone(&self.search_matches),
             selected_search_match: self.selected_search_match,
             settings: self.settings_view(),
             tts,
             stats,
             panels,
+            pdf_document_handle: None,
         }
     }
 
     pub fn set_search_query(&mut self, query: String, normalizer: &normalizer::TextNormalizer) {
         self.search_query = query;
+        self.search_query_revision = self.search_query_revision.saturating_add(1);
         self.update_search_matches(normalizer);
         self.apply_selected_match_as_highlight(normalizer);
     }
@@ -1375,7 +1796,7 @@ impl ReaderSession {
     }
 
     fn current_sentences(&self, _normalizer: &normalizer::TextNormalizer) -> Vec<String> {
-        self.raw_page_sentences
+        self.active_page_sentences()
             .get(self.current_page)
             .cloned()
             .unwrap_or_default()
@@ -1384,11 +1805,25 @@ impl ReaderSession {
     fn current_sentence_anchor_map(&self) -> Vec<Option<usize>> {
         if self.text_only_mode {
             let count = self
-                .raw_page_sentences
+                .active_page_sentences()
                 .get(self.current_page)
                 .map(|v| v.len())
                 .unwrap_or(0);
             return (0..count).map(Some).collect();
+        }
+        if let Some(document) = self.pdf_text_document() {
+            return document
+                .sentence_anchor_maps
+                .get(self.current_page)
+                .cloned()
+                .unwrap_or_else(|| {
+                    let count = self
+                        .active_page_sentences()
+                        .get(self.current_page)
+                        .map(Vec::len)
+                        .unwrap_or(0);
+                    (0..count).map(Some).collect()
+                });
         }
         self.sentence_anchor_maps
             .get(self.current_page)
@@ -1398,7 +1833,7 @@ impl ReaderSession {
             })
             .unwrap_or_else(|| {
                 let count = self
-                    .raw_page_sentences
+                    .active_page_sentences()
                     .get(self.current_page)
                     .map(|v| v.len())
                     .unwrap_or(0);
@@ -1529,11 +1964,23 @@ impl ReaderSession {
     }
 
     fn global_display_idx(&self) -> Option<usize> {
-        let page_base: usize = self
-            .page_sentence_counts
-            .iter()
-            .take(self.current_page)
-            .sum();
+        let page_base = self
+            .pdf_text_document
+            .as_deref()
+            .and_then(|document| {
+                document
+                    .page_sentence_prefix_sums
+                    .get(self.current_page)
+                    .copied()
+            })
+            .unwrap_or_else(|| {
+                #[cfg(test)]
+                record_enriched_linear_scan_fallback();
+                self.active_page_sentence_counts()
+                    .iter()
+                    .take(self.current_page)
+                    .sum()
+            });
         self.highlighted_display_idx.map(|idx| page_base + idx)
     }
 
@@ -1595,21 +2042,53 @@ impl ReaderSession {
     }
 
     fn has_sentence_before_current_page(&self) -> bool {
-        self.page_sentence_counts
+        if let Some(document) = self.pdf_text_document() {
+            return document
+                .page_sentence_prefix_sums
+                .get(self.current_page)
+                .copied()
+                .unwrap_or_default()
+                > 0;
+        }
+        #[cfg(test)]
+        record_enriched_linear_scan_fallback();
+        self.active_page_sentence_counts()
             .iter()
             .take(self.current_page)
             .any(|count| *count > 0)
     }
 
     fn has_sentence_after_current_page(&self) -> bool {
-        self.page_sentence_counts
+        if let Some(document) = self.pdf_text_document() {
+            let next_page_base = document
+                .page_sentence_prefix_sums
+                .get(self.current_page.saturating_add(1))
+                .copied()
+                .unwrap_or_else(|| {
+                    document
+                        .page_sentence_prefix_sums
+                        .last()
+                        .copied()
+                        .unwrap_or(0)
+                });
+            return document
+                .page_sentence_prefix_sums
+                .last()
+                .copied()
+                .unwrap_or_default()
+                > next_page_base;
+        }
+        #[cfg(test)]
+        record_enriched_linear_scan_fallback();
+        self.active_page_sentence_counts()
             .iter()
             .skip(self.current_page.saturating_add(1))
             .any(|count| *count > 0)
     }
 
     fn update_search_matches(&mut self, normalizer: &normalizer::TextNormalizer) {
-        self.search_matches.clear();
+        let mut search_matches = Vec::new();
+        self.search_matches = Arc::new(Vec::new());
         self.selected_search_match = None;
         let query = self.search_query.trim().to_string();
         if query.is_empty() {
@@ -1624,22 +2103,76 @@ impl ReaderSession {
             return;
         }
 
-        let sentences = self.current_sentences(normalizer);
         let regex = Regex::new(&query).ok();
         let query_lower = query.to_ascii_lowercase();
-        for (idx, sentence) in sentences.iter().enumerate() {
-            let matched = if let Some(regex) = &regex {
-                regex.is_match(sentence)
-            } else {
-                sentence.to_ascii_lowercase().contains(&query_lower)
-            };
-            if matched {
-                self.search_matches.push(idx);
+        if self.is_pdf_source() && !self.active_page_sentences().is_empty() {
+            for (idx, sentence) in self.active_page_sentences().iter().flatten().enumerate() {
+                let matched = regex
+                    .as_ref()
+                    .map(|regex| regex.is_match(sentence))
+                    .unwrap_or_else(|| sentence.to_ascii_lowercase().contains(&query_lower));
+                if matched {
+                    search_matches.push(idx);
+                }
+            }
+        } else {
+            for (idx, sentence) in self.current_sentences(normalizer).iter().enumerate() {
+                let matched = regex
+                    .as_ref()
+                    .map(|regex| regex.is_match(sentence))
+                    .unwrap_or_else(|| sentence.to_ascii_lowercase().contains(&query_lower));
+                if matched {
+                    search_matches.push(idx);
+                }
             }
         }
+        self.search_matches = Arc::new(search_matches);
         if !self.search_matches.is_empty() {
             self.selected_search_match = Some(0);
         }
+    }
+
+    /// Performs the document-wide query against an immutable prepared document. Callers must
+    /// run this on a worker; the live egui commit only installs the resulting match IDs.
+    pub fn search_matches_for_prepared_document(
+        prepared: &PreparedPdfEmbeddedText,
+        query: &str,
+    ) -> Vec<usize> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let regex = Regex::new(query).ok();
+        let query_lower = query.to_ascii_lowercase();
+        prepared
+            .canonical_sentences
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, sentence)| {
+                let matched = regex
+                    .as_ref()
+                    .map(|regex| regex.is_match(sentence))
+                    .unwrap_or_else(|| sentence.to_ascii_lowercase().contains(&query_lower));
+                matched.then_some(idx)
+            })
+            .collect()
+    }
+
+    pub fn apply_search_reconciliation(
+        &mut self,
+        query_revision: u64,
+        query: &str,
+        matches: Arc<Vec<usize>>,
+        normalizer: &normalizer::TextNormalizer,
+    ) -> bool {
+        if query_revision != self.search_query_revision || query.trim() != self.search_query.trim()
+        {
+            return false;
+        }
+        self.search_matches = matches;
+        self.selected_search_match = (!self.search_matches.is_empty()).then_some(0);
+        self.apply_selected_match_as_highlight(normalizer);
+        true
     }
 
     fn reselect_search_match_for_current_highlight(&mut self) {
@@ -1663,29 +2196,61 @@ impl ReaderSession {
         let Some(sentence_idx) = self.search_matches.get(selected_idx).copied() else {
             return;
         };
-        self.sentence_click(sentence_idx, normalizer);
+        if self.is_pdf_source() && sentence_idx < self.active_pdf_sentence_page_hints().len() {
+            self.current_page = self.active_pdf_sentence_page_hints()[sentence_idx];
+            self.highlighted_display_idx = self
+                .active_pdf_sentence_page_local_indices()
+                .get(sentence_idx)
+                .copied();
+            self.highlighted_canonical_idx = Some(sentence_idx);
+            self.reselect_search_match_for_current_highlight();
+        } else {
+            self.sentence_click(sentence_idx, normalizer);
+        }
     }
 
     fn stats(&mut self, _normalizer: &normalizer::TextNormalizer) -> ReaderStats {
+        let page_word_counts = self.active_page_word_counts();
+        let page_sentence_counts = self.active_page_sentence_counts();
         let page_word_count = self
-            .page_word_counts
+            .active_page_word_counts()
             .get(self.current_page)
             .copied()
             .unwrap_or_default();
         let page_sentence_count = self
-            .page_sentence_counts
+            .active_page_sentence_counts()
             .get(self.current_page)
             .copied()
             .unwrap_or_default();
-        let words_before_page: usize = self.page_word_counts.iter().take(self.current_page).sum();
-        let sentences_before_page: usize = self
-            .page_sentence_counts
-            .iter()
-            .take(self.current_page)
-            .sum();
+        let (words_before_page, sentences_before_page, total_words) =
+            if let Some(document) = self.pdf_text_document() {
+                (
+                    document
+                        .page_word_prefix_sums
+                        .get(self.current_page)
+                        .copied()
+                        .unwrap_or_default(),
+                    document
+                        .page_sentence_prefix_sums
+                        .get(self.current_page)
+                        .copied()
+                        .unwrap_or_default(),
+                    document
+                        .page_word_prefix_sums
+                        .last()
+                        .copied()
+                        .unwrap_or_default(),
+                )
+            } else {
+                (
+                    page_word_counts.iter().take(self.current_page).sum(),
+                    page_sentence_counts.iter().take(self.current_page).sum(),
+                    page_word_counts.iter().sum(),
+                )
+            };
         let words_up_to_page_end = words_before_page + page_word_count;
         let sentences_up_to_page_end = sentences_before_page + page_sentence_count;
-        let total_words = self.page_word_counts.iter().sum::<usize>().max(1);
+        let total_words = total_words.max(1);
 
         let count = page_sentence_count;
         let idx = self.highlighted_display_idx.unwrap_or(0);
@@ -2033,6 +2598,15 @@ fn extract_img_blocks(html: &str) -> Vec<ContentBlock> {
     blocks
 }
 
+fn prefix_sums(values: &[usize]) -> Vec<usize> {
+    let mut prefixes = Vec::with_capacity(values.len() + 1);
+    prefixes.push(0);
+    for value in values {
+        prefixes.push(prefixes.last().copied().unwrap_or_default() + value);
+    }
+    prefixes
+}
+
 fn proportional_anchor_map(sentence_count: usize, anchor_count: usize) -> Vec<Option<usize>> {
     if sentence_count == 0 {
         return Vec::new();
@@ -2133,8 +2707,12 @@ mod tests {
             highlighted_audio_idx: None,
             text_only_mode: false,
             search_query: String::new(),
-            search_matches: Vec::new(),
+            search_query_revision: 0,
+            search_matches: Arc::new(Vec::new()),
             selected_search_match: None,
+            pdf_sentence_page_hints: Vec::new(),
+            pdf_sentence_page_local_indices: Vec::new(),
+            pdf_text_document: None,
             tts_state: TtsPlaybackState::Paused,
             current_plan_page: None,
             current_plan_display_start: 0,
@@ -2200,6 +2778,445 @@ mod tests {
         );
         assert!(snapshot.sentences.is_empty());
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn trusted_native_text_promotes_render_only_pdf_capabilities_without_geometry() {
+        let path = unique_pdf_source_path();
+        fs::write(&path, b"%PDF-1.7\nvisual-session-fixture").expect("write readable PDF");
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session =
+            load_session_for_source(path.clone(), &config::AppConfig::default(), &normalizer)
+                .expect("render-only PDF session");
+        session.set_pdf_page_count(3);
+        let initial = session.snapshot(PanelState::default(), &normalizer);
+        assert_eq!(
+            initial
+                .pdf_runtime_policy
+                .as_ref()
+                .map(|policy| policy.tts_allowed),
+            Some(false)
+        );
+        assert_eq!(
+            initial
+                .pdf_runtime_policy
+                .as_ref()
+                .map(|policy| policy.search_policy),
+            Some(crate::epub_loader::PdfSearchPolicy::Disabled)
+        );
+
+        let prepared = ReaderSession::prepare_pdf_embedded_text(
+            vec![
+                "First native page.".to_string(),
+                "Unrelated middle page.".to_string(),
+                "Later native needle page.".to_string(),
+            ],
+            "native",
+            true,
+        )
+        .expect("prepared trusted text");
+        session
+            .apply_prepared_pdf_embedded_text(prepared.into())
+            .expect("trusted text adoption");
+        let adopted = session.snapshot(PanelState::default(), &normalizer);
+        let policy = adopted.pdf_runtime_policy.clone().expect("promoted policy");
+        assert_eq!(
+            policy.text_only_policy,
+            crate::epub_loader::PdfTextOnlyPolicy::FullText
+        );
+        assert_eq!(
+            policy.search_policy,
+            crate::epub_loader::PdfSearchPolicy::FullText
+        );
+        assert!(policy.tts_allowed);
+        assert!(!policy.pretty_sync_enabled);
+        assert!(!policy.exact_sentence_sync);
+        assert_eq!(adopted.total_pages, 3);
+        assert_eq!(adopted.page_sentence_counts, vec![1, 1, 1].into());
+
+        session.toggle_text_only(&normalizer);
+        assert!(session.text_only_mode);
+        session.set_search_query("native".to_string(), &normalizer);
+        assert_eq!(session.search_matches, vec![0, 2].into());
+        session.search_next(&normalizer);
+        assert_eq!(
+            session.current_page, 2,
+            "search next must navigate to later-page provenance"
+        );
+        session.tts_play(&normalizer);
+        assert_eq!(session.tts_state, TtsPlaybackState::Playing);
+
+        let mut rejected =
+            load_session_for_source(path.clone(), &config::AppConfig::default(), &normalizer)
+                .expect("second render-only PDF session");
+        rejected.set_pdf_page_count(2);
+        assert!(
+            rejected
+                .snapshot(PanelState::default(), &normalizer)
+                .pdf_runtime_policy
+                .clone()
+                .is_some_and(|policy| !policy.tts_allowed)
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn trusted_pdf_adoption_preserves_live_state_after_preparation_race() {
+        let path = unique_pdf_source_path();
+        fs::write(&path, b"%PDF-1.7\nvisual-session-fixture").expect("write readable PDF");
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session =
+            load_session_for_source(path.clone(), &config::AppConfig::default(), &normalizer)
+                .expect("render-only PDF session");
+        session.set_pdf_page_count(3);
+
+        // Model the production race: the worker finishes preparation before the live session
+        // is changed by the user, then the bounded commit must apply only the prepared document.
+        let prepared = Arc::new(
+            ReaderSession::prepare_pdf_embedded_text(
+                vec![
+                    "First native page.".to_string(),
+                    "Unrelated middle page.".to_string(),
+                    "Later native needle page.".to_string(),
+                ],
+                "native",
+                true,
+            )
+            .expect("prepared trusted text"),
+        );
+        session.current_page = 2;
+        session.search_query = "later".to_string();
+        session.tts_state = TtsPlaybackState::Playing;
+        session.config.tts_speed = 1.35;
+        session.reset_snapshot_construction_count();
+
+        session
+            .apply_prepared_pdf_embedded_text(prepared)
+            .expect("trusted text adoption");
+
+        assert_eq!(session.current_page, 2);
+        assert_eq!(session.search_query, "later");
+        assert_eq!(session.tts_state, TtsPlaybackState::Playing);
+        assert!(session.pdf_text_document().is_some());
+        assert_eq!(
+            session.snapshot_construction_count(),
+            0,
+            "adoption must not construct a document-sized egui snapshot"
+        );
+
+        let snapshot = session.snapshot(PanelState::default(), &normalizer);
+        assert_eq!(snapshot.current_page, 2);
+        assert_eq!(snapshot.search_query, "later");
+        assert_eq!(snapshot.tts.state, TtsPlaybackState::Playing);
+        assert_eq!(snapshot.page_text, "Later native needle page.");
+        assert_eq!(snapshot.page_sentence_counts.as_ref(), &[1, 1, 1]);
+        assert_eq!(session.snapshot_construction_count(), 0);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn enriched_pdf_uses_one_global_identity_across_tts_boundaries_and_bookmarks() {
+        let path = unique_pdf_source_path();
+        fs::write(&path, b"%PDF-1.7\nvisual-session-fixture").expect("write readable PDF");
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session =
+            load_session_for_source(path.clone(), &config::AppConfig::default(), &normalizer)
+                .expect("render-only PDF session");
+        session.set_pdf_page_count(3);
+        let prepared = ReaderSession::prepare_pdf_embedded_text(
+            vec![
+                "Page one first. Page one second.".to_string(),
+                "Page two only.".to_string(),
+                "Page three final.".to_string(),
+            ],
+            "",
+            true,
+        )
+        .expect("prepared trusted text");
+        session
+            .apply_prepared_pdf_embedded_text(Arc::new(prepared))
+            .expect("trusted text adoption");
+        session.tts_state = TtsPlaybackState::Playing;
+
+        session.set_page(1, &normalizer);
+        session.highlighted_display_idx = Some(0);
+        let page_two_ids = session.current_tts_audio_display_ids(&normalizer);
+        assert_eq!(page_two_ids, vec![2]);
+        assert_eq!(session.highlighted_canonical_idx(), Some(2));
+        session
+            .apply_tts_sentence_boundary(&normalizer, 0, page_two_ids[0])
+            .expect("first-sample boundary on page two");
+        assert_eq!(session.current_page, 1);
+        assert_eq!(session.highlighted_display_idx, Some(0));
+        assert_eq!(session.highlighted_canonical_idx(), Some(2));
+        assert!(session.has_canonical_sentence_after_current());
+
+        session.set_page(2, &normalizer);
+        session.highlighted_display_idx = Some(0);
+        let final_ids = session.current_tts_audio_display_ids(&normalizer);
+        assert_eq!(final_ids, vec![3]);
+        assert_eq!(session.highlighted_canonical_idx(), Some(3));
+        session
+            .apply_tts_sentence_boundary(&normalizer, 0, final_ids[0])
+            .expect("first-sample boundary on final page");
+        assert_eq!(session.highlighted_canonical_idx(), Some(3));
+        assert!(!session.has_canonical_sentence_after_current());
+        session.tts_seek_next(&normalizer);
+        assert_eq!(session.tts_state, TtsPlaybackState::Paused);
+
+        let bookmark = session.to_bookmark();
+        assert_eq!(bookmark.page, 2);
+        assert_eq!(bookmark.sentence_idx, Some(0));
+        let mut restored =
+            load_session_for_source(path.clone(), &config::AppConfig::default(), &normalizer)
+                .expect("second render-only PDF session");
+        restored.set_pdf_page_count(3);
+        let prepared = ReaderSession::prepare_pdf_embedded_text(
+            vec![
+                "Page one first. Page one second.".to_string(),
+                "Page two only.".to_string(),
+                "Page three final.".to_string(),
+            ],
+            "",
+            true,
+        )
+        .expect("prepared trusted text");
+        restored
+            .apply_prepared_pdf_embedded_text(Arc::new(prepared))
+            .expect("restored trusted text adoption");
+        restored.restore_bookmark_position(&bookmark, &normalizer);
+        assert_eq!(restored.current_page, 2);
+        assert_eq!(restored.highlighted_display_idx, Some(0));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn enriched_pdf_reconciles_live_search_query_and_rejects_stale_results() {
+        let path = unique_pdf_source_path();
+        fs::write(&path, b"%PDF-1.7\nvisual-session-fixture").expect("write readable PDF");
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session =
+            load_session_for_source(path.clone(), &config::AppConfig::default(), &normalizer)
+                .expect("render-only PDF session");
+        session.set_pdf_page_count(3);
+        session.set_search_query("alpha".to_string(), &normalizer);
+        let old_revision = session.search_query_revision();
+        session.set_search_query("Needle".to_string(), &normalizer);
+        let current_revision = session.search_query_revision();
+        let prepared = Arc::new(
+            ReaderSession::prepare_pdf_embedded_text(
+                vec![
+                    "Alpha on page one.".to_string(),
+                    "Unrelated page.".to_string(),
+                    "Needle only on the final page.".to_string(),
+                ],
+                "alpha",
+                false,
+            )
+            .expect("prepared trusted text"),
+        );
+        session
+            .apply_prepared_pdf_embedded_text(Arc::clone(&prepared))
+            .expect("trusted text adoption");
+        assert!(
+            !session.apply_search_reconciliation(
+                old_revision,
+                "alpha",
+                Arc::new(vec![0]),
+                &normalizer,
+            ),
+            "obsolete query result must not replace the live query"
+        );
+        let computed = ReaderSession::search_matches_for_prepared_document(&prepared, "Needle");
+        assert!(session.apply_search_reconciliation(
+            current_revision,
+            "Needle",
+            Arc::new(computed),
+            &normalizer,
+        ));
+        assert_eq!(session.search_matches.as_ref(), &[2]);
+        assert_eq!(session.current_page, 2);
+        session.set_search_query(String::new(), &normalizer);
+        assert!(session.search_matches.is_empty());
+        assert!(!session.apply_search_reconciliation(
+            current_revision,
+            "needle",
+            Arc::new(vec![2]),
+            &normalizer,
+        ));
+        assert!(session.search_matches.is_empty());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn enriched_pdf_document_payload_retirement_runs_off_commit_thread() {
+        PDF_DEFERRED_DROP_THREADS
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .expect("drop probe lock")
+            .clear();
+        let path = unique_pdf_source_path();
+        fs::write(&path, b"%PDF-1.7\nvisual-session-fixture").expect("write readable PDF");
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session =
+            load_session_for_source(path.clone(), &config::AppConfig::default(), &normalizer)
+                .expect("render-only PDF session");
+        session.set_pdf_page_count(1);
+        let prepared = ReaderSession::prepare_pdf_embedded_text(
+            vec!["Retired payload.".to_string()],
+            "",
+            true,
+        )
+        .expect("prepared trusted text");
+        session
+            .apply_prepared_pdf_embedded_text(Arc::new(prepared))
+            .expect("trusted text adoption");
+        let snapshot = session.snapshot(PanelState::default(), &normalizer);
+        drop(snapshot);
+        drop(session);
+        for _ in 0..50 {
+            if !PDF_DEFERRED_DROP_THREADS
+                .get()
+                .expect("drop probe initialized")
+                .lock()
+                .expect("drop probe lock")
+                .is_empty()
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let current = std::thread::current().id();
+        let drops = PDF_DEFERRED_DROP_THREADS
+            .get()
+            .expect("drop probe initialized")
+            .lock()
+            .expect("drop probe lock");
+        assert!(!drops.is_empty());
+        assert!(drops.iter().all(|thread| *thread != current));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn enriched_pdf_snapshot_churn_uses_one_bounded_retirement_worker() {
+        PDF_DEFERRED_DROP_THREADS
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .expect("drop probe lock")
+            .clear();
+        let caller = std::thread::current().id();
+        let path = unique_pdf_source_path();
+        fs::write(&path, b"%PDF-1.7\nvisual-session-fixture").expect("write readable PDF");
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = ReaderSession::from_pages_for_test(
+            path.clone(),
+            "churn.pdf".to_string(),
+            vec![String::new(); 24],
+            vec![Vec::new(); 24],
+        );
+        session.set_pdf_page_count(24);
+        let prepared = Arc::new(
+            ReaderSession::prepare_pdf_embedded_text(
+                (0..24)
+                    .map(|page| format!("Page {page} has a stable sentence."))
+                    .collect(),
+                "",
+                true,
+            )
+            .expect("prepared trusted text"),
+        );
+        session
+            .apply_prepared_pdf_embedded_text(Arc::clone(&prepared))
+            .expect("trusted text adoption");
+        drop(prepared);
+
+        for page in 0..256 {
+            session.current_page = page % 24;
+            drop(session.snapshot(PanelState::default(), &normalizer));
+        }
+        drop(session);
+
+        for _ in 0..200 {
+            let count = PDF_DEFERRED_DROP_THREADS
+                .get()
+                .expect("drop probe initialized")
+                .lock()
+                .expect("drop probe lock")
+                .len();
+            if count >= 257 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let drops = PDF_DEFERRED_DROP_THREADS
+            .get()
+            .expect("drop probe initialized")
+            .lock()
+            .expect("drop probe lock");
+        assert!(
+            drops.len() >= 257,
+            "all snapshot/session retirements are queued"
+        );
+        assert!(drops.iter().all(|thread| *thread != caller));
+        assert_eq!(
+            drops.iter().collect::<std::collections::HashSet<_>>().len(),
+            1
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn enriched_pdf_bounded_projection_uses_prefix_indexes_for_small_and_large_documents() {
+        fn exercise(page_count: usize, normalizer: &normalizer::TextNormalizer) -> usize {
+            let path = unique_pdf_source_path();
+            fs::write(&path, b"%PDF-1.7\nprojection-fixture").expect("write readable PDF");
+            let mut session = ReaderSession::from_pages_for_test(
+                path.clone(),
+                "projection.pdf".to_string(),
+                vec![String::new(); page_count],
+                vec![Vec::new(); page_count],
+            );
+            session.set_pdf_page_count(page_count);
+            let prepared = ReaderSession::prepare_pdf_embedded_text(
+                (0..page_count)
+                    .map(|page| format!("Page {page} has a stable sentence."))
+                    .collect(),
+                "",
+                true,
+            )
+            .expect("prepared trusted text");
+            session
+                .apply_prepared_pdf_embedded_text(Arc::new(prepared))
+                .expect("trusted text adoption");
+            session.current_page = page_count / 2;
+            session.highlighted_display_idx = Some(0);
+            let expected = page_count / 2;
+            assert_eq!(session.highlighted_canonical_idx(), Some(expected));
+            assert!(session.has_canonical_sentence_after_current());
+            assert!(!session.current_tts_audio_display_ids(normalizer).is_empty());
+            assert_eq!(
+                session.page_idx_for_global_sentence(expected),
+                (expected, 0)
+            );
+            let snapshot = session.snapshot_enriched_pdf_bounded(PanelState::default(), normalizer);
+            assert_eq!(snapshot.current_page, page_count / 2);
+            drop(snapshot);
+            drop(session);
+            let _ = fs::remove_file(path);
+            expected
+        }
+
+        PDF_ENRICHED_LINEAR_SCAN_GUARD.store(0, Ordering::SeqCst);
+        let normalizer = normalizer::TextNormalizer::default();
+        let small = exercise(10, &normalizer);
+        let large = exercise(100, &normalizer);
+        assert_eq!(small, 5);
+        assert_eq!(large, 50);
+        assert_eq!(
+            PDF_ENRICHED_LINEAR_SCAN_GUARD.load(Ordering::SeqCst),
+            0,
+            "enriched projection helpers must not fall back to page scans"
+        );
     }
 
     #[test]
@@ -2487,17 +3504,17 @@ mod tests {
         session.set_search_query("Needle".to_string(), &normalizer);
         assert_eq!(session.highlighted_display_idx, Some(1));
         assert_eq!(session.selected_search_match, Some(0));
-        assert_eq!(session.search_matches, vec![1]);
+        assert_eq!(session.search_matches, vec![1].into());
 
         session.toggle_text_only(&normalizer);
         assert_eq!(session.current_highlight_idx(), Some(1));
         assert_eq!(session.selected_search_match, Some(0));
-        assert_eq!(session.search_matches, vec![1]);
+        assert_eq!(session.search_matches, vec![1].into());
 
         session.toggle_text_only(&normalizer);
         assert_eq!(session.highlighted_display_idx, Some(1));
         assert_eq!(session.selected_search_match, Some(0));
-        assert_eq!(session.search_matches, vec![1]);
+        assert_eq!(session.search_matches, vec![1].into());
     }
 
     #[test]
@@ -3396,5 +4413,55 @@ mod tests {
         assert_eq!(session.highlighted_canonical_idx(), Some(3));
         assert_eq!(delta.playback.highlighted_canonical_idx, Some(3));
         assert_eq!(delta.playback.highlighted_sentence_idx, Some(1));
+    }
+
+    #[test]
+    fn native_pdf_text_adoption_preserves_native_page_domain_without_repagination() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = ReaderSession::from_pages_for_test(
+            PathBuf::from("/tmp/native-text.pdf"),
+            "native-text.pdf".to_string(),
+            vec![String::new()],
+            vec![Vec::new()],
+        );
+        session.set_pdf_page_count(2);
+        session
+            .adopt_pdf_embedded_text(
+                vec![
+                    "First native page. Search needle.".to_string(),
+                    "Second native page for TTS.".to_string(),
+                ],
+                &normalizer,
+            )
+            .expect("page-aligned native text should be adopted");
+        session.set_search_query("needle".to_string(), &normalizer);
+        let snapshot = session.snapshot(PanelState::default(), &normalizer);
+        assert_eq!(snapshot.total_pages, 2);
+        assert_eq!(snapshot.page_sentence_counts.len(), 2);
+        assert_eq!(snapshot.page_text, "First native page. Search needle.");
+        assert!(!snapshot.search_matches.is_empty());
+    }
+
+    #[test]
+    fn native_pdf_preparation_builds_page_provenance_off_caller_thread() {
+        let caller = std::thread::current().id();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let prepared = ReaderSession::prepare_pdf_embedded_text(
+                vec![
+                    "First native page. Search needle.".to_string(),
+                    "Second native page for TTS.".to_string(),
+                ],
+                "needle",
+                true,
+            )
+            .expect("native text preparation");
+            tx.send((std::thread::current().id(), prepared)).unwrap();
+        });
+        let (worker, prepared) = rx.recv().expect("prepared native text payload");
+        assert_ne!(worker, caller);
+        assert_eq!(prepared.page_sentence_counts, vec![2, 1].into());
+        assert_eq!(prepared.sentence_page_hints, vec![0, 0, 1].into());
+        assert_eq!(prepared.search_matches, vec![1].into());
     }
 }

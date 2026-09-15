@@ -110,7 +110,7 @@ impl ReaderSession {
 
     pub fn to_bookmark(&self) -> crate::cache::Bookmark {
         let sentence_text = self.highlighted_display_idx.and_then(|idx| {
-            self.raw_page_sentences
+            self.active_page_sentences()
                 .get(self.current_page)
                 .and_then(|sentences| sentences.get(idx))
                 .cloned()
@@ -153,7 +153,7 @@ impl ReaderSession {
             pdf_sentence_text_hash: self
                 .highlighted_display_idx
                 .and_then(|idx| {
-                    self.raw_page_sentences
+                    self.active_page_sentences()
                         .get(self.current_page)
                         .and_then(|page| page.get(idx))
                 })

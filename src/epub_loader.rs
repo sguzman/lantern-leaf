@@ -22,8 +22,7 @@ static RE_HTML_IMG_SRC: Lazy<Regex> = Lazy::new(|| {
         .expect("valid html image src regex")
 });
 static RE_HTML_IMG_ALT: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r#"(?is)\balt\s*=\s*["']([^"']*)["']"#)
-        .expect("valid html image alt regex")
+    Regex::new(r#"(?is)\balt\s*=\s*["']([^"']*)["']"#).expect("valid html image alt regex")
 });
 static RE_HTML_SVG_IMAGE_HREF: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"(?is)<image\b[^>]*?\b(?:xlink:href|href)\s*=\s*["']([^"']+)["'][^>]*>"#)
@@ -1025,11 +1024,11 @@ fn epub_resource_output_path(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use image::ImageEncoder;
     use crate::browser_tabs::{
         BrowserTab, BrowserTabSnapshot, SnapshotTruncation, SnapshotTruncationEntry,
     };
     use crate::cache::{delete_recent_source_and_cache, persist_browser_tab_source};
+    use image::ImageEncoder;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_temp_file(name: &str, extension: &str) -> PathBuf {
@@ -1118,12 +1117,12 @@ mod tests {
         let chapter1 = br#"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Before PNG.</p><img src="../Images/foo%20bar.png" alt="PNG art"/><p>Between.</p><img src="../Images/nested/photo.jpg" alt="JPEG art"/></body></html>"#;
         let chapter2 = br#"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Second chapter.</p><img src="../../Images/foo%20bar.png" alt="PNG again"/></body></html>"#;
         let png = [
-            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49,
-            0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06,
-            0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44,
-            0x41, 0x54, 0x78, 0x9c, 0x63, 0x60, 0x60, 0x60, 0xf8, 0xcf, 0xc0, 0x00, 0x00,
-            0x04, 0x00, 0x01, 0xff, 0x89, 0x99, 0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49,
-            0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9c, 0x63, 0x60, 0x60, 0x60, 0xf8, 0xcf, 0xc0, 0x00, 0x00, 0x04, 0x00, 0x01, 0xff,
+            0x89, 0x99, 0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42,
+            0x60, 0x82,
         ];
         let mut jpeg = Vec::new();
         image::codecs::jpeg::JpegEncoder::new(&mut jpeg)
@@ -1148,15 +1147,23 @@ mod tests {
             .structured_document
             .expect("EPUB fixture should retain structured provenance");
         assert!(structured.blocks.iter().any(|block| block.kind == "img"));
-        assert!(structured
-            .sentences
-            .iter()
-            .any(|sentence| sentence.display_text == "Before PNG."));
-        assert!(structured
-            .sentences
-            .iter()
-            .any(|sentence| sentence.display_text == "Between."));
-        assert_eq!(images.len(), 3, "each inline occurrence keeps its source position");
+        assert!(
+            structured
+                .sentences
+                .iter()
+                .any(|sentence| sentence.display_text == "Before PNG.")
+        );
+        assert!(
+            structured
+                .sentences
+                .iter()
+                .any(|sentence| sentence.display_text == "Between.")
+        );
+        assert_eq!(
+            images.len(),
+            3,
+            "each inline occurrence keeps its source position"
+        );
         assert_eq!(images[0].chapter_index, 0);
         assert_eq!(images[0].source_order, 0);
         assert_eq!(images[0].alt.as_deref(), Some("PNG art"));
@@ -1169,15 +1176,22 @@ mod tests {
         assert_eq!(images[2].alt.as_deref(), Some("PNG again"));
         assert_eq!(images[0].normalized_path, "oebps/images/foo bar.png");
         assert_eq!(images[1].normalized_path, "oebps/images/nested/photo.jpg");
-        assert!(images[0].aliases.iter().any(|key| key == "oebps/images/foo bar.png"));
+        assert!(
+            images[0]
+                .aliases
+                .iter()
+                .any(|key| key == "oebps/images/foo bar.png")
+        );
         assert!(images[0].path.exists());
         assert!(images[1].path.exists());
         assert_eq!(image::image_dimensions(&images[0].path).unwrap(), (1, 1));
         assert_eq!(image::image_dimensions(&images[1].path).unwrap(), (1, 1));
         let extraction_root = hash_dir(&path).join("images");
-        assert!(images
-            .iter()
-            .all(|image| image.path.starts_with(&extraction_root)));
+        assert!(
+            images
+                .iter()
+                .all(|image| image.path.starts_with(&extraction_root))
+        );
         assert_ne!(images[0].path, images[1].path);
         let _ = fs::remove_file(path);
     }

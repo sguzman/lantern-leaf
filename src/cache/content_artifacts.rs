@@ -21,7 +21,7 @@ const CONTENT_PDF_OCR_ALIGNMENT_FILE: &str = "content/pdf-ocr-alignment.toml";
 const CONTENT_PDF_RENDER_PRECOMPUTE_FILE: &str = "content/pdf-render-precompute.toml";
 const PDF_SYNC_META_CLASSIFICATION_VERSION: u32 = 3;
 pub const PDF_OCR_ALIGNMENT_VERSION: u32 = 2;
-const PDF_RENDER_PRECOMPUTE_VERSION: u32 = 1;
+const PDF_RENDER_PRECOMPUTE_VERSION: u32 = 2;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct PdfSyncMeta {
@@ -183,6 +183,10 @@ pub struct PdfSentencePageHint {
 pub struct PdfRenderPrecomputedState {
     pub version: u32,
     #[serde(default)]
+    pub extraction_revision: String,
+    #[serde(default)]
+    pub source_identity: String,
+    #[serde(default)]
     pub page_texts: Vec<String>,
     #[serde(default)]
     pub sentence_page_hints: Vec<PdfSentencePageHint>,
@@ -323,10 +327,6 @@ pub(super) fn load_sentence_anchor_map(
 ) -> Option<Vec<Option<usize>>> {
     None
 }
-
-
-
-
 
 pub(super) fn tts_dir(source_path: &Path) -> PathBuf {
     hash_dir(source_path).join("tts")
@@ -486,8 +486,7 @@ pub(super) fn persist_pdf_sentence_map(source_path: &Path, locations: &[PdfSente
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn persist_pdf_sentence_map(_source_path: &Path, _locations: &[PdfSentenceLocation]) {
-}
+pub(super) fn persist_pdf_sentence_map(_source_path: &Path, _locations: &[PdfSentenceLocation]) {}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn load_pdf_sentence_map(source_path: &Path) -> Option<Vec<PdfSentenceLocation>> {

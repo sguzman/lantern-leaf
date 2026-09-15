@@ -1,5 +1,6 @@
 use lanternleaf_core::{browser_tabs, calibre, config, session};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use ts_rs::TS;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS, PartialEq, Eq)]
@@ -141,6 +142,49 @@ pub struct PdfTranscriptionEvent {
     pub phase: String,
     pub source_path: String,
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PdfEmbeddedTextEvent {
+    #[ts(type = "number")]
+    pub request_id: u64,
+    pub source_path: String,
+    #[ts(type = "number")]
+    pub generation: u64,
+    #[ts(type = "number")]
+    pub revision: u64,
+    #[ts(type = "number")]
+    pub page_count: usize,
+    pub page_texts: Vec<String>,
+    pub worker_thread: String,
+    pub terminal: String,
+    pub accepted: bool,
+    pub degraded_reason: Option<String>,
+}
+
+/// Worker-owned immutable PDF text preparation. The egui commit consumes this
+/// payload without re-splitting the document or serializing cache state.
+#[derive(Debug, Clone)]
+pub struct PdfEmbeddedTextPreparedEvent {
+    pub request_id: u64,
+    pub source_path: String,
+    pub generation: u64,
+    pub revision: u64,
+    pub page_count: usize,
+    pub worker_thread: String,
+    pub preparation_thread: String,
+    pub prepared: Arc<session::PreparedPdfEmbeddedText>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PdfEmbeddedTextSearchReconciledEvent {
+    pub request_id: u64,
+    pub source_path: String,
+    pub generation: u64,
+    pub query_revision: u64,
+    pub query: String,
+    pub matches: Arc<Vec<usize>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

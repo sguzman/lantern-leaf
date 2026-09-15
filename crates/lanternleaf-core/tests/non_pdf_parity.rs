@@ -152,40 +152,68 @@ fn assert_session_contract(path: &Path, expected_kind: session::PrettyKind, conf
             "the real EPUB fixture must cross multiple bounded TTS windows; got {}",
             provenance.sentences.len()
         );
-        assert_eq!(provenance.sentences.len(), initial.canonical_sentences.len());
+        assert_eq!(
+            provenance.sentences.len(),
+            initial.canonical_sentences.len()
+        );
         assert_eq!(
             initial.page_sentence_counts,
-            vec![provenance.sentences.len()],
+            vec![provenance.sentences.len()].into(),
             "structured EPUB ownership must remain one explicit logical page"
         );
         assert_eq!(provenance.sentences[0].canonical_display_id, 0);
-        assert!(provenance.sentences.iter().any(|sentence| sentence.chapter_index == 1));
+        assert!(
+            provenance
+                .sentences
+                .iter()
+                .any(|sentence| sentence.chapter_index == 1)
+        );
         let duplicates = provenance
             .sentences
             .iter()
-            .filter(|sentence| sentence.display_text == "The repeated distant sentence is identical.")
+            .filter(|sentence| {
+                sentence.display_text == "The repeated distant sentence is identical."
+            })
             .collect::<Vec<_>>();
         assert_eq!(duplicates.len(), 2);
-        assert_ne!(duplicates[0].canonical_display_id, duplicates[1].canonical_display_id);
+        assert_ne!(
+            duplicates[0].canonical_display_id,
+            duplicates[1].canonical_display_id
+        );
         assert_ne!(duplicates[0].block_id, duplicates[1].block_id);
-        assert!(provenance.blocks.iter().any(|block| block.kind == "blockquote"));
+        assert!(
+            provenance
+                .blocks
+                .iter()
+                .any(|block| block.kind == "blockquote")
+        );
         assert!(provenance.blocks.iter().any(|block| block.kind == "img"));
         assert!(provenance.blocks.iter().any(|block| block.kind == "li"));
         assert!(provenance.blocks.iter().any(|block| block.kind == "hr"));
         assert!(provenance.blocks.iter().any(|block| block.kind == "table"));
-        assert!(provenance.sentences.iter().any(|sentence| {
-            sentence.display_text == "Unicode lead élan et suite finale."
-        }));
+        assert!(
+            provenance
+                .sentences
+                .iter()
+                .any(|sentence| { sentence.display_text == "Unicode lead élan et suite finale." })
+        );
         assert!(provenance.sentences.iter().all(|sentence| {
             sentence.source_start < sentence.source_end
-                && sentence.source_end <= provenance
-                    .blocks
-                    .iter()
-                    .find(|block| block.block_id == sentence.block_id)
-                    .map(|block| block.plain_text.len())
-                    .unwrap_or(0)
+                && sentence.source_end
+                    <= provenance
+                        .blocks
+                        .iter()
+                        .find(|block| block.block_id == sentence.block_id)
+                        .map(|block| block.plain_text.len())
+                        .unwrap_or(0)
         }));
-        assert!(!initial.reading_html_page.as_deref().unwrap_or_default().contains("data-ll-sentence-ids"));
+        assert!(
+            !initial
+                .reading_html_page
+                .as_deref()
+                .unwrap_or_default()
+                .contains("data-ll-sentence-ids")
+        );
     }
     if expected_kind != session::PrettyKind::Html {
         assert_eq!(
@@ -353,7 +381,12 @@ fn representative_epub_builder_is_deterministic_and_loadable() {
                 .collect::<Vec<_>>()
                 .join("\n\n")
         );
-        assert!(provenance.sentences.iter().any(|sentence| sentence.chapter_index == 1));
+        assert!(
+            provenance
+                .sentences
+                .iter()
+                .any(|sentence| sentence.chapter_index == 1)
+        );
         assert!(
             loaded
                 .reading_html

@@ -7,8 +7,8 @@ use lanternleaf_app::pipeline::ReaderCommand;
 use lanternleaf_app::state::AppState;
 use lanternleaf_core::session::{ReaderSettingsPatch, SessionCommand};
 use lanternleaf_core::text_utils;
-use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::thread;
 use tracing::trace;
 
@@ -17,11 +17,11 @@ use crate::app::{
     AnchorFallback, FontRegistry, LanternLeafApp, PrettySentenceSegment, PrettySentenceTarget,
     RepaintNotifier, text_only_mode_transition,
 };
+use crate::pdf_viewport::{PdfPageGeometry, PdfViewportGeometry};
 use crate::pretty::{
     PrettyBlock, PrettyBlockKind, PrettyPageCacheKey, PrettySpan, PrettyStyle, clamp_image_size,
     font_id_for, html_to_blocks, markdown_to_blocks, structured_to_blocks,
 };
-use crate::pdf_viewport::{PdfPageGeometry, PdfViewportGeometry};
 
 const BLOCKQUOTE_RULE_WIDTH: f32 = 1.0;
 const BLOCKQUOTE_INDENT: f32 = 14.0;
@@ -428,13 +428,15 @@ impl LanternLeafApp {
             let scroll_id = ui.make_persistent_id("native_pdf_viewport");
             let prior_state = ScrollAreaState::load(ui.ctx(), scroll_id);
             let prior_witness = self.pdf_geometry_cache.as_ref().and_then(|geometry| {
-                prior_state.as_ref().and_then(|state| geometry.capture_witness(
-                    state.offset.x,
-                    state.offset.y,
-                    ui.available_width().max(1.0),
-                    ui.available_height().max(1.0),
-                    snapshot.current_page,
-                ))
+                prior_state.as_ref().and_then(|state| {
+                    geometry.capture_witness(
+                        state.offset.x,
+                        state.offset.y,
+                        ui.available_width().max(1.0),
+                        ui.available_height().max(1.0),
+                        snapshot.current_page,
+                    )
+                })
             });
             ui.horizontal(|ui| {
                 if ui.button("← Prev page").clicked() {
@@ -497,29 +499,50 @@ impl LanternLeafApp {
             let viewport_width = ui.available_width().max(320.0);
             if ui.button("Fit width").clicked() {
                 let scroll_id = ui.make_persistent_id("native_pdf_viewport");
-                self.pdf_pending_witness = ScrollAreaState::load(ui.ctx(), scroll_id)
-                    .and_then(|state| self.pdf_geometry_cache.as_ref().and_then(|geometry| geometry.capture_witness(
-                        state.offset.x, state.offset.y, viewport_width, ui.available_height().max(1.0), snapshot.current_page,
-                    )));
+                self.pdf_pending_witness =
+                    ScrollAreaState::load(ui.ctx(), scroll_id).and_then(|state| {
+                        self.pdf_geometry_cache.as_ref().and_then(|geometry| {
+                            geometry.capture_witness(
+                                state.offset.x,
+                                state.offset.y,
+                                viewport_width,
+                                ui.available_height().max(1.0),
+                                snapshot.current_page,
+                            )
+                        })
+                    });
                 self.pdf_render_state.zoom_mode = crate::pdf_subsystem::PdfZoomMode::FitWidth;
                 self.pdf_generation = self.pdf_generation.saturating_add(1);
             }
             if ui.button("Fit page").clicked() {
                 let scroll_id = ui.make_persistent_id("native_pdf_viewport");
-                self.pdf_pending_witness = ScrollAreaState::load(ui.ctx(), scroll_id)
-                    .and_then(|state| self.pdf_geometry_cache.as_ref().and_then(|geometry| geometry.capture_witness(
-                        state.offset.x, state.offset.y, viewport_width, ui.available_height().max(1.0), snapshot.current_page,
-                    )));
+                self.pdf_pending_witness =
+                    ScrollAreaState::load(ui.ctx(), scroll_id).and_then(|state| {
+                        self.pdf_geometry_cache.as_ref().and_then(|geometry| {
+                            geometry.capture_witness(
+                                state.offset.x,
+                                state.offset.y,
+                                viewport_width,
+                                ui.available_height().max(1.0),
+                                snapshot.current_page,
+                            )
+                        })
+                    });
                 self.pdf_render_state.zoom_mode = crate::pdf_subsystem::PdfZoomMode::FitPage;
                 self.pdf_generation = self.pdf_generation.saturating_add(1);
             }
             let viewport_height = ui.available_height().max(1.0);
-            let target_aspect = self.pdf_page_aspects.get(&snapshot.current_page).copied().unwrap_or(0.707);
+            let target_aspect = self
+                .pdf_page_aspects
+                .get(&snapshot.current_page)
+                .copied()
+                .unwrap_or(0.707);
             let target_height = crate::pdf_viewport::PDF_BASE_PAGE_WIDTH / target_aspect.max(0.1);
             let zoom = crate::pdf_subsystem::PdfZoomState {
                 mode: self.pdf_render_state.zoom_mode,
                 manual_level: self.pdf_render_state.zoom_level,
-            }.effective_level(
+            }
+            .effective_level(
                 viewport_width,
                 viewport_height,
                 crate::pdf_viewport::PDF_BASE_PAGE_WIDTH,
@@ -527,8 +550,12 @@ impl LanternLeafApp {
             );
             ui.label(match self.pdf_render_state.zoom_mode {
                 crate::pdf_subsystem::PdfZoomMode::Manual => format!("{:.0}%", zoom * 100.0),
-                crate::pdf_subsystem::PdfZoomMode::FitWidth => format!("Fit width ({:.0}%)", zoom * 100.0),
-                crate::pdf_subsystem::PdfZoomMode::FitPage => format!("Fit page ({:.0}%)", zoom * 100.0),
+                crate::pdf_subsystem::PdfZoomMode::FitWidth => {
+                    format!("Fit width ({:.0}%)", zoom * 100.0)
+                }
+                crate::pdf_subsystem::PdfZoomMode::FitPage => {
+                    format!("Fit page ({:.0}%)", zoom * 100.0)
+                }
             });
             let source: std::path::PathBuf = snapshot.source_path.clone().into();
             let render_spec = crate::pdf_renderer::PdfRenderSpec::from_effective_zoom(
@@ -548,13 +575,23 @@ impl LanternLeafApp {
             if self.pdf_geometry_cache_key != Some(geometry_key) {
                 if self.pdf_pending_witness.is_none() {
                     self.pdf_pending_witness = prior_state.as_ref().and_then(|state| {
-                        self.pdf_geometry_cache.as_ref().and_then(|geometry| geometry.capture_witness(
-                            state.offset.x, state.offset.y, viewport_width, viewport_height, snapshot.current_page,
-                        ))
+                        self.pdf_geometry_cache.as_ref().and_then(|geometry| {
+                            geometry.capture_witness(
+                                state.offset.x,
+                                state.offset.y,
+                                viewport_width,
+                                viewport_height,
+                                snapshot.current_page,
+                            )
+                        })
                     });
                 }
                 let page_specs = (0..snapshot.total_pages)
-                    .map(|page| PdfPageGeometry::new(self.pdf_page_aspects.get(&page).copied().unwrap_or(0.707)))
+                    .map(|page| {
+                        PdfPageGeometry::new(
+                            self.pdf_page_aspects.get(&page).copied().unwrap_or(0.707),
+                        )
+                    })
                     .collect::<Vec<_>>();
                 self.pdf_geometry_cache = Some(Arc::new(PdfViewportGeometry::new(
                     &page_specs,
@@ -563,7 +600,11 @@ impl LanternLeafApp {
                 )));
                 self.pdf_geometry_cache_key = Some(geometry_key);
             }
-            let geometry = self.pdf_geometry_cache.as_ref().expect("PDF geometry cache").clone();
+            let geometry = self
+                .pdf_geometry_cache
+                .as_ref()
+                .expect("PDF geometry cache")
+                .clone();
             let current_key = render_spec.key_for(snapshot.current_page);
             let mut planned_keep_pages = self
                 .pdf_render_state
@@ -593,36 +634,66 @@ impl LanternLeafApp {
             let mut pdf_scroll_area = ScrollArea::both().id_source("native_pdf_viewport");
             if self.pdf_pending_jump_page.is_none() {
                 if let Some(witness) = self.pdf_pending_witness {
-                    let (offset_y, offset_x) = geometry.restore_witness(witness, viewport_width, viewport_height);
-                    pdf_scroll_area = pdf_scroll_area.vertical_scroll_offset(offset_y).horizontal_scroll_offset(offset_x);
+                    let (offset_y, offset_x) =
+                        geometry.restore_witness(witness, viewport_width, viewport_height);
+                    pdf_scroll_area = pdf_scroll_area
+                        .vertical_scroll_offset(offset_y)
+                        .horizontal_scroll_offset(offset_x);
                 }
             }
             pdf_scroll_area.show_viewport(ui, |ui, viewport| {
-                let actual_visible = geometry.visible_page_indexes(viewport.min.y, viewport.max.y, 0.0);
+                let actual_visible =
+                    geometry.visible_page_indexes(viewport.min.y, viewport.max.y, 0.0);
                 self.pdf_render_state.visible_page_indexes = actual_visible.clone();
-                let mut visible = geometry.visible_page_indexes(viewport.min.y, viewport.max.y, 900.0);
+                let mut visible =
+                    geometry.visible_page_indexes(viewport.min.y, viewport.max.y, 900.0);
                 if let Some(target) = self.pdf_pending_jump_page {
-                    if !visible.contains(&target) { visible.push(target); visible.sort_unstable(); }
+                    if !visible.contains(&target) {
+                        visible.push(target);
+                        visible.sort_unstable();
+                    }
                 }
-                let current = geometry.current_page(viewport.min.y, viewport.height(), snapshot.current_page);
+                let current =
+                    geometry.current_page(viewport.min.y, viewport.height(), snapshot.current_page);
                 if let Some(page) = current.filter(|page| *page != snapshot.current_page) {
-                    self.execute_reader_command(ReaderCommand::Session(SessionCommand::SetPage { page }));
+                    self.execute_reader_command(ReaderCommand::Session(SessionCommand::SetPage {
+                        page,
+                    }));
                 }
                 ui.set_width(geometry.page_width());
                 ui.set_min_height(geometry.total_height());
                 let mut cursor = 0.0;
                 for page_index in visible {
-                    let Some(slot) = geometry.slots().get(page_index).copied() else { continue };
-                    if slot.top > cursor { ui.add_space(slot.top - cursor); }
+                    let Some(slot) = geometry.slots().get(page_index).copied() else {
+                        continue;
+                    };
+                    if slot.top > cursor {
+                        ui.add_space(slot.top - cursor);
+                    }
                     let key = render_spec.key_for(page_index);
                     let _response = if let Some(texture) = self.pdf_textures.get(&key) {
-                        ui.add(Image::new(texture).fit_to_exact_size(eframe::egui::vec2(slot.width, slot.height)))
+                        ui.add(
+                            Image::new(texture)
+                                .fit_to_exact_size(eframe::egui::vec2(slot.width, slot.height)),
+                        )
                     } else if let Some(error) = self.pdf_render_errors.get(&key) {
-                        ui.allocate_ui(eframe::egui::vec2(slot.width, slot.height), |ui| ui.centered_and_justified(|ui| ui.label(format!("PDF page unavailable: {error}")))).response
+                        ui.allocate_ui(eframe::egui::vec2(slot.width, slot.height), |ui| {
+                            ui.centered_and_justified(|ui| {
+                                ui.label(format!("PDF page unavailable: {error}"))
+                            })
+                        })
+                        .response
                     } else {
-                        ui.allocate_ui(eframe::egui::vec2(slot.width, slot.height), |ui| ui.centered_and_justified(|ui| ui.label(format!("Rendering page {}…", page_index + 1)))).response
+                        ui.allocate_ui(eframe::egui::vec2(slot.width, slot.height), |ui| {
+                            ui.centered_and_justified(|ui| {
+                                ui.label(format!("Rendering page {}…", page_index + 1))
+                            })
+                        })
+                        .response
                     };
-                    if self.pdf_pending_jump_page == Some(page_index) { _response.scroll_to_me(Some(Align::Center)); }
+                    if self.pdf_pending_jump_page == Some(page_index) {
+                        _response.scroll_to_me(Some(Align::Center));
+                    }
                     cursor = slot.bottom();
                     ui.add_space(geometry.gap());
                 }

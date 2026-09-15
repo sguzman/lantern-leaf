@@ -229,8 +229,7 @@ impl ReaderSession {
         if needs_refresh {
             let plan_started = std::time::Instant::now();
             let page_text_chars = self
-                .pages
-                .get(self.current_page)
+                .active_page_text(self.current_page)
                 .map(|value| value.len())
                 .unwrap_or(0);
             tracing::trace!(
@@ -241,7 +240,7 @@ impl ReaderSession {
                 "Building normalization/TTS plan from canonical plain text page"
             );
             let display = self
-                .raw_page_sentences
+                .active_page_sentences()
                 .get(self.current_page)
                 .cloned()
                 .unwrap_or_default();
@@ -518,10 +517,21 @@ impl ReaderSession {
     ) -> Vec<usize> {
         let plan = self.ensure_current_plan(normalizer);
         let page_base = self
-            .page_sentence_counts
-            .iter()
-            .take(self.current_page)
-            .sum::<usize>();
+            .pdf_text_document()
+            .and_then(|document| {
+                document
+                    .page_sentence_prefix_sums
+                    .get(self.current_page)
+                    .copied()
+            })
+            .unwrap_or_else(|| {
+                #[cfg(test)]
+                super::record_enriched_linear_scan_fallback();
+                self.active_page_sentence_counts()
+                    .iter()
+                    .take(self.current_page)
+                    .sum()
+            });
         plan.audio_to_display
             .iter()
             .map(|idx| page_base.saturating_add(*idx))
@@ -577,13 +587,19 @@ impl ReaderSession {
         direction: isize,
         normalizer: &normalizer::TextNormalizer,
     ) -> bool {
-        if direction == 0 || self.pages.is_empty() {
+        if direction == 0 || self.page_domain_len() == 0 {
             return false;
         }
         let mut page = self.current_page as isize + direction;
-        while page >= 0 && (page as usize) < self.pages.len() {
+        while page >= 0 && (page as usize) < self.page_domain_len() {
             let idx = page as usize;
-            if self.page_sentence_counts.get(idx).copied().unwrap_or(0) > 0 {
+            if self
+                .active_page_sentence_counts()
+                .get(idx)
+                .copied()
+                .unwrap_or(0)
+                > 0
+            {
                 self.set_page(idx, normalizer);
                 return true;
             }
