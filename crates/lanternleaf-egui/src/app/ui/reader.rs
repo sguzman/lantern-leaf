@@ -3663,4 +3663,13 @@ mod tests {
             2..5
         );
     }
+
+    #[test]
+    fn search_excerpt_is_bounded_and_preserves_match_state_contract() {
+        let long = "match ".repeat(80);
+        let excerpt = bounded_search_excerpt(&long);
+        assert!(excerpt.ends_with('…'));
+        assert!(excerpt.chars().count() <= 121);
+        assert_eq!(bounded_search_excerpt("short match"), "short match");
+    }
 }
