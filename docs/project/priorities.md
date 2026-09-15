@@ -106,25 +106,23 @@ After Fit Width/Fit Page, `+/-` should step from the current effective fit perce
 
 ## P4 — Goal 0022: trustworthy native PDF embedded text + TTS
 
-**READY A6 — CURRENT SUBSTANTIVE PRODUCT PRIORITY**
+**READY A7 — CURRENT SUBSTANTIVE PRODUCT PRIORITY**
 
-A1 through A5 were rejected before human QA; none is accepted for physical testing.
+A1 through A6 were rejected before human QA; none is accepted for physical testing.
 
-A5 established the shared immutable trusted-PDF document model, current-live-state adoption, bounded enriched projection behavior, background cache/native work, Current/Nearby preemption, bounded text chunks, policy promotion, and fresh hosted Windows validation.
+A6 fixed the correctness gaps from A5: the shared trusted document now owns later-page/global canonical sentence identity, first-sample identity and final-document exhaustion are covered, current live search is reconciled off-thread with query/source/generation stale safety, and trusted publication has an explicit bounded API. Fresh hosted Windows `native-workspace` and `hosted-renderer-probe` validation passed.
 
-A6 owns the remaining director blockers:
+A7 owns two remaining director blockers:
 
-- make the shared trusted document authoritative for every local -> global canonical sentence identity and true TTS document-exhaustion decision;
-- automatically reconcile the current live search query when trusted text arrives, including queries changed or cleared while preparation is in flight, without whole-document egui scanning;
-- explicitly retire document-scale shared payloads off egui so final Arc destruction cannot fall onto the render thread;
-- make the bounded enriched-PDF runtime projection an explicit API/invariant.
+- replace enriched `ReaderSnapshot`/session per-drop `std::thread::spawn()` with one bounded shared off-egui retirement worker/queue so rapid continuous-page ownership, navigation, search, and settings cannot create one OS thread per retired snapshot;
+- make the explicit enriched-PDF projection actually independent of total native page count by using prepared prefix indexes for global sentence bases, before/after-page checks, final-exhaustion checks, TTS display IDs, and global-sentence -> page lookup.
 
 Hard exclusions remain: Quack-check, Python, Docling, OCR, exact sentence overlays, and hostile-PDF recovery.
 
 The visual reader must remain usable before, during, and after text/cache/search enrichment failure.
 
-Authoritative A6 contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
-A5 rejection: `docs/work/reviews/0022-a5-director-rejection.md`.
+Authoritative A7 contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
+A6 rejection: `docs/work/reviews/0022-a6-director-rejection.md`.
 Architecture boundary: `docs/architecture/pdf-text-recovery-boundary-2026-09.md`.
 
 ## P4.1 — Native PDF sentence geometry/highlight/follow
