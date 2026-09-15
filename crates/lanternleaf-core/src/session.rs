@@ -3059,6 +3059,64 @@ mod tests {
     }
 
     #[test]
+    fn enriched_pdf_tts_uses_page_local_plan_boundaries_on_later_pages() {
+        let path = unique_pdf_source_path();
+        fs::write(&path, b"%PDF-1.7\nlarge-plan-fixture").expect("write readable PDF");
+        let normalizer = normalizer::TextNormalizer::default();
+        let first_page = (0..200)
+            .map(|idx| format!("First page sentence {idx}."))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let later_page = (0..100)
+            .map(|idx| format!("Later page sentence {idx}."))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut session = ReaderSession::from_pages_for_test(
+            path.clone(),
+            "large-plan.pdf".to_string(),
+            vec![String::new(), String::new()],
+            vec![Vec::new(), Vec::new()],
+        );
+        session.set_pdf_page_count(2);
+        let prepared =
+            ReaderSession::prepare_pdf_embedded_text(vec![first_page, later_page], "", true)
+                .expect("prepare large trusted text");
+        session
+            .apply_prepared_pdf_embedded_text(Arc::new(prepared))
+            .expect("adopt large trusted text");
+        session.set_page(1, &normalizer);
+        session.tts_play(&normalizer);
+        let page_base = session
+            .pdf_text_document()
+            .expect("prepared document")
+            .page_sentence_prefix_sums[1];
+        assert!(page_base > ReaderSession::TTS_PLAN_WINDOW);
+        let _ = session.current_tts_audio_display_ids(&normalizer);
+        assert_eq!(session.current_plan_page, Some(1));
+        let initial_window = (
+            session.current_plan_display_start,
+            session.current_plan_display_end,
+        );
+
+        for local_idx in 0..4 {
+            session
+                .apply_tts_sentence_boundary(&normalizer, local_idx, page_base + local_idx)
+                .expect("later-page boundary");
+            assert!(session.current_plan.is_some());
+            assert_eq!(session.current_plan_page, Some(1));
+            assert_eq!(
+                (
+                    session.current_plan_display_start,
+                    session.current_plan_display_end
+                ),
+                initial_window,
+                "global canonical base must not invalidate a local plan"
+            );
+        }
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn enriched_pdf_reconciles_live_search_query_and_rejects_stale_results() {
         let path = unique_pdf_source_path();
         fs::write(&path, b"%PDF-1.7\nvisual-session-fixture").expect("write readable PDF");

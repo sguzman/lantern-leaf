@@ -579,7 +579,10 @@ impl ReaderSession {
         self.highlighted_audio_idx = Some(audio_idx);
         self.highlighted_canonical_idx = Some(canonical_display_id);
         self.highlighted_display_idx = Some(local_idx);
-        if canonical_display_id.saturating_add(1) >= self.current_plan_display_end {
+        let plan_is_outside_local_identity = self.current_plan_page != Some(page)
+            || local_idx < self.current_plan_display_start
+            || local_idx.saturating_add(1) >= self.current_plan_display_end;
+        if plan_is_outside_local_identity {
             self.current_plan = None;
             self.current_plan_page = None;
         }

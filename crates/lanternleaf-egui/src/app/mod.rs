@@ -432,6 +432,10 @@ struct LanternLeafApp {
     lifecycle: LifecycleHandshake,
     search_panel_open: bool,
     pending_search_focus: bool,
+    search_editor_focused: bool,
+    search_query_draft: String,
+    search_query_draft_source: Option<String>,
+    search_query_draft_dirty: bool,
     last_plan: Option<DispatchPlan>,
     auto_scroll_state: AutoScrollState,
     text_only_override: Option<bool>,
@@ -982,6 +986,24 @@ fn decode_pretty_image(
     })
 }
 
+pub(crate) fn reconcile_search_query_draft(
+    draft: &mut String,
+    dirty: &mut bool,
+    draft_source: &mut Option<String>,
+    authoritative_source: Option<&str>,
+    authoritative_query: &str,
+) {
+    if draft_source.as_deref() != authoritative_source {
+        *draft_source = authoritative_source.map(str::to_owned);
+        *draft = authoritative_query.to_owned();
+        *dirty = false;
+    } else if !*dirty {
+        *draft = authoritative_query.to_owned();
+    } else if draft == authoritative_query {
+        *dirty = false;
+    }
+}
+
 impl LanternLeafApp {
     const OVERLAY_EVICTION_SNACK_DURATION: Duration = Duration::from_secs(5);
     #[cfg(not(target_arch = "wasm32"))]
@@ -1032,6 +1054,10 @@ impl LanternLeafApp {
             lifecycle: LifecycleHandshake::default(),
             search_panel_open: false,
             pending_search_focus: false,
+            search_editor_focused: false,
+            search_query_draft: String::new(),
+            search_query_draft_source: None,
+            search_query_draft_dirty: false,
             last_plan: None,
             auto_scroll_state: AutoScrollState::default(),
             text_only_override: None,
@@ -1185,6 +1211,10 @@ impl LanternLeafApp {
             lifecycle: LifecycleHandshake::default(),
             search_panel_open: false,
             pending_search_focus: false,
+            search_editor_focused: false,
+            search_query_draft: String::new(),
+            search_query_draft_source: None,
+            search_query_draft_dirty: false,
             last_plan: None,
             auto_scroll_state: AutoScrollState::default(),
             text_only_override: None,
@@ -1295,6 +1325,8 @@ impl LanternLeafApp {
             state,
             self.show_safe_quit_modal,
             self.show_reader_confirm_modal,
+            self.search_panel_open,
+            self.search_editor_focused,
             self.pending_search_focus,
         );
     }
@@ -3592,6 +3624,10 @@ impl eframe::App for LanternLeafApp {
         if reader_snapshot.is_none() {
             self.search_panel_open = false;
             self.pending_search_focus = false;
+            self.search_editor_focused = false;
+            self.search_query_draft.clear();
+            self.search_query_draft_source = None;
+            self.search_query_draft_dirty = false;
             self.text_only_override = None;
             self.text_only_toggle_pending = false;
             self.text_only_pending_target = None;
@@ -3681,6 +3717,63 @@ mod tts_repaint_policy_tests {
         assert!(super::search_panel_is_visible(open));
         open = false; // only an explicit close may hide the panel.
         assert!(!super::search_panel_is_visible(open));
+    }
+
+    #[test]
+    fn delayed_search_acknowledgements_cannot_erase_newer_draft() {
+        let mut draft = String::new();
+        let mut dirty = false;
+        let mut source = None;
+        super::reconcile_search_query_draft(
+            &mut draft,
+            &mut dirty,
+            &mut source,
+            Some("book.epub"),
+            "",
+        );
+        for (typed, stale_ack) in [("f", ""), ("fs", "f"), ("fsr", "fs")] {
+            draft = typed.to_string();
+            dirty = true;
+            super::reconcile_search_query_draft(
+                &mut draft,
+                &mut dirty,
+                &mut source,
+                Some("book.epub"),
+                stale_ack,
+            );
+            assert_eq!(draft, typed);
+            assert!(dirty);
+        }
+        super::reconcile_search_query_draft(
+            &mut draft,
+            &mut dirty,
+            &mut source,
+            Some("book.epub"),
+            "fsr",
+        );
+        assert_eq!(draft, "fsr");
+        assert!(!dirty);
+
+        draft.clear();
+        dirty = true;
+        super::reconcile_search_query_draft(
+            &mut draft,
+            &mut dirty,
+            &mut source,
+            Some("book.epub"),
+            "fsr",
+        );
+        assert!(draft.is_empty(), "stale ack must not restore cleared draft");
+        assert!(dirty);
+        super::reconcile_search_query_draft(
+            &mut draft,
+            &mut dirty,
+            &mut source,
+            Some("book.epub"),
+            "",
+        );
+        assert!(draft.is_empty());
+        assert!(!dirty);
     }
 
     #[test]

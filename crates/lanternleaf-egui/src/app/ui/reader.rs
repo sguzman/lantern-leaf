@@ -1887,25 +1887,37 @@ impl LanternLeafApp {
     }
 
     pub(crate) fn render_search_panel(&mut self, ui: &mut Ui, state: &AppState) {
+        let authoritative_source = state.reader_ui.source_path.clone();
+        super::super::reconcile_search_query_draft(
+            &mut self.search_query_draft,
+            &mut self.search_query_draft_dirty,
+            &mut self.search_query_draft_source,
+            authoritative_source.as_deref(),
+            &state.reader_ui.search_query,
+        );
         ui.horizontal(|ui| {
             ui.heading("Search");
             if ui.button("Close").clicked() {
                 self.search_panel_open = false;
                 self.pending_search_focus = false;
+                self.search_editor_focused = false;
+                self.search_query_draft = state.reader_ui.search_query.clone();
+                self.search_query_draft_dirty = false;
             }
         });
-        let mut query = state.reader_ui.search_query.clone();
         let response = ui.add(
-            TextEdit::singleline(&mut query)
+            TextEdit::singleline(&mut self.search_query_draft)
                 .id_source("reader-search-query")
                 .hint_text("Search current document"),
         );
         if consume_search_focus_request(&mut self.pending_search_focus) {
             response.request_focus();
         }
+        self.search_editor_focused = response.has_focus();
         if response.changed() {
+            self.search_query_draft_dirty = true;
             self.execute_reader_command(ReaderCommand::Session(SessionCommand::SearchSetQuery {
-                query,
+                query: self.search_query_draft.clone(),
             }));
         }
         ui.label(format!("Matches: {}", state.reader_ui.search_matches.len()));
