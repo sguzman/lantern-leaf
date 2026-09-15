@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-15 after Goal 0022 A5 director rejection and A6 reopening.
+Updated: 2026-09-15 after Goal 0022 A6 director rejection and A7 reopening.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -79,7 +79,7 @@ The real 105,570-book Caliberate library becomes usable while the catalog is sti
 
 **QUEUED — MINOR POLISH**
 
-Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe reflow without permanent highlight pinning or fighting user scrolling.
+Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow without permanent highlight pinning or fighting user scrolling.
 
 ## Goal 0017 — progressive cover backpressure / cached-hydration scaling
 
@@ -133,7 +133,7 @@ Real-desktop acceptance: `docs/work/reviews/0020-a3-real-desktop-acceptance.md`.
 
 ## Gate 4 — PDF text/TTS/highlight synchronization
 
-**ACTIVE NEXT CORE PRODUCT GATE — GOAL 0022 A6 READY**
+**ACTIVE NEXT CORE PRODUCT GATE — GOAL 0022 A7 READY**
 
 The Gate-4 architecture remains native-first and recovery-isolated. Quack-check is **not** trusted as baseline infrastructure and cannot block visual open. The accepted recovery boundary is documented in `docs/architecture/pdf-text-recovery-boundary-2026-09.md`.
 
@@ -147,23 +147,22 @@ The standalone `sguzman/quack-check` repository is not a runtime dependency. Goa
 
 ### Goal 0022 — native PDF embedded-text/TTS trustworthy path
 
-**READY A6 — A1/A2/A3/A4/A5 REJECTED BEFORE HUMAN QA**
+**READY A7 — A1 THROUGH A6 REJECTED BEFORE HUMAN QA**
 
-A5 successfully introduced shared immutable prepared PDF text state, preserved current live mutable session state at adoption time, kept cache/native work off egui, retained Current/Nearby raster preemption and bounded extraction, and passed fresh hosted Windows validation.
+A6 fixed the A5 correctness defects: the trusted document now owns later-page/global canonical sentence identity, first-sample identity and final-document exhaustion are covered, live search reconciliation is off-thread and source/generation/query-revision stale-safe, and the enriched PDF publication path is explicitly named. Fresh hosted Windows `native-workspace` and `hosted-renderer-probe` validation passed on the A6 substantive commit.
 
-Director review still found two production correctness blockers plus one lifecycle hardening gap:
+Director review still found two blocking lifecycle/boundedness defects:
 
-- enriched-PDF `global_display_idx()` still uses the legacy pre-enrichment page-count vector, so later-page canonical identity and true end-of-document TTS detection can be wrong;
-- a search query entered before or changed during enrichment is preserved as text but is not automatically reconciled against the newly trusted document when trust arrives;
-- final destruction of inner document-scale Arc payloads is not yet explicitly guaranteed off egui during replacement/retirement.
+- enriched `ReaderSnapshot::drop()` starts a new OS thread for each retired full snapshot. Continuous viewport `SetPage` churn can therefore couple rapid PDF scrolling/navigation to unbounded short-lived thread creation, risking regression of Goal 0020's physically accepted responsiveness;
+- `snapshot_enriched_pdf_bounded()` still reaches helpers that linearly scan native-page sentence-count vectors (`global_display_idx`, before/after-page checks), despite the prepared document already owning prefix indexes. The named bounded projection therefore is not actually independent of total PDF page count.
 
-A6 therefore makes the shared prepared document authoritative for all canonical global identity, adds stale-safe off-egui live-query reconciliation, makes enriched-PDF bounded projection explicit, and closes document-retirement thread ownership.
+A7 owns a single bounded off-egui retirement worker/queue plus prefix-indexed/O(1)-or-O(log pages) trusted-PDF identity/projection helpers.
 
 Authoritative contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
-A5 rejection: `docs/work/reviews/0022-a5-director-rejection.md`.
+A6 rejection: `docs/work/reviews/0022-a6-director-rejection.md`.
 
 ## Workflow status
 
-**GOAL 0022 A6 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
+**GOAL 0022 A7 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
 
-No human QA is authorized for A5. Goals 0015, 0017, 0018, and 0021 remain queued. Goal 0011 remains deferred. Exact native PDF spoken overlays/follow come after Goal 0022. Hostile-PDF Quack-check/Docling/OCR recovery comes only after the native trustworthy-text path is physically accepted.
+No human QA is authorized for A6. Goals 0015, 0017, 0018, and 0021 remain queued. Goal 0011 remains deferred. Exact native PDF spoken overlays/follow come after Goal 0022. Hostile-PDF Quack-check/Docling/OCR recovery comes only after the native trustworthy-text path is physically accepted.
