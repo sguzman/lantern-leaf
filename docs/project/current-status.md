@@ -1,6 +1,6 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-14 after Goal 0022 A4 director rejection and A5 reopening.
+Updated: 2026-09-15 after Goal 0022 A5 director rejection and A6 reopening.
 
 This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
 
@@ -79,7 +79,7 @@ The real 105,570-book Caliberate library becomes usable while the catalog is sti
 
 **QUEUED — MINOR POLISH**
 
-Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow without permanent highlight pinning or fighting user scrolling.
+Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe reflow without permanent highlight pinning or fighting user scrolling.
 
 ## Goal 0017 — progressive cover backpressure / cached-hydration scaling
 
@@ -133,7 +133,7 @@ Real-desktop acceptance: `docs/work/reviews/0020-a3-real-desktop-acceptance.md`.
 
 ## Gate 4 — PDF text/TTS/highlight synchronization
 
-**ACTIVE NEXT CORE PRODUCT GATE — GOAL 0022 A5 READY**
+**ACTIVE NEXT CORE PRODUCT GATE — GOAL 0022 A6 READY**
 
 The Gate-4 architecture remains native-first and recovery-isolated. Quack-check is **not** trusted as baseline infrastructure and cannot block visual open. The accepted recovery boundary is documented in `docs/architecture/pdf-text-recovery-boundary-2026-09.md`.
 
@@ -147,22 +147,23 @@ The standalone `sguzman/quack-check` repository is not a runtime dependency. Goa
 
 ### Goal 0022 — native PDF embedded-text/TTS trustworthy path
 
-**READY A5 — A1/A2/A3/A4 REJECTED BEFORE HUMAN QA**
+**READY A6 — A1/A2/A3/A4/A5 REJECTED BEFORE HUMAN QA**
 
-A4 fixed the explicit A3 blockers: cache load/parse moved off egui, FullText search became document-wide with native-page navigation, UI-facing native request enqueue became nonblocking, Current/Nearby raster preemption remained intact, bounded eight-page extraction remained intact, and fresh hosted Windows validation is green.
+A5 successfully introduced shared immutable prepared PDF text state, preserved current live mutable session state at adoption time, kept cache/native work off egui, retained Current/Nearby raster preemption and bounded extraction, and passed fresh hosted Windows validation.
 
-Director review still found two blocking adoption-boundary defects:
+Director review still found two production correctness blockers plus one lifecycle hardening gap:
 
-- the worker builds the final runtime `ReaderSnapshot` from a clone of mutable live session state captured before asynchronous preparation, so user changes made while preparation runs can be overwritten by a stale snapshot at commit time;
-- live adoption still returns a full document-wide canonical sentence `Vec<String>` and A4 discards it with `Ok(_)` on egui, causing O(document) string destruction on the render thread.
+- enriched-PDF `global_display_idx()` still uses the legacy pre-enrichment page-count vector, so later-page canonical identity and true end-of-document TTS detection can be wrong;
+- a search query entered before or changed during enrichment is preserved as text but is not automatically reconciled against the newly trusted document when trust arrives;
+- final destruction of inner document-scale Arc payloads is not yet explicitly guaranteed off egui during replacement/retirement.
 
-A5 therefore owns a shared immutable prepared PDF text document/state boundary, preservation of live mutable state at commit time, a genuinely bounded runtime patch/projection, and elimination of document-scale allocation/clone/drop work from egui.
+A6 therefore makes the shared prepared document authoritative for all canonical global identity, adds stale-safe off-egui live-query reconciliation, makes enriched-PDF bounded projection explicit, and closes document-retirement thread ownership.
 
 Authoritative contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
-A4 rejection: `docs/work/reviews/0022-a4-director-rejection.md`.
+A5 rejection: `docs/work/reviews/0022-a5-director-rejection.md`.
 
 ## Workflow status
 
-**GOAL 0022 A5 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
+**GOAL 0022 A6 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
 
-No human QA is authorized for A4. Goals 0015, 0017, 0018, and 0021 remain queued. Goal 0011 remains deferred. Exact native PDF spoken overlays/follow come after Goal 0022. Hostile-PDF Quack-check/Docling/OCR recovery comes only after the native trustworthy-text path is physically accepted.
+No human QA is authorized for A5. Goals 0015, 0017, 0018, and 0021 remain queued. Goal 0011 remains deferred. Exact native PDF spoken overlays/follow come after Goal 0022. Hostile-PDF Quack-check/Docling/OCR recovery comes only after the native trustworthy-text path is physically accepted.
