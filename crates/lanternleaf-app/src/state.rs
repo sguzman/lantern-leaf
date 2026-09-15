@@ -133,7 +133,7 @@ pub struct ReaderUiState {
     pub text_only_mode: bool,
     pub pretty_kind: Option<crate::contracts::PrettyKind>,
     pub search_query: String,
-    pub search_matches: Vec<usize>,
+    pub search_matches: Arc<Vec<usize>>,
     pub selected_search_match: Option<usize>,
     pub panels: Option<crate::contracts::PanelState>,
     pub settings: Option<crate::contracts::ReaderSettingsView>,
@@ -357,7 +357,7 @@ impl AppState {
             self.reader_document.canonical_page_text = Some(Arc::from(reader.page_text.as_str()));
             self.reader_document.pretty_kind = Some(reader.pretty_kind);
             self.reader_document.images = Arc::new(reader.images.clone());
-            self.reader_document.sentence_anchor_map = Arc::new(reader.sentence_anchor_map.clone());
+            self.reader_document.sentence_anchor_map = Arc::clone(&reader.sentence_anchor_map);
             self.reader_document.pdf_sync_metadata = Some(PdfSyncMetadata {
                 geometry_mode: reader.pdf_geometry_mode,
                 sync_strategy: reader.pdf_sync_strategy,
@@ -588,8 +588,8 @@ pub fn derive_reader_ui(reader: Option<&ReaderSnapshot>) -> ReaderUiState {
             .map(|value| value.search_query.clone())
             .unwrap_or_default(),
         search_matches: reader
-            .map(|value| value.search_matches.clone())
-            .unwrap_or_default(),
+            .map(|value| Arc::clone(&value.search_matches))
+            .unwrap_or_else(|| Arc::new(Vec::new())),
         selected_search_match: reader.and_then(|value| value.selected_search_match),
         panels: reader.map(|value| value.panels),
         settings: reader.map(|value| value.settings.clone()),
@@ -642,14 +642,14 @@ mod tests {
             tts_current_sentence_text: Some("one".to_string()),
             page_text: "page".to_string(),
             sentences: vec!["one".to_string()],
-            canonical_sentences: vec!["one".to_string()],
-            page_sentence_counts: vec![1],
-            sentence_anchor_map: vec![Some(0)],
+            canonical_sentences: vec!["one".to_string()].into(),
+            page_sentence_counts: vec![1].into(),
+            sentence_anchor_map: vec![Some(0)].into(),
             structured_document: None,
             highlighted_canonical_idx: Some(0),
             highlighted_sentence_idx: Some(0),
             search_query: "query".to_string(),
-            search_matches: vec![0],
+            search_matches: vec![0].into(),
             selected_search_match: Some(0),
             settings: session::ReaderSettingsView {
                 theme: config::ThemeMode::Day,
@@ -729,7 +729,7 @@ mod tests {
         assert_eq!(reader_ui.total_pages, Some(12));
         assert_eq!(reader_ui.pretty_kind, Some(PrettyKind::Html));
         assert_eq!(reader_ui.search_query, "query");
-        assert_eq!(reader_ui.search_matches, vec![0]);
+        assert_eq!(reader_ui.search_matches, vec![0].into());
         assert_eq!(reader_ui.selected_search_match, Some(0));
         assert_eq!(reader_ui.panels, Some(snapshot.panels));
     }

@@ -2894,12 +2894,12 @@ impl LanternLeafApp {
                             self.pdf_worker
                                 .request_metadata(PathBuf::from(&snapshot.source_path)),
                         );
-                        let source_identity = pdf_source_identity(&source_path);
                         let (cache_tx, cache_rx) = mpsc::sync_channel(1);
                         let cache_service = Arc::clone(&self.cache_service);
                         let cache_path = source_path.clone();
                         let expected_pages = snapshot.total_pages;
                         std::thread::spawn(move || {
+                            let source_identity = pdf_source_identity(&cache_path);
                             let artifact = cache_service
                                 .load_pdf_render_precomputed_state(&cache_path)
                                 .filter(|artifact| {
@@ -3918,8 +3918,8 @@ mod tests {
         snapshot.pretty_kind = PrettyKind::Markdown;
         snapshot.reading_markdown_page = Some("Idle pretty build.".to_string());
         snapshot.sentences = vec!["Idle pretty build.".to_string()];
-        snapshot.canonical_sentences = snapshot.sentences.clone();
-        snapshot.page_sentence_counts = vec![1];
+        snapshot.canonical_sentences = snapshot.sentences.clone().into();
+        snapshot.page_sentence_counts = vec![1].into();
         let key = PrettyPageCacheKey {
             source_path: snapshot.source_path.clone(),
             page: 0,
@@ -4075,14 +4075,14 @@ mod tests {
             tts_current_sentence_text: None,
             page_text: String::new(),
             sentences: vec!["one".to_string()],
-            canonical_sentences: vec!["one".to_string()],
-            page_sentence_counts: vec![1],
-            sentence_anchor_map: vec![Some(0)],
+            canonical_sentences: vec!["one".to_string()].into(),
+            page_sentence_counts: vec![1].into(),
+            sentence_anchor_map: vec![Some(0)].into(),
             structured_document: None,
             highlighted_canonical_idx: Some(0),
             highlighted_sentence_idx: Some(0),
             search_query: String::new(),
-            search_matches: Vec::new(),
+            search_matches: Vec::new().into(),
             selected_search_match: None,
             settings: ReaderSettingsView {
                 theme: config::ThemeMode::Day,
@@ -4305,7 +4305,7 @@ mod tests {
     #[test]
     fn resolve_sentence_anchor_prefers_exact_match() {
         let mut snapshot = make_reader_snapshot();
-        snapshot.sentence_anchor_map = vec![Some(7), None];
+        snapshot.sentence_anchor_map = vec![Some(7), None].into();
         let (anchor, fallback) = LanternLeafApp::resolve_sentence_anchor(&snapshot, 0);
         assert_eq!(anchor, Some(7));
         assert_eq!(fallback, AnchorFallback::Exact);
@@ -4314,7 +4314,7 @@ mod tests {
     #[test]
     fn resolve_sentence_anchor_falls_back_to_nearest() {
         let mut snapshot = make_reader_snapshot();
-        snapshot.sentence_anchor_map = vec![None, Some(4), None, None];
+        snapshot.sentence_anchor_map = vec![None, Some(4), None, None].into();
         let (anchor, fallback) = LanternLeafApp::resolve_sentence_anchor(&snapshot, 0);
         assert_eq!(anchor, Some(4));
         assert_eq!(fallback, AnchorFallback::Nearest);

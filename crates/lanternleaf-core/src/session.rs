@@ -176,16 +176,16 @@ pub struct ReaderSnapshot {
     pub tts_current_sentence_text: Option<String>,
     pub page_text: String,
     pub sentences: Vec<String>,
-    pub canonical_sentences: Vec<String>,
-    pub page_sentence_counts: Vec<usize>,
-    pub sentence_anchor_map: Vec<Option<usize>>,
+    pub canonical_sentences: Arc<Vec<String>>,
+    pub page_sentence_counts: Arc<Vec<usize>>,
+    pub sentence_anchor_map: Arc<Vec<Option<usize>>>,
     #[serde(skip)]
     #[ts(skip)]
     pub structured_document: Option<Arc<crate::epub_loader::StructuredDocument>>,
     pub highlighted_canonical_idx: Option<usize>,
     pub highlighted_sentence_idx: Option<usize>,
     pub search_query: String,
-    pub search_matches: Vec<usize>,
+    pub search_matches: Arc<Vec<usize>>,
     pub selected_search_match: Option<usize>,
     pub settings: ReaderSettingsView,
     pub tts: ReaderTtsView,
@@ -1412,11 +1412,12 @@ impl ReaderSession {
         } else {
             self.current_sentences(normalizer)
         };
-        let canonical_sentences = self
-            .raw_page_sentences
-            .iter()
-            .flat_map(|page| page.iter().cloned())
-            .collect();
+        let canonical_sentences = Arc::new(
+            self.raw_page_sentences
+                .iter()
+                .flat_map(|page| page.iter().cloned())
+                .collect(),
+        );
         let sentence_anchor_map = self.current_sentence_anchor_map();
         let anchor_hits = sentence_anchor_map
             .iter()
@@ -1510,13 +1511,13 @@ impl ReaderSession {
             page_text: tts_text_page,
             sentences,
             canonical_sentences,
-            page_sentence_counts: self.page_sentence_counts.clone(),
-            sentence_anchor_map,
+            page_sentence_counts: Arc::new(self.page_sentence_counts.clone()),
+            sentence_anchor_map: Arc::new(sentence_anchor_map),
             structured_document: self.structured_document.clone(),
             highlighted_canonical_idx: self.highlighted_canonical_idx(),
             highlighted_sentence_idx,
             search_query: self.search_query.clone(),
-            search_matches: self.search_matches.clone(),
+            search_matches: Arc::new(self.search_matches.clone()),
             selected_search_match: self.selected_search_match,
             settings: self.settings_view(),
             tts,
@@ -1805,22 +1806,27 @@ impl ReaderSession {
             return;
         }
 
-        let sentences: Vec<String> = if self.is_pdf_source() && !self.raw_page_sentences.is_empty()
-        {
-            self.raw_page_sentences.iter().flatten().cloned().collect()
-        } else {
-            self.current_sentences(normalizer)
-        };
         let regex = Regex::new(&query).ok();
         let query_lower = query.to_ascii_lowercase();
-        for (idx, sentence) in sentences.iter().enumerate() {
-            let matched = if let Some(regex) = &regex {
-                regex.is_match(sentence)
-            } else {
-                sentence.to_ascii_lowercase().contains(&query_lower)
-            };
-            if matched {
-                self.search_matches.push(idx);
+        if self.is_pdf_source() && !self.raw_page_sentences.is_empty() {
+            for (idx, sentence) in self.raw_page_sentences.iter().flatten().enumerate() {
+                let matched = regex
+                    .as_ref()
+                    .map(|regex| regex.is_match(sentence))
+                    .unwrap_or_else(|| sentence.to_ascii_lowercase().contains(&query_lower));
+                if matched {
+                    self.search_matches.push(idx);
+                }
+            }
+        } else {
+            for (idx, sentence) in self.current_sentences(normalizer).iter().enumerate() {
+                let matched = regex
+                    .as_ref()
+                    .map(|regex| regex.is_match(sentence))
+                    .unwrap_or_else(|| sentence.to_ascii_lowercase().contains(&query_lower));
+                if matched {
+                    self.search_matches.push(idx);
+                }
             }
         }
         if !self.search_matches.is_empty() {
@@ -2452,7 +2458,7 @@ mod tests {
         assert!(!policy.pretty_sync_enabled);
         assert!(!policy.exact_sentence_sync);
         assert_eq!(adopted.total_pages, 3);
-        assert_eq!(adopted.page_sentence_counts, vec![1, 1, 1]);
+        assert_eq!(adopted.page_sentence_counts, vec![1, 1, 1].into());
 
         session.toggle_text_only(&normalizer);
         assert!(session.text_only_mode);

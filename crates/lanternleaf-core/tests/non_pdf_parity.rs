@@ -158,7 +158,7 @@ fn assert_session_contract(path: &Path, expected_kind: session::PrettyKind, conf
         );
         assert_eq!(
             initial.page_sentence_counts,
-            vec![provenance.sentences.len()],
+            vec![provenance.sentences.len()].into(),
             "structured EPUB ownership must remain one explicit logical page"
         );
         assert_eq!(provenance.sentences[0].canonical_display_id, 0);

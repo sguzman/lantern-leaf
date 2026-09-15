@@ -971,32 +971,18 @@ impl PdfNativeService {
         source: PathBuf,
     ) -> mpsc::Receiver<Result<PdfMetadata, String>> {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
-        match self.metadata_tx.try_send(PdfMetadataRequest {
-            source,
-            reply: reply_tx,
-        }) {
-            Ok(()) => self.scheduler.1.notify_one(),
-            Err(std::sync::mpsc::TrySendError::Full(mut request)) => {
-                let tx = self.metadata_tx.clone();
-                let scheduler = Arc::clone(&self.scheduler);
-                std::thread::spawn(move || {
-                    loop {
-                        match tx.try_send(request) {
-                            Ok(()) => {
-                                scheduler.1.notify_one();
-                                break;
-                            }
-                            Err(std::sync::mpsc::TrySendError::Full(next)) => {
-                                request = next;
-                                std::thread::sleep(std::time::Duration::from_millis(1));
-                            }
-                            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
-                        }
-                    }
-                });
-            }
-            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {}
-        }
+        let notify = Arc::new({
+            let scheduler = Arc::clone(&self.scheduler);
+            move || scheduler.1.notify_one()
+        });
+        enqueue_nonblocking(
+            &self.metadata_tx,
+            PdfMetadataRequest {
+                source,
+                reply: reply_tx,
+            },
+            notify,
+        );
         reply_rx
     }
 
@@ -1008,34 +994,20 @@ impl PdfNativeService {
     ) -> mpsc::Receiver<Result<PdfEmbeddedText, String>> {
         self.text_generation.store(generation, Ordering::Release);
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
-        match self.text_tx.try_send(PdfTextRequest {
-            source,
-            generation,
-            revision,
-            reply: reply_tx,
-        }) {
-            Ok(()) => self.scheduler.1.notify_one(),
-            Err(std::sync::mpsc::TrySendError::Full(mut request)) => {
-                let tx = self.text_tx.clone();
-                let scheduler = Arc::clone(&self.scheduler);
-                std::thread::spawn(move || {
-                    loop {
-                        match tx.try_send(request) {
-                            Ok(()) => {
-                                scheduler.1.notify_one();
-                                break;
-                            }
-                            Err(std::sync::mpsc::TrySendError::Full(next)) => {
-                                request = next;
-                                std::thread::sleep(std::time::Duration::from_millis(1));
-                            }
-                            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
-                        }
-                    }
-                });
-            }
-            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {}
-        }
+        let notify = Arc::new({
+            let scheduler = Arc::clone(&self.scheduler);
+            move || scheduler.1.notify_one()
+        });
+        enqueue_nonblocking(
+            &self.text_tx,
+            PdfTextRequest {
+                source,
+                generation,
+                revision,
+                reply: reply_tx,
+            },
+            notify,
+        );
         reply_rx
     }
 
@@ -1061,6 +1033,36 @@ impl PdfNativeService {
         if let Some(worker) = self.worker.lock().expect("PDF worker lock").take() {
             let _ = worker.join();
         }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn enqueue_nonblocking<T: Send + 'static>(
+    tx: &mpsc::SyncSender<T>,
+    request: T,
+    notify: Arc<dyn Fn() + Send + Sync>,
+) {
+    match tx.try_send(request) {
+        Ok(()) => notify(),
+        Err(mpsc::TrySendError::Full(mut request)) => {
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                loop {
+                    match tx.try_send(request) {
+                        Ok(()) => {
+                            notify();
+                            break;
+                        }
+                        Err(mpsc::TrySendError::Full(next)) => {
+                            request = next;
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                        }
+                        Err(mpsc::TrySendError::Disconnected(_)) => break,
+                    }
+                }
+            });
+        }
+        Err(mpsc::TrySendError::Disconnected(_)) => {}
     }
 }
 
@@ -1454,6 +1456,24 @@ mod tests {
         assert!(scheduler.submit(key(1, 1, 800), PdfRequestPriority::Nearby));
         assert!(!scheduler.submit(key(1, 1, 800), PdfRequestPriority::Nearby));
         assert_eq!(scheduler.pending_len(), 1);
+    }
+
+    #[test]
+    fn native_request_enqueue_is_nonblocking_when_bounded_queue_is_full() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        tx.send(1usize).expect("fill bounded request queue");
+        let started = Instant::now();
+        enqueue_nonblocking(&tx, 2usize, Arc::new(|| {}));
+        assert!(
+            started.elapsed() < Duration::from_millis(100),
+            "a full native request queue must not block the caller"
+        );
+        assert_eq!(rx.recv().expect("first queued request"), 1);
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(1))
+                .expect("deferred request should be retried"),
+            2
+        );
     }
 
     #[test]

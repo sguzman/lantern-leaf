@@ -802,7 +802,6 @@ pub fn apply_event(state: &mut AppState, event: AppEvent) {
             }
             let request_id = event.request_id;
             let reader = event.reader;
-            state.set_reader_document(Some(reader.clone()));
             state.set_reader_playback(derive_reader_playback(Some(&reader)));
             let session = SessionState {
                 mode: UiMode::Reader,
@@ -810,6 +809,7 @@ pub fn apply_event(state: &mut AppState, event: AppEvent) {
                 open_in_flight: false,
                 panels: reader.panels,
             };
+            state.set_reader_document(Some(reader));
             state.set_session(Some(session));
             state.apply_runtime_job_patch(RuntimeJobPatch {
                 last_reader_event_request_id: Some(request_id),
@@ -1175,14 +1175,14 @@ mod tests {
             tts_current_sentence_text: Some("one".to_string()),
             page_text: "page".to_string(),
             sentences: vec!["one".to_string()],
-            canonical_sentences: vec!["one".to_string()],
-            page_sentence_counts: vec![1],
-            sentence_anchor_map: vec![Some(0)],
+            canonical_sentences: vec!["one".to_string()].into(),
+            page_sentence_counts: vec![1].into(),
+            sentence_anchor_map: vec![Some(0)].into(),
             structured_document: None,
             highlighted_canonical_idx: Some(0),
             highlighted_sentence_idx: Some(0),
             search_query: "query".to_string(),
-            search_matches: vec![0],
+            search_matches: vec![0].into(),
             selected_search_match: Some(0),
             settings: session::ReaderSettingsView {
                 theme: config::ThemeMode::Day,
