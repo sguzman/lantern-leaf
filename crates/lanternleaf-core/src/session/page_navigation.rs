@@ -81,6 +81,15 @@ impl ReaderSession {
         normalizer: &normalizer::TextNormalizer,
         preserve_global_idx: Option<usize>,
     ) {
+        if self.pdf_text_document().is_some() {
+            self.current_page = self
+                .current_page
+                .min(self.page_domain_len().saturating_sub(1));
+            self.current_plan_page = None;
+            self.current_plan = None;
+            self.update_search_matches(normalizer);
+            return;
+        }
         // For EPUB pretty view we render the entire concatenated HTML stream, so keep the
         // canonical TTS/page text in the same "single-page" coordinate space. Otherwise,
         // the UI can show full-book HTML while the TTS cursor/indices are paginated against
@@ -190,12 +199,16 @@ impl ReaderSession {
         let sentence_idx = bookmark.sentence_idx?;
         let page = bookmark
             .page
-            .min(self.page_sentence_counts.len().saturating_sub(1));
-        let page_sentence_count = self.page_sentence_counts.get(page).copied().unwrap_or(0);
+            .min(self.active_page_sentence_counts().len().saturating_sub(1));
+        let page_sentence_count = self
+            .active_page_sentence_counts()
+            .get(page)
+            .copied()
+            .unwrap_or(0);
         if sentence_idx >= page_sentence_count {
             return None;
         }
-        let base: usize = self.page_sentence_counts.iter().take(page).sum();
+        let base: usize = self.active_page_sentence_counts().iter().take(page).sum();
         Some(base + sentence_idx)
     }
 
@@ -206,7 +219,7 @@ impl ReaderSession {
         }
         let target_lower = target.to_ascii_lowercase();
         let mut global_idx = 0usize;
-        for sentences in &self.raw_page_sentences {
+        for sentences in self.active_page_sentences() {
             for sentence in sentences {
                 if sentence.trim().eq_ignore_ascii_case(target)
                     || sentence.to_ascii_lowercase().contains(&target_lower)
@@ -256,7 +269,7 @@ impl ReaderSession {
         bookmark: &crate::cache::Bookmark,
         normalizer: &normalizer::TextNormalizer,
     ) {
-        if self.page_sentence_counts.is_empty() && !self.is_pdf_source() {
+        if self.active_page_sentence_counts().is_empty() && !self.is_pdf_source() {
             self.current_page = 0;
             self.highlighted_display_idx = None;
             self.highlighted_audio_idx = None;
@@ -267,11 +280,11 @@ impl ReaderSession {
             self.pdf_page_count
                 .map_or(bookmark.page, |count| count.saturating_sub(1))
         } else {
-            self.page_sentence_counts.len().saturating_sub(1)
+            self.active_page_sentence_counts().len().saturating_sub(1)
         });
         self.current_page = clamped_page;
 
-        if self.is_pdf_source() && self.page_sentence_counts.is_empty() {
+        if self.is_pdf_source() && self.active_page_sentence_counts().is_empty() {
             self.highlighted_display_idx = None;
             self.highlighted_audio_idx = None;
             return;
@@ -298,11 +311,16 @@ impl ReaderSession {
     }
 
     pub(crate) fn page_idx_for_global_sentence(&self, global_idx: usize) -> (usize, usize) {
-        if self.page_sentence_counts.is_empty() {
+        if self.active_page_sentence_counts().is_empty() {
             return (0, 0);
         }
         let mut remaining = global_idx;
-        for (page_idx, count) in self.page_sentence_counts.iter().copied().enumerate() {
+        for (page_idx, count) in self
+            .active_page_sentence_counts()
+            .iter()
+            .copied()
+            .enumerate()
+        {
             if count == 0 {
                 continue;
             }
@@ -311,13 +329,14 @@ impl ReaderSession {
             }
             remaining = remaining.saturating_sub(count);
         }
-        let last_page = self.page_sentence_counts.len().saturating_sub(1);
-        let last_idx = self.page_sentence_counts[last_page].saturating_sub(1);
+        let counts = self.active_page_sentence_counts();
+        let last_page = counts.len().saturating_sub(1);
+        let last_idx = counts[last_page].saturating_sub(1);
         (last_page, last_idx)
     }
 
     pub(super) fn current_display_len(&self) -> usize {
-        self.raw_page_sentences
+        self.active_page_sentences()
             .get(self.current_page)
             .map(Vec::len)
             .unwrap_or(0)

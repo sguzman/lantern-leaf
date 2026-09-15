@@ -1,5 +1,6 @@
 use lanternleaf_core::{browser_tabs, calibre, config, session};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use ts_rs::TS;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS, PartialEq, Eq)]
@@ -173,10 +174,7 @@ pub struct PdfEmbeddedTextPreparedEvent {
     pub page_count: usize,
     pub worker_thread: String,
     pub preparation_thread: String,
-    pub prepared: session::PreparedPdfEmbeddedText,
-    /// Built on the preparation worker. The egui commit only moves this
-    /// already-materialized snapshot into runtime; it must not construct one.
-    pub reader: Option<session::ReaderSnapshot>,
+    pub prepared: Arc<session::PreparedPdfEmbeddedText>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
