@@ -90,7 +90,9 @@ impl ShellState {
         state: &AppState,
         show_safe_quit: bool,
         show_reader_confirm: bool,
-        pending_search: bool,
+        search_panel_open: bool,
+        search_editor_focused: bool,
+        pending_search_focus: bool,
     ) {
         let previous_mode = self.active_mode;
         let active_mode = if state.app_shell.operations.source_open {
@@ -124,7 +126,7 @@ impl ShellState {
             show_settings: session_panels.show_settings,
             show_stats: session_panels.show_stats,
             show_tts: session_panels.show_tts,
-            show_search: pending_search,
+            show_search: search_panel_open,
         };
 
         self.modal = if show_safe_quit {
@@ -137,7 +139,7 @@ impl ShellState {
         self.safe_quit_pending = show_safe_quit;
         self.focus_owner = if self.modal != ModalState::None {
             FocusOwner::Modal
-        } else if pending_search {
+        } else if search_editor_focused || pending_search_focus {
             FocusOwner::PanelInput
         } else if matches!(self.active_mode, ActiveMode::Reader) {
             FocusOwner::Reader

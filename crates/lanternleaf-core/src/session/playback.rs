@@ -63,16 +63,23 @@ impl ReaderSession {
     }
 
     pub fn toggle_text_only(&mut self, normalizer: &normalizer::TextNormalizer) {
-        if !self.text_only_mode && !self.pdf_text_only_allowed() {
+        self.set_text_only(!self.text_only_mode, normalizer);
+    }
+
+    pub fn set_text_only(&mut self, enabled: bool, normalizer: &normalizer::TextNormalizer) {
+        if enabled == self.text_only_mode {
+            return;
+        }
+        if enabled && !self.pdf_text_only_allowed() {
             tracing::info!(
                 path = %self.source_path.display(),
                 policy = ?self.pdf_runtime_policy_ref().map(|value| value.text_only_policy),
-                "Ignoring text-only toggle because PDF runtime policy does not allow text ownership"
+                "Ignoring text-only request because PDF runtime policy does not allow text ownership"
             );
             return;
         }
         let previous_mode = self.text_only_mode;
-        self.text_only_mode = !self.text_only_mode;
+        self.text_only_mode = enabled;
         if self.text_only_mode {
             let display_idx = self.highlighted_display_idx.unwrap_or(0);
             self.highlighted_audio_idx = self.map_display_to_audio_idx(normalizer, display_idx);
@@ -572,7 +579,10 @@ impl ReaderSession {
         self.highlighted_audio_idx = Some(audio_idx);
         self.highlighted_canonical_idx = Some(canonical_display_id);
         self.highlighted_display_idx = Some(local_idx);
-        if canonical_display_id.saturating_add(1) >= self.current_plan_display_end {
+        let plan_is_outside_local_identity = self.current_plan_page != Some(page)
+            || local_idx < self.current_plan_display_start
+            || local_idx.saturating_add(1) >= self.current_plan_display_end;
+        if plan_is_outside_local_identity {
             self.current_plan = None;
             self.current_plan_page = None;
         }
@@ -606,5 +616,18 @@ impl ReaderSession {
             page += direction;
         }
         false
+    }
+
+    /// Move playback to the first sentence on the next non-empty native page.
+    /// This is the authoritative cross-page transition used when a bounded
+    /// TTS plan reaches its page end; it never rebuilds an empty same-page plan.
+    pub fn advance_tts_to_next_non_empty_page(
+        &mut self,
+        normalizer: &normalizer::TextNormalizer,
+    ) -> bool {
+        if !self.move_to_adjacent_page_with_sentences(1, normalizer) {
+            return false;
+        }
+        self.set_audio_highlight_idx(normalizer, 0)
     }
 }

@@ -349,6 +349,19 @@ pub(crate) fn text_only_mode_transition(
     }
 }
 
+pub(crate) fn search_panel_is_visible(open: bool) -> bool {
+    open
+}
+
+pub(crate) fn consume_search_focus_request(pending: &mut bool) -> bool {
+    if *pending {
+        *pending = false;
+        true
+    } else {
+        false
+    }
+}
+
 impl LifecycleHandshake {
     pub(crate) fn begin_close_book(&mut self) {
         self.close_after_persistence = true;
@@ -417,11 +430,17 @@ struct LanternLeafApp {
     show_safe_quit_modal: bool,
     show_reader_confirm_modal: bool,
     lifecycle: LifecycleHandshake,
+    search_panel_open: bool,
     pending_search_focus: bool,
+    search_editor_focused: bool,
+    search_query_draft: String,
+    search_query_draft_source: Option<String>,
+    search_query_draft_dirty: bool,
     last_plan: Option<DispatchPlan>,
     auto_scroll_state: AutoScrollState,
     text_only_override: Option<bool>,
     text_only_toggle_pending: bool,
+    text_only_pending_target: Option<bool>,
     anchor_diagnostics: AnchorDiagnostics,
     overlay_diagnostics: OverlayDiagnostics,
     audio_diagnostics: AudioDiagnostics,
@@ -967,6 +986,24 @@ fn decode_pretty_image(
     })
 }
 
+pub(crate) fn reconcile_search_query_draft(
+    draft: &mut String,
+    dirty: &mut bool,
+    draft_source: &mut Option<String>,
+    authoritative_source: Option<&str>,
+    authoritative_query: &str,
+) {
+    if draft_source.as_deref() != authoritative_source {
+        *draft_source = authoritative_source.map(str::to_owned);
+        *draft = authoritative_query.to_owned();
+        *dirty = false;
+    } else if !*dirty {
+        *draft = authoritative_query.to_owned();
+    } else if draft == authoritative_query {
+        *dirty = false;
+    }
+}
+
 impl LanternLeafApp {
     const OVERLAY_EVICTION_SNACK_DURATION: Duration = Duration::from_secs(5);
     #[cfg(not(target_arch = "wasm32"))]
@@ -1015,11 +1052,17 @@ impl LanternLeafApp {
             show_safe_quit_modal: false,
             show_reader_confirm_modal: false,
             lifecycle: LifecycleHandshake::default(),
+            search_panel_open: false,
             pending_search_focus: false,
+            search_editor_focused: false,
+            search_query_draft: String::new(),
+            search_query_draft_source: None,
+            search_query_draft_dirty: false,
             last_plan: None,
             auto_scroll_state: AutoScrollState::default(),
             text_only_override: None,
             text_only_toggle_pending: false,
+            text_only_pending_target: None,
             anchor_diagnostics: AnchorDiagnostics::default(),
             overlay_diagnostics: OverlayDiagnostics::default(),
             audio_diagnostics: AudioDiagnostics::default(),
@@ -1166,11 +1209,17 @@ impl LanternLeafApp {
             show_safe_quit_modal: false,
             show_reader_confirm_modal: false,
             lifecycle: LifecycleHandshake::default(),
+            search_panel_open: false,
             pending_search_focus: false,
+            search_editor_focused: false,
+            search_query_draft: String::new(),
+            search_query_draft_source: None,
+            search_query_draft_dirty: false,
             last_plan: None,
             auto_scroll_state: AutoScrollState::default(),
             text_only_override: None,
             text_only_toggle_pending: false,
+            text_only_pending_target: None,
             anchor_diagnostics: AnchorDiagnostics::default(),
             overlay_diagnostics: OverlayDiagnostics::default(),
             audio_diagnostics: AudioDiagnostics::default(),
@@ -1276,6 +1325,8 @@ impl LanternLeafApp {
             state,
             self.show_safe_quit_modal,
             self.show_reader_confirm_modal,
+            self.search_panel_open,
+            self.search_editor_focused,
             self.pending_search_focus,
         );
     }
@@ -1319,6 +1370,7 @@ impl LanternLeafApp {
         match action {
             ShortcutAction::Command(command) => self.execute_command(command.clone()),
             ShortcutAction::Ui(UiShortcutAction::FocusSearch) => {
+                self.search_panel_open = true;
                 self.pending_search_focus = true;
                 self.push_status("Shortcut: focus search".to_string());
             }
@@ -2483,20 +2535,25 @@ impl LanternLeafApp {
     }
 
     fn maybe_reapply_text_only(&mut self, snapshot: &ReaderSnapshot) {
-        if self.text_only_override == Some(true) && !snapshot.text_only_mode {
-            if !self.text_only_toggle_pending {
+        if let Some(desired) = self.text_only_override {
+            if snapshot.text_only_mode == desired {
+                self.text_only_toggle_pending = false;
+                self.text_only_pending_target = None;
+            } else if self.text_only_pending_target != Some(desired) {
                 trace!(
                     current = snapshot.text_only_mode,
-                    desired = true,
-                    "Text-only override mismatch detected, reapplying toggle"
+                    desired,
+                    "Text-only desired state mismatch detected, reapplying idempotent request"
                 );
                 self.execute_reader_command(ReaderCommand::Session(
-                    session::SessionCommand::ToggleTextOnly,
+                    session::SessionCommand::SetTextOnly { enabled: desired },
                 ));
                 self.text_only_toggle_pending = true;
+                self.text_only_pending_target = Some(desired);
             }
         } else {
             self.text_only_toggle_pending = false;
+            self.text_only_pending_target = None;
         }
     }
 
@@ -3564,6 +3621,17 @@ impl eframe::App for LanternLeafApp {
             "Prepared lightweight egui state projection"
         );
         let reader_snapshot = snapshot.reader_document.snapshot.as_deref();
+        if reader_snapshot.is_none() {
+            self.search_panel_open = false;
+            self.pending_search_focus = false;
+            self.search_editor_focused = false;
+            self.search_query_draft.clear();
+            self.search_query_draft_source = None;
+            self.search_query_draft_dirty = false;
+            self.text_only_override = None;
+            self.text_only_toggle_pending = false;
+            self.text_only_pending_target = None;
+        }
         if let Some(reader_snapshot) = reader_snapshot {
             self.maybe_reapply_text_only(reader_snapshot);
         }
@@ -3632,6 +3700,80 @@ mod tts_repaint_policy_tests {
     #[test]
     fn idle_without_pending_command_is_event_driven() {
         assert!(!super::tts_repaint_due(false));
+    }
+
+    #[test]
+    fn search_panel_stays_open_while_one_shot_focus_is_consumed() {
+        let mut open = false;
+        let mut focus_pending = false;
+        open = true;
+        focus_pending = true;
+        assert!(super::search_panel_is_visible(open));
+        assert!(super::consume_search_focus_request(&mut focus_pending));
+        assert!(!focus_pending);
+        assert!(super::search_panel_is_visible(open));
+        assert!(!super::consume_search_focus_request(&mut focus_pending));
+        // Empty and cleared queries do not participate in visibility.
+        assert!(super::search_panel_is_visible(open));
+        open = false; // only an explicit close may hide the panel.
+        assert!(!super::search_panel_is_visible(open));
+    }
+
+    #[test]
+    fn delayed_search_acknowledgements_cannot_erase_newer_draft() {
+        let mut draft = String::new();
+        let mut dirty = false;
+        let mut source = None;
+        super::reconcile_search_query_draft(
+            &mut draft,
+            &mut dirty,
+            &mut source,
+            Some("book.epub"),
+            "",
+        );
+        for (typed, stale_ack) in [("f", ""), ("fs", "f"), ("fsr", "fs")] {
+            draft = typed.to_string();
+            dirty = true;
+            super::reconcile_search_query_draft(
+                &mut draft,
+                &mut dirty,
+                &mut source,
+                Some("book.epub"),
+                stale_ack,
+            );
+            assert_eq!(draft, typed);
+            assert!(dirty);
+        }
+        super::reconcile_search_query_draft(
+            &mut draft,
+            &mut dirty,
+            &mut source,
+            Some("book.epub"),
+            "fsr",
+        );
+        assert_eq!(draft, "fsr");
+        assert!(!dirty);
+
+        draft.clear();
+        dirty = true;
+        super::reconcile_search_query_draft(
+            &mut draft,
+            &mut dirty,
+            &mut source,
+            Some("book.epub"),
+            "fsr",
+        );
+        assert!(draft.is_empty(), "stale ack must not restore cleared draft");
+        assert!(dirty);
+        super::reconcile_search_query_draft(
+            &mut draft,
+            &mut dirty,
+            &mut source,
+            Some("book.epub"),
+            "",
+        );
+        assert!(draft.is_empty());
+        assert!(!dirty);
     }
 
     #[test]

@@ -1057,20 +1057,52 @@ fn run_tts_runtime_loop(
         if next_start < plan.sentences.len() {
             resume_start_override = Some(next_start);
         } else {
-            let has_more_canonical = ctx
+            let (has_more_canonical, is_pdf, has_more_on_page) = ctx
                 .session
                 .lock()
                 .ok()
                 .and_then(|guard| {
-                    guard
-                        .as_ref()
-                        .map(session::ReaderSession::has_canonical_sentence_after_current)
+                    guard.as_ref().map(|reader| {
+                        (
+                            reader.has_canonical_sentence_after_current(),
+                            reader.is_pdf_source(),
+                            reader.has_sentence_after_current_on_page(),
+                        )
+                    })
                 })
-                .unwrap_or(false);
+                .unwrap_or((false, false, false));
             if has_more_canonical {
-                // The bounded normalization window ended, but the document did
-                // not. Rebuild the next local window around the current identity.
-                resume_start_override = Some(next_start);
+                if is_pdf && !has_more_on_page {
+                    // A PDF plan ended at a native-page boundary. Advance the
+                    // authoritative session first, skipping empty native pages,
+                    // so the next plan starts on the next real sentence.
+                    let advanced = ctx
+                        .session
+                        .lock()
+                        .ok()
+                        .and_then(|mut guard| {
+                            guard.as_mut().map(|reader| {
+                                reader.advance_tts_to_next_non_empty_page(&ctx.normalizer)
+                            })
+                        })
+                        .unwrap_or(false);
+                    if !advanced {
+                        if let Ok(mut guard) = ctx.session.lock() {
+                            if let Some(reader) = guard.as_mut() {
+                                let _ = reader.apply_command_lightweight(
+                                    session::SessionCommand::TtsStop,
+                                    &ctx.normalizer,
+                                );
+                            }
+                        }
+                        break;
+                    }
+                    resume_start_override = None;
+                } else {
+                    // EPUB and same-page PDF refills retain the bounded-window
+                    // continuation semantics without changing native page.
+                    resume_start_override = Some(next_start);
+                }
             } else if let Ok(mut guard) = ctx.session.lock() {
                 // The actual page/document is exhausted. Do not let the last
                 // boundary become the next plan's start and replay indefinitely.
@@ -1641,6 +1673,7 @@ fn simulated_sentence_duration(sentence: &str, speed: f32) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn sentence_started_events_are_not_coalesced_with_progress() {
@@ -1945,6 +1978,95 @@ mod tests {
             "boundary identities did not cross the second window: max={:?}",
             observed.iter().max()
         );
+    }
+
+    #[test]
+    fn simulated_runtime_continues_enriched_pdf_tts_across_empty_pages() {
+        let source_path =
+            std::env::temp_dir().join(format!("lanternleaf-a9-runtime-{}.pdf", std::process::id()));
+        fs::write(&source_path, b"%PDF-1.7\nlanternleaf-a9-runtime")
+            .expect("write runtime PDF fixture");
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut reader = session::ReaderSession::from_pages_for_test(
+            source_path.clone(),
+            "a9-runtime.pdf".to_string(),
+            vec![String::new(); 6],
+            vec![Vec::new(); 6],
+        );
+        reader.set_pdf_page_count(6);
+        let prepared = session::ReaderSession::prepare_pdf_embedded_text(
+            vec![
+                "Title page only.".to_string(),
+                String::new(),
+                String::new(),
+                "Chapter one begins.".to_string(),
+                "Chapter two begins.".to_string(),
+                String::new(),
+            ],
+            "",
+            true,
+        )
+        .expect("prepare trusted runtime text");
+        reader
+            .apply_prepared_pdf_embedded_text(Arc::new(prepared))
+            .expect("adopt trusted runtime text");
+
+        let runtime = TtsRuntime::new_with_mode(normalizer, TtsRuntimeMode::Simulated);
+        let driver = runtime
+            .simulated_boundary_driver()
+            .expect("simulated runtime exposes boundary driver");
+        runtime.set_session(Some(reader));
+        assert!(runtime.submit_command(TtsCommand::Play));
+
+        let deadline = Instant::now() + Duration::from_secs(4);
+        let mut boundaries = Vec::new();
+        let mut completed = 0usize;
+        let mut failure_messages = Vec::new();
+        while Instant::now() < deadline && completed == 0 {
+            let _ = driver.emit_next();
+            for event in runtime.collect_events() {
+                match event.kind {
+                    TtsRuntimeEventKind::SentenceStarted => {
+                        let cursor = event.cursor.expect("sentence boundary cursor");
+                        boundaries.push((
+                            cursor.canonical_display_idx,
+                            cursor.page,
+                            cursor.display_idx,
+                        ));
+                    }
+                    TtsRuntimeEventKind::Failed => {
+                        failure_messages.push(event.message.unwrap_or_default());
+                    }
+                    TtsRuntimeEventKind::Completed => completed += 1,
+                    _ => {}
+                }
+            }
+            if boundaries.len() < 3 && completed == 0 {
+                thread::sleep(Duration::from_millis(2));
+            }
+        }
+
+        assert!(
+            failure_messages.is_empty(),
+            "runtime failed: {failure_messages:?}"
+        );
+        assert_eq!(
+            boundaries,
+            vec![
+                (Some(0), 0, Some(0)),
+                (Some(1), 3, Some(0)),
+                (Some(2), 4, Some(0))
+            ]
+        );
+        assert_eq!(
+            completed, 1,
+            "final exhaustion must terminalize exactly once"
+        );
+        assert_eq!(
+            runtime.snapshot().map(|view| view.tts.state),
+            Some(session::TtsPlaybackState::Idle)
+        );
+        let _ = fs::remove_file(source_path);
     }
 
     #[test]

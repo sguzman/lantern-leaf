@@ -398,7 +398,9 @@ impl WebClientApp {
                 .clicked()
             {
                 self.send(&ClientEvent::SessionCommand {
-                    command: SessionCommand::ToggleTextOnly,
+                    command: SessionCommand::SetTextOnly {
+                        enabled: !snapshot.text_only_mode,
+                    },
                 });
             }
             ui.label(format!("pretty={:?}", snapshot.pretty_kind));

@@ -1,6 +1,7 @@
 use eframe::egui::{
     Align, Color32, Context, FontFamily, Frame, Grid, Image, Label, Rect, RichText, ScrollArea,
-    Slider, Stroke, TextFormat, Ui, scroll_area::State as ScrollAreaState, text::LayoutJob,
+    Slider, Stroke, TextEdit, TextFormat, Ui, scroll_area::State as ScrollAreaState,
+    text::LayoutJob,
 };
 use lanternleaf_app::contracts::{PrettyKind, ReaderSnapshot};
 use lanternleaf_app::pipeline::ReaderCommand;
@@ -15,7 +16,7 @@ use tracing::trace;
 use crate::app::ui::{bounded_diagnostic, format::format_duration_secs};
 use crate::app::{
     AnchorFallback, FontRegistry, LanternLeafApp, PrettySentenceSegment, PrettySentenceTarget,
-    RepaintNotifier, text_only_mode_transition,
+    RepaintNotifier, consume_search_focus_request, text_only_mode_transition,
 };
 use crate::pdf_viewport::{PdfPageGeometry, PdfViewportGeometry};
 use crate::pretty::{
@@ -1643,20 +1644,22 @@ impl LanternLeafApp {
                                 .map(|local_idx| canonical_display_index(snapshot, local_idx))
                         }),
                     );
-                    if transition.text_only {
-                        self.text_only_override = Some(true);
-                    } else {
-                        self.text_only_override = None;
-                    }
+                    let desired_text_only = transition.text_only;
+                    self.text_only_override = Some(desired_text_only);
                     if transition.arm_follow {
                         let canonical_idx = transition.canonical_idx.expect("armed follow target");
                         self.auto_scroll_state
                             .request_cursor(snapshot.source_path.clone(), canonical_idx);
                     }
-                    self.text_only_toggle_pending = false;
-                    self.execute_reader_command(ReaderCommand::Session(
-                        SessionCommand::ToggleTextOnly,
-                    ));
+                    if self.text_only_pending_target != Some(desired_text_only) {
+                        self.execute_reader_command(ReaderCommand::Session(
+                            SessionCommand::SetTextOnly {
+                                enabled: desired_text_only,
+                            },
+                        ));
+                        self.text_only_toggle_pending = true;
+                        self.text_only_pending_target = Some(desired_text_only);
+                    }
                 }
                 if ui.button("Play/Pause").clicked() {
                     self.execute_reader_command(ReaderCommand::Session(
@@ -1884,16 +1887,42 @@ impl LanternLeafApp {
     }
 
     pub(crate) fn render_search_panel(&mut self, ui: &mut Ui, state: &AppState) {
-        ui.label(format!(
-            "Query: {}",
-            if state.reader_ui.search_query.is_empty() {
-                "none"
-            } else {
-                &state.reader_ui.search_query
+        let authoritative_source = state.reader_ui.source_path.clone();
+        super::super::reconcile_search_query_draft(
+            &mut self.search_query_draft,
+            &mut self.search_query_draft_dirty,
+            &mut self.search_query_draft_source,
+            authoritative_source.as_deref(),
+            &state.reader_ui.search_query,
+        );
+        ui.horizontal(|ui| {
+            ui.heading("Search");
+            if ui.button("Close").clicked() {
+                self.search_panel_open = false;
+                self.pending_search_focus = false;
+                self.search_editor_focused = false;
+                self.search_query_draft = state.reader_ui.search_query.clone();
+                self.search_query_draft_dirty = false;
             }
-        ));
+        });
+        let response = ui.add(
+            TextEdit::singleline(&mut self.search_query_draft)
+                .id_source("reader-search-query")
+                .hint_text("Search current document"),
+        );
+        if consume_search_focus_request(&mut self.pending_search_focus) {
+            response.request_focus();
+        }
+        self.search_editor_focused = response.has_focus();
+        if response.changed() {
+            self.search_query_draft_dirty = true;
+            self.execute_reader_command(ReaderCommand::Session(SessionCommand::SearchSetQuery {
+                query: self.search_query_draft.clone(),
+            }));
+        }
         ui.label(format!("Matches: {}", state.reader_ui.search_matches.len()));
         if ui.button("Focus search").clicked() {
+            self.search_panel_open = true;
             self.pending_search_focus = true;
             self.push_status("Search focus requested".to_string());
         }
