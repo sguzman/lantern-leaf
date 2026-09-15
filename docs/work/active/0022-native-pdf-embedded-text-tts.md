@@ -1,8 +1,15 @@
-# 0022 — Native PDF embedded-text / TTS trustworthy path — A10
+# 0022 — Native PDF embedded-text / TTS trustworthy path — A11
 
 ## Status
 
-**READY — A10 CORRECTION AFTER A9 REAL-DESKTOP REJECTION**
+**READY — A11 CORRECTION AFTER A10 DIRECTOR SOURCE REJECTION**
+
+This continuation preserves the accepted A10 implementation on the existing `codex/0022-native-pdf-embedded-text-tts` branch and report lineage. The attached A11 correction brief is authoritative where current `main` has not yet received the named A10 rejection document.
+
+## A11 correction blockers
+
+1. Reproduce and close burst seek correctness through the actual asynchronous `TtsRuntime` worker and simulated first-sample path. Commands must use the normal queue/worker path, cross PDF page boundaries and empty pages, exercise rapid accepted Next/Previous, inject a stale first-sample event from a superseded generation, prove stale rejection, monotonic one-sentence canonical movement, boundary clamping, coherent page/local/global identity, and representative EPUB parity. If no defect reproduces, document the existing rejection mechanism explicitly and test it.
+2. Reproduce and diagnose damaged EPUB through a production-shaped temporary cache/persistence close, full session release, same-source reopen lifecycle. Stress Pretty/Text-only through the desired-state path, preserve valid bookmark/canonical position, reject stale prior-session Pretty worker completion, exercise valid dual-view/structured artifacts, reject or safely rebuild corrupt/incomplete derived artifacts, and prove complete Pretty content is immediate without TTS/Next healing. Do not globally purge healthy caches. Record the evidence and actual causal finding.
 
 Read first:
 
