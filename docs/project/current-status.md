@@ -1,8 +1,8 @@
 # LanternLeaf Current Status
 
-Updated: 2026-09-15 after Goal 0022 A8 director rejection and A9 reopening.
+Updated: 2026-09-15 after Goal 0022 A9 real-desktop rejection and A10 reopening.
 
-This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/` and `docs/work/reviews/`.
+This file contains current verified/bounded state. Detailed attempt history lives in `docs/work/reports/`, `docs/work/reviews/`, and the durable project-memory files under `docs/project/`.
 
 ## Workspace / architecture
 
@@ -14,6 +14,7 @@ This file contains current verified/bounded state. Detailed attempt history live
 - Windows human workflow is repo-native: `git pull -> .\qa.ps1`.
 - Scoop is the active Windows CLI dependency convention.
 - Heavy/blocking work must never run on the egui/render thread.
+- Chat is coordination; Git is durable project memory.
 
 ## Gate 0 — Windows baseline
 
@@ -29,150 +30,190 @@ Accepted runtime shape:
 
 `canonical display sentence -> backend synthesis -> prepared audio -> Rodio first-sample boundary -> canonical ReaderSession cursor -> native UI projection`
 
-Real Windows evidence proves audible Windows speech, Play/Pause, ordinary installed voice switching, and sentence-boundary-driven pretty/text-only synchronization.
+Real Windows evidence proves audible ordinary Windows speech, Play/Pause, ordinary installed voice switching, and first-sample sentence identity.
 
-## Goal 0008 / Gate 2.5 — Caliberate first-class reader integration
+Windows Natural/HD voices remain **DEFERRED BY USER** and must not be investigated/tested until re-authorized.
+
+## Non-PDF reader / TTS baseline
+
+**COMPLETE, WITH ONE CURRENT GOAL-0022 REGRESSION INVESTIGATION**
+
+The accepted EPUB/TXT/Markdown/HTML path includes native Pretty rendering, Text-only, ordinary Windows TTS, spoken-sentence highlight/follow, layered voice configuration, presentation controls, inline imagery, and semantic reflow anchoring.
+
+A7 introduced a severe EPUB Pretty/Text-only race. A8/A9 fixed the easy reproduction with idempotent `SetTextOnly { enabled }`, and a new EPUB now survives stress toggling. However, the EPUB previously damaged under A7 later reopened in a truncated-looking state until TTS/Next activity repaired it. A10 owns diagnosis of that stale/durable presentation-state path before Goal 0022 can close.
+
+## Goal 0008 — Caliberate first-class reader integration
 
 **COMPLETE — AUTOMATED + REAL-DESKTOP ACCEPTED**
 
-The large real Caliberate EPUB opens quickly, remains responsive, speaks through Windows TTS, highlights the actually audible sentence in native pretty view, and follows playback correctly.
+Caliberate catalog/materialization/native EPUB/Windows TTS integration is accepted. Some provider-backed books require Caliberate running; provider unavailable is distinct from source corruption.
 
-## Goal 0009 / Gate 2.6 — TTS playback polish and layered voice configuration
+## Goal 0009 — TTS playback polish / layered voices
 
 **COMPLETE — AUTOMATED + REAL-DESKTOP ACCEPTED**
 
-Stable audible TTS, no unsolicited duplicate ordinary lines, correct pretty/text-only spoken-sentence highlight/follow, portable Zira inheritance, per-book voice persistence, transactional Piper rejection/recovery, Close Book, and Safe Quit are accepted.
+Stable ordinary Windows TTS, Zira inheritance, per-book voice persistence, transactional Piper rejection/recovery, Close Book, Safe Quit, and non-PDF pretty/text-only spoken synchronization are accepted.
 
-## Goal 0012 — pretty presentation controls and inline images
-
-**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
-
-Accepted presentation/image behavior includes literal margins, presentation geometry invalidation, scrollable settings, working word/letter spacing, readable tables/TOCs, restrained blockquotes, explicit font fallback state, inline EPUB imagery, bounded off-render-thread pretty/image work, and durable canonical spoken highlighting/follow after geometry changes.
-
-## Goal 0013 — starter shell responsive panel containment
+## Goal 0012 — pretty presentation controls / inline images
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-Implementation `58ae9de` uses actual center width, a deterministic `1120px` two-column breakpoint, one-column fallback below it, width-bounded groups, wrapped action/control rows, and bounded long-path/URL presentation while preserving Calibre virtualization and off-render-thread work.
+The severe hidden-width/gutter, settings clipping, table/TOC, font fallback, image sizing, spacing, and stale highlight issues are accepted as repaired.
 
-## Goal 0014 — reader presentation-geometry anchor stability
-
-**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
-
-A3 removed the high-severity multi-frame reflow instability by retaining one last-stable semantic viewport witness across an edit burst, avoiding recapture from unstable intermediate geometry, keeping bounded virtualization in the anchor neighborhood, reconciling after measured geometry is available, preserving pending TTS-follow precedence, and yielding to explicit user wheel/drag input.
-
-A lower-severity residual remains under severe cumulative text-metric edits such as aggressive letter spacing and font scaling. This is queued separately as Goal 0015.
-
-## Goal 0010 — Caliberate catalog covers / provider availability UX
+## Goal 0013 — starter shell responsive containment
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-Caliberate exposes the explicit `/api/v1/books/{id}/cover` provider contract; LanternLeaf propagates `has_cover`, lazily fetches covers for visible/near-visible rows, keeps network/disk/decode work off the UI thread, distinguishes intentional cover states, and never materializes an EPUB merely to obtain a thumbnail.
+Actual center width, deterministic two-column breakpoint, one-column fallback, bounded groups, wrapping, and long-string containment are accepted.
+
+## Goal 0014 — reader presentation anchor stability
+
+**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
+
+The violent multi-frame reflow jump is fixed. Minor severe-metric highlight-band polish remains Goal 0015.
+
+## Goal 0010 — Caliberate covers / provider UX
+
+**COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
+
+Catalog covers are lazy/visible-near-visible, bounded/coalesced, and do not require book materialization merely to obtain thumbnails.
 
 ## Goal 0016 — starter library live-state continuity
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-The real 105,570-book Caliberate library becomes usable while the catalog is still loading: provider pages publish progressively, the starter shell shows truthful loaded/total progress, final reconciliation preserves live cover state, and successful source persistence refreshes Recents in the same process.
+The real ~105,570-book library becomes usable progressively with loaded/total state, live cover reconciliation, same-session Recents refresh, and durable Recents.
 
-## Goal 0015 — highlight viewport-band reflow polish
+## Queued non-core work
+
+### Goal 0015 — highlight viewport-band reflow polish
 
 **QUEUED — MINOR POLISH**
 
-Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow without permanent highlight pinning or fighting user scrolling.
+Preserve a stronger temporary viewport band for an already-visible canonical highlight during severe text-metric reflow.
 
-## Goal 0017 — progressive cover backpressure / cached-hydration scaling
+### Goal 0017 — progressive cover backpressure / cached hydration
 
 **QUEUED — CONFIRMED LIBRARY SCALING POLISH**
 
-Warm cached runs proved repeated roughly-O(total-books) thumbnail-hydration scans and giant catalog-cache rewrites. Goal 0017 owns bounded transient backoff/retry plus lazy/indexed cached-thumbnail association and bounded logging/cache rewrites.
+Warm runs exposed roughly-O(total-books) thumbnail hydration/cache rewrite behavior plus transient cover retry/logging issues.
 
-## Goal 0018 — Windows QA bootstrap idempotence
+### Goal 0018 — Windows QA bootstrap idempotence
 
 **QUEUED — QA INFRASTRUCTURE**
 
-Repeated `qa.ps1` invocations in one PowerShell process can eventually make `VsDevCmd.bat` fail with `The input line is too long`. Until fixed, use a fresh PowerShell for physical QA.
+Repeated `qa.ps1` in one PowerShell can eventually produce `The input line is too long`; use a fresh PowerShell for physical QA until fixed.
 
-## Windows Natural/HD voices
+### Goal 0021 — fit-to-manual zoom transition polish
 
-**DEFERRED BY USER — DO NOT WORK ON OR TEST UNTIL RE-AUTHORIZED**
+**QUEUED — MINOR PDF UX POLISH**
 
-Preserve the existing ordinary Windows voice backend. Goal 0011 remains dormant.
+After Fit Width/Fit Page, `+/-` resumes the old manual zoom ladder instead of stepping from effective fit percentage.
+
+### Goal 0024 — Caliberate materialized source identity in Recents
+
+**QUEUED — REAL-DESKTOP UX DEFECT**
+
+Materialized provider PDFs are correctly cached as source files under paths such as `calibre-downloads/caliberate/725-<hash>.pdf`, but Recents currently exposes the hash-like materialized file stem as the title and loses the known cover/provider identity. Preserve durable Caliberate provenance/title/cover without O(total-catalog) lookup or rematerialization.
 
 ## Goal 0019 / Gate 3 — native PDF visual stability
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-The native Pdfium/egui visual foundation is physically proven on Windows. Accepted behavior includes visual-first PDF open independent of transcript/OCR prerequisites, one process-wide `PdfNativeService`, truthful native page-domain ownership, native raster presentation, stale-safe render identity, bounded residency, and all heavy Pdfium work off the egui thread.
+One process-wide native Pdfium service owns metadata/raster work; visual open is independent of transcript/OCR; native page ownership and bounded residency are accepted.
 
-## Goal 0020 / Gate 3.1 — continuous native PDF viewport and practical zoom
+## Goal 0020 / Gate 3.1 — continuous PDF viewport / practical zoom
 
 **COMPLETE — AUTOMATED + DIRECTOR + REAL-DESKTOP ACCEPTED**
 
-A3 is physically accepted on a real 638-page Caliberate PDF.
+Physical QA on a real 638-page Caliberate PDF verified continuous adjacent-page scrolling, extremely responsive violent scrolling/scrollbar dragging, responsive page ownership, Previous/Next page jumps, Fit Width/Fit Page/Reset, manual 25–400% zoom, high-zoom horizontal access, and approximate focal preservation.
 
-Verified behavior:
-
-- continuous wheel scrolling across page boundaries;
-- portions of adjacent pages visible simultaneously;
-- extremely responsive rapid long-document scrolling;
-- responsive viewport-derived `Page N / 638` ownership;
-- Previous/Next as continuous-stack jumps;
-- Fit Width, Fit Page, Reset/100%, and manual 25–400% zoom;
-- horizontal navigation at high zoom;
-- approximate semantic focal preservation during zoom;
-- no representative EPUB visual/TTS regression.
-
-Real-desktop acceptance: `docs/work/reviews/0020-a3-real-desktop-acceptance.md`.
-
-## Goal 0021 — fit-to-manual zoom transition polish
-
-**QUEUED — MINOR PDF UX POLISH**
-
-`+/-` entered after Fit Width/Fit Page currently resume the prior manual zoom ladder rather than stepping from the current effective fit percentage. Reset/100% plus manual `+/-` works. This does not keep Goal 0020 open.
+A9 physical QA re-confirmed that this visual foundation remains excellent. Transient `Rendering page N` placeholders still appear during extreme movement but disappear quickly and are not a blocker.
 
 ## Gate 4 — PDF text/TTS/highlight synchronization
 
-**ACTIVE CORE PRODUCT GATE — GOAL 0022 A9 READY**
+**ACTIVE CORE PRODUCT GATE — GOAL 0022 A10 READY**
 
-The Gate-4 architecture remains native-first and recovery-isolated. Quack-check is **not** trusted as baseline infrastructure and cannot block visual open. The accepted recovery boundary is documented in `docs/architecture/pdf-text-recovery-boundary-2026-09.md`.
-
-The trust order remains:
+The architecture remains native-first and recovery-isolated:
 
 1. native visual Pdfium reader is immediately usable;
-2. trustworthy embedded text is extracted asynchronously through the same process-wide Pdfium owner or reused from a safe background cache path;
-3. only later, for degraded/mixed/scanned PDFs, a typed background recovery provider may reuse/rewrite Quack-check/Docling/OCR components.
+2. trustworthy embedded text is asynchronously extracted through the same Pdfium owner or reused from safe cache;
+3. hostile/mixed/scanned recovery comes later behind a typed optional provider boundary.
 
-The standalone `sguzman/quack-check` repository is not a runtime dependency. Goal 0022 explicitly excludes Quack-check, Python, Docling, OCR, and exact PDF sentence overlays.
+Quack-check is not baseline infrastructure. Goal 0022 excludes Quack-check, Python, Docling, OCR, hostile recovery, exact PDF sentence rectangles, visual spoken overlays, and visual PDF auto-follow.
 
-### Goal 0022 — native PDF embedded-text/TTS trustworthy path
+### Goal 0022 accepted architecture through A9
 
-**READY A9 — A7 REJECTED IN REAL-DESKTOP QA; A8 REJECTED BEFORE FURTHER HUMAN QA**
+Preserve:
 
-A7 physical QA proved the native visual/text foundation while exposing three product defects: inconsistent natural PDF TTS continuation at native page boundaries, a Search panel that disappeared immediately, and rapid Text-only toggling that could corrupt EPUB presentation.
+- one process-wide Pdfium owner;
+- visual-first PDF open;
+- cooperative native text extraction with Current/Nearby raster priority;
+- trusted page-aligned `PreparedPdfEmbeddedText`;
+- prefix-indexed bounded enriched projections;
+- bounded off-egui PDF retirement;
+- off-egui document preparation/cache/search;
+- source/generation/query-revision stale safety;
+- trusted PDF Text-only/search/ordinary Windows TTS policy;
+- idempotent `SetTextOnly { enabled }` desired-state semantics;
+- Search synchronous draft + actual editor focus ownership;
+- runtime-level natural PDF page continuation;
+- document-global canonical identity with page-local bounded-plan identity.
 
-A8 source work correctly moved in the right direction:
+A9 substantive commit `8a991a3f7ce72c42e5e0138d09bcbc8f2228f66e` passed hosted workflow `34991458105` (`native-workspace` + `hosted-renderer-probe`) and was integrated through PR #30.
 
-- `SetTextOnly { enabled }` replaces relative-toggle correctness for the new egui/web path;
-- Search-panel visibility is persistent and separate from the one-shot focus request;
-- a real Search `TextEdit` exists;
-- PDF TTS has an explicit next-non-empty-native-page continuation helper;
-- hosted workflow `34986927340` passed on substantive A8 commit `7c1e04883a67f33d68e355b8280b4abac29706b9`.
+### A9 physical Windows result
 
-Director review still rejected A8 because:
+**REJECTED.**
 
-- actual Search editor focus is not authoritative for shortcut suppression; after the one-shot focus flag is consumed, typing query keys can also execute reader shortcuts;
-- the Search editor is rebuilt each frame from asynchronously acknowledged `reader_ui.search_query`, so delayed `ReaderUpdated` events can overwrite newer typed characters;
-- the new natural PDF continuation branch lacks a true `TtsRuntimeMode::Simulated` runtime-loop regression, and `apply_tts_sentence_boundary()` still compares a document-global canonical ID against a page-local plan boundary.
+What worked:
 
-A9 owns those corrections while preserving A8's idempotent Text-only semantics and accepted A7 architecture.
+- violent PDF scrolling/dragging remains excellent;
+- PDF Text-only works and is page-aligned;
+- natural TTS crossed a native page boundary;
+- burst Next mostly works;
+- PDF Text-only stress works;
+- a newly opened EPUB survives Pretty/Text-only stress;
+- reopen remains snappy.
 
-Authoritative contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
-A8 rejection: `docs/work/reviews/0022-a8-director-rejection.md`.
-A7 physical rejection: `docs/work/reviews/0022-a7-real-desktop-rejection.md`.
+What failed:
+
+- TTS Speed/Volume UI is asynchronously owned: slider values can snap back (observed speed returning to `2.5`) and settings traffic causes severe layout churn;
+- changing command/status diagnostics visibly moves reader layout;
+- Search computes matches but offers no useful navigation: Enter does nothing and selected match/page/excerpt are not presented;
+- burst Previous can repeat instead of moving monotonically backward;
+- visual PDF offers no discoverable coarse way to reposition TTS, while exact click-on-rendered-text correctly remains unavailable without geometry;
+- the EPUB damaged under A7 can reopen in a truncated-looking state, implying stale presentation/persistence/cache state still needs diagnosis.
+
+A9 physical rejection: `docs/work/reviews/0022-a9-real-desktop-rejection.md`.
+
+### Goal 0022 A10
+
+**READY — CURRENT AUTHORIZED MACRO-GOAL**
+
+A10 owns:
+
+- synchronous/stale-safe/bounded TTS Speed/Volume editor state;
+- fixed/bounded diagnostics that cannot reflow reader geometry;
+- Search Previous/Next + Enter/Shift+Enter + selected match X/Y/page/excerpt;
+- real-runtime burst seek monotonicity;
+- explicit coarse `Play from current PDF page` without pretending exact geometry;
+- persisted EPUB close/reopen recovery so damaged transient presentation state cannot survive as authoritative content.
+
+Authoritative A10 contract: `docs/work/ready/0022-native-pdf-embedded-text-tts.md`.
+
+## Next after Goal 0022 physical acceptance
+
+### Native PDF sentence geometry / highlight / follow
+
+Build native sentence -> page-relative geometry, visual spoken overlays, continuous-viewport follow/jump semantics, and eventually truthful click-to-sentence behavior where confidence permits.
+
+### Hostile/mixed PDF recovery
+
+Only after the trustworthy native baseline is physically accepted should Quack-check/Docling/OCR concepts be considered behind the typed optional recovery boundary.
 
 ## Workflow status
 
-**GOAL 0022 A9 READY NEXT — ONE AUTHORIZED MACRO-GOAL**
+**GOAL 0022 A10 READY — ONE AUTHORIZED MACRO-GOAL.**
 
-No human QA is authorized for A8. Goals 0015, 0017, 0018, and 0021 remain queued. Goal 0011 remains deferred. Exact native PDF spoken overlays/follow come only after Goal 0022 is physically accepted. Hostile-PDF Quack-check/Docling/OCR recovery also remains later, after the native trustworthy-text baseline is physically accepted.
+No human QA is authorized until A10 passes director source/CI review. Goals 0015, 0017, 0018, 0021, and 0024 remain queued. Goal 0011 remains deferred.
