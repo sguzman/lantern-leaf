@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, OnceLock};
 #[cfg(test)]
 use std::thread::ThreadId;
@@ -29,6 +30,52 @@ const BASE_WPM: f64 = 170.0;
 
 #[cfg(test)]
 static PDF_DEFERRED_DROP_THREADS: OnceLock<Mutex<Vec<ThreadId>>> = OnceLock::new();
+#[cfg(test)]
+static PDF_ENRICHED_LINEAR_SCAN_GUARD: AtomicUsize = AtomicUsize::new(0);
+
+struct PdfRetirementPayload {
+    document: Option<Arc<PreparedPdfEmbeddedText>>,
+    canonical_sentences: Arc<Vec<String>>,
+    page_sentence_counts: Arc<Vec<usize>>,
+    search_matches: Arc<Vec<usize>>,
+}
+
+static PDF_RETIREMENT_TX: OnceLock<Sender<PdfRetirementPayload>> = OnceLock::new();
+
+fn pdf_retirement_sender() -> &'static Sender<PdfRetirementPayload> {
+    PDF_RETIREMENT_TX.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<PdfRetirementPayload>();
+        std::thread::Builder::new()
+            .name("lanternleaf-pdf-retirement".to_string())
+            .spawn(move || {
+                while let Ok(payload) = rx.recv() {
+                    let PdfRetirementPayload {
+                        document,
+                        canonical_sentences,
+                        page_sentence_counts,
+                        search_matches,
+                    } = payload;
+                    drop((
+                        document,
+                        canonical_sentences,
+                        page_sentence_counts,
+                        search_matches,
+                    ));
+                    #[cfg(test)]
+                    record_pdf_deferred_drop();
+                }
+            })
+            .expect("start PDF retirement worker");
+        tx
+    })
+}
+
+fn retire_pdf_payload(payload: PdfRetirementPayload) {
+    // The worker is process-scoped and never shuts down during ordinary app
+    // lifetime, so this handoff cannot fall back to document-scale destruction
+    // on the caller/render thread.
+    let _ = pdf_retirement_sender().send(payload);
+}
 
 #[cfg(test)]
 fn record_pdf_deferred_drop() {
@@ -37,6 +84,11 @@ fn record_pdf_deferred_drop() {
         .lock()
         .expect("drop probe lock")
         .push(std::thread::current().id());
+}
+
+#[cfg(test)]
+fn record_enriched_linear_scan_fallback() {
+    PDF_ENRICHED_LINEAR_SCAN_GUARD.fetch_add(1, Ordering::SeqCst);
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq, TS)]
@@ -222,15 +274,11 @@ impl Drop for ReaderSnapshot {
         let page_sentence_counts =
             std::mem::replace(&mut self.page_sentence_counts, Arc::new(Vec::new()));
         let search_matches = std::mem::replace(&mut self.search_matches, Arc::new(Vec::new()));
-        std::thread::spawn(move || {
-            drop((
-                document,
-                canonical_sentences,
-                page_sentence_counts,
-                search_matches,
-            ));
-            #[cfg(test)]
-            record_pdf_deferred_drop();
+        retire_pdf_payload(PdfRetirementPayload {
+            document: Some(document),
+            canonical_sentences,
+            page_sentence_counts,
+            search_matches,
         });
     }
 }
@@ -367,10 +415,11 @@ impl Drop for ReaderSession {
         let Some(document) = self.pdf_text_document.take() else {
             return;
         };
-        std::thread::spawn(move || {
-            drop(document);
-            #[cfg(test)]
-            record_pdf_deferred_drop();
+        retire_pdf_payload(PdfRetirementPayload {
+            document: Some(document),
+            canonical_sentences: Arc::new(Vec::new()),
+            page_sentence_counts: Arc::new(Vec::new()),
+            search_matches: Arc::new(Vec::new()),
         });
     }
 }
@@ -464,9 +513,17 @@ impl ReaderSession {
     /// current first-sample identity. This is intentionally lightweight and is
     /// used by the TTS runtime when a bounded normalization window is exhausted.
     pub fn has_canonical_sentence_after_current(&self) -> bool {
-        self.highlighted_canonical_idx().is_some_and(|idx| {
-            idx.saturating_add(1) < self.active_page_sentence_counts().iter().sum()
-        })
+        let total = self
+            .pdf_text_document
+            .as_deref()
+            .and_then(|document| document.page_sentence_prefix_sums.last().copied())
+            .unwrap_or_else(|| {
+                #[cfg(test)]
+                record_enriched_linear_scan_fallback();
+                self.active_page_sentence_counts().iter().sum()
+            });
+        self.highlighted_canonical_idx()
+            .is_some_and(|idx| idx.saturating_add(1) < total)
     }
 
     /// Lightweight constructor for test-only sessions without IO.
@@ -668,7 +725,12 @@ impl ReaderSession {
         }
         let old_document = self.pdf_text_document.replace(Arc::clone(&prepared));
         if let Some(old_document) = old_document {
-            std::thread::spawn(move || drop(old_document));
+            retire_pdf_payload(PdfRetirementPayload {
+                document: Some(old_document),
+                canonical_sentences: Arc::new(Vec::new()),
+                page_sentence_counts: Arc::new(Vec::new()),
+                search_matches: Arc::new(Vec::new()),
+            });
         }
         self.current_page = self.current_page.min(page_count.saturating_sub(1));
         self.current_plan_page = None;
@@ -1902,11 +1964,23 @@ impl ReaderSession {
     }
 
     fn global_display_idx(&self) -> Option<usize> {
-        let page_base: usize = self
-            .active_page_sentence_counts()
-            .iter()
-            .take(self.current_page)
-            .sum();
+        let page_base = self
+            .pdf_text_document
+            .as_deref()
+            .and_then(|document| {
+                document
+                    .page_sentence_prefix_sums
+                    .get(self.current_page)
+                    .copied()
+            })
+            .unwrap_or_else(|| {
+                #[cfg(test)]
+                record_enriched_linear_scan_fallback();
+                self.active_page_sentence_counts()
+                    .iter()
+                    .take(self.current_page)
+                    .sum()
+            });
         self.highlighted_display_idx.map(|idx| page_base + idx)
     }
 
@@ -1968,6 +2042,16 @@ impl ReaderSession {
     }
 
     fn has_sentence_before_current_page(&self) -> bool {
+        if let Some(document) = self.pdf_text_document() {
+            return document
+                .page_sentence_prefix_sums
+                .get(self.current_page)
+                .copied()
+                .unwrap_or_default()
+                > 0;
+        }
+        #[cfg(test)]
+        record_enriched_linear_scan_fallback();
         self.active_page_sentence_counts()
             .iter()
             .take(self.current_page)
@@ -1975,6 +2059,27 @@ impl ReaderSession {
     }
 
     fn has_sentence_after_current_page(&self) -> bool {
+        if let Some(document) = self.pdf_text_document() {
+            let next_page_base = document
+                .page_sentence_prefix_sums
+                .get(self.current_page.saturating_add(1))
+                .copied()
+                .unwrap_or_else(|| {
+                    document
+                        .page_sentence_prefix_sums
+                        .last()
+                        .copied()
+                        .unwrap_or(0)
+                });
+            return document
+                .page_sentence_prefix_sums
+                .last()
+                .copied()
+                .unwrap_or_default()
+                > next_page_base;
+        }
+        #[cfg(test)]
+        record_enriched_linear_scan_fallback();
         self.active_page_sentence_counts()
             .iter()
             .skip(self.current_page.saturating_add(1))
@@ -2990,6 +3095,128 @@ mod tests {
         assert!(!drops.is_empty());
         assert!(drops.iter().all(|thread| *thread != current));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn enriched_pdf_snapshot_churn_uses_one_bounded_retirement_worker() {
+        PDF_DEFERRED_DROP_THREADS
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .expect("drop probe lock")
+            .clear();
+        let caller = std::thread::current().id();
+        let path = unique_pdf_source_path();
+        fs::write(&path, b"%PDF-1.7\nvisual-session-fixture").expect("write readable PDF");
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = ReaderSession::from_pages_for_test(
+            path.clone(),
+            "churn.pdf".to_string(),
+            vec![String::new(); 24],
+            vec![Vec::new(); 24],
+        );
+        session.set_pdf_page_count(24);
+        let prepared = Arc::new(
+            ReaderSession::prepare_pdf_embedded_text(
+                (0..24)
+                    .map(|page| format!("Page {page} has a stable sentence."))
+                    .collect(),
+                "",
+                true,
+            )
+            .expect("prepared trusted text"),
+        );
+        session
+            .apply_prepared_pdf_embedded_text(Arc::clone(&prepared))
+            .expect("trusted text adoption");
+        drop(prepared);
+
+        for page in 0..256 {
+            session.current_page = page % 24;
+            drop(session.snapshot(PanelState::default(), &normalizer));
+        }
+        drop(session);
+
+        for _ in 0..200 {
+            let count = PDF_DEFERRED_DROP_THREADS
+                .get()
+                .expect("drop probe initialized")
+                .lock()
+                .expect("drop probe lock")
+                .len();
+            if count >= 257 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let drops = PDF_DEFERRED_DROP_THREADS
+            .get()
+            .expect("drop probe initialized")
+            .lock()
+            .expect("drop probe lock");
+        assert!(
+            drops.len() >= 257,
+            "all snapshot/session retirements are queued"
+        );
+        assert!(drops.iter().all(|thread| *thread != caller));
+        assert_eq!(
+            drops.iter().collect::<std::collections::HashSet<_>>().len(),
+            1
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn enriched_pdf_bounded_projection_uses_prefix_indexes_for_small_and_large_documents() {
+        fn exercise(page_count: usize, normalizer: &normalizer::TextNormalizer) -> usize {
+            let path = unique_pdf_source_path();
+            fs::write(&path, b"%PDF-1.7\nprojection-fixture").expect("write readable PDF");
+            let mut session = ReaderSession::from_pages_for_test(
+                path.clone(),
+                "projection.pdf".to_string(),
+                vec![String::new(); page_count],
+                vec![Vec::new(); page_count],
+            );
+            session.set_pdf_page_count(page_count);
+            let prepared = ReaderSession::prepare_pdf_embedded_text(
+                (0..page_count)
+                    .map(|page| format!("Page {page} has a stable sentence."))
+                    .collect(),
+                "",
+                true,
+            )
+            .expect("prepared trusted text");
+            session
+                .apply_prepared_pdf_embedded_text(Arc::new(prepared))
+                .expect("trusted text adoption");
+            session.current_page = page_count / 2;
+            session.highlighted_display_idx = Some(0);
+            let expected = page_count / 2;
+            assert_eq!(session.highlighted_canonical_idx(), Some(expected));
+            assert!(session.has_canonical_sentence_after_current());
+            assert!(!session.current_tts_audio_display_ids(normalizer).is_empty());
+            assert_eq!(
+                session.page_idx_for_global_sentence(expected),
+                (expected, 0)
+            );
+            let snapshot = session.snapshot_enriched_pdf_bounded(PanelState::default(), normalizer);
+            assert_eq!(snapshot.current_page, page_count / 2);
+            drop(snapshot);
+            drop(session);
+            let _ = fs::remove_file(path);
+            expected
+        }
+
+        PDF_ENRICHED_LINEAR_SCAN_GUARD.store(0, Ordering::SeqCst);
+        let normalizer = normalizer::TextNormalizer::default();
+        let small = exercise(10, &normalizer);
+        let large = exercise(100, &normalizer);
+        assert_eq!(small, 5);
+        assert_eq!(large, 50);
+        assert_eq!(
+            PDF_ENRICHED_LINEAR_SCAN_GUARD.load(Ordering::SeqCst),
+            0,
+            "enriched projection helpers must not fall back to page scans"
+        );
     }
 
     #[test]

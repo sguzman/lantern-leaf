@@ -517,10 +517,21 @@ impl ReaderSession {
     ) -> Vec<usize> {
         let plan = self.ensure_current_plan(normalizer);
         let page_base = self
-            .active_page_sentence_counts()
-            .iter()
-            .take(self.current_page)
-            .sum::<usize>();
+            .pdf_text_document()
+            .and_then(|document| {
+                document
+                    .page_sentence_prefix_sums
+                    .get(self.current_page)
+                    .copied()
+            })
+            .unwrap_or_else(|| {
+                #[cfg(test)]
+                super::record_enriched_linear_scan_fallback();
+                self.active_page_sentence_counts()
+                    .iter()
+                    .take(self.current_page)
+                    .sum()
+            });
         plan.audio_to_display
             .iter()
             .map(|idx| page_base.saturating_add(*idx))

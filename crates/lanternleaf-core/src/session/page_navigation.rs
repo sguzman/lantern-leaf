@@ -208,7 +208,10 @@ impl ReaderSession {
         if sentence_idx >= page_sentence_count {
             return None;
         }
-        let base: usize = self.active_page_sentence_counts().iter().take(page).sum();
+        let base = self
+            .pdf_text_document()
+            .and_then(|document| document.page_sentence_prefix_sums.get(page).copied())
+            .unwrap_or_else(|| self.active_page_sentence_counts().iter().take(page).sum());
         Some(base + sentence_idx)
     }
 
@@ -311,6 +314,29 @@ impl ReaderSession {
     }
 
     pub(crate) fn page_idx_for_global_sentence(&self, global_idx: usize) -> (usize, usize) {
+        if let Some(document) = self.pdf_text_document() {
+            let prefixes = document.page_sentence_prefix_sums.as_slice();
+            if prefixes.len() >= 2 {
+                let page_idx = prefixes
+                    .partition_point(|prefix| *prefix <= global_idx)
+                    .saturating_sub(1)
+                    .min(prefixes.len().saturating_sub(2));
+                let page_base = prefixes.get(page_idx).copied().unwrap_or_default();
+                let page_len = document
+                    .page_sentence_counts
+                    .get(page_idx)
+                    .copied()
+                    .unwrap_or_default();
+                return (
+                    page_idx,
+                    global_idx
+                        .saturating_sub(page_base)
+                        .min(page_len.saturating_sub(1)),
+                );
+            }
+        }
+        #[cfg(test)]
+        super::record_enriched_linear_scan_fallback();
         if self.active_page_sentence_counts().is_empty() {
             return (0, 0);
         }
