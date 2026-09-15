@@ -178,6 +178,70 @@ Architectural correction:
 
 with latest-target authority and same-target no-op semantics.
 
+## Goal 0022 A9 — second physical native PDF embedded-text/TTS QA
+
+A9 was source/CI accepted and integrated before this run. It fixed the A8 Search draft/focus and runtime-level PDF continuation source blockers, but was rejected physically.
+
+### Visual/PDF baseline remained strong
+
+Observed:
+
+- violent scrollbar dragging remained very responsive;
+- `Rendering page N` still appeared transiently but vanished quickly;
+- pages rendered quickly;
+- PDF Text-only worked and aligned sensibly with native pages;
+- PDF visual/Text-only stress toggling worked;
+- close/reopen remained snappy.
+
+The materialized PDF itself was visible under the QA cache as a real source file such as `calibre-downloads/caliberate/725-13e8b7a0.pdf`. This is source materialization, not proof that native page rasters are durably cached.
+
+### Natural TTS improved but interaction remained unacceptable
+
+Observed:
+
+- natural TTS crossed at least one native PDF page boundary, confirming A9 improved the original A7 continuation failure;
+- spamming Next worked well;
+- spamming Previous eventually repeated instead of continuing backward;
+- exact visual PDF click-to-sentence did not work, which is architecturally expected before sentence geometry, but the absence of an obvious coarse `Play from current page` action made repositioning TTS confusing.
+
+### TTS Speed/Volume UI failure
+
+A severe newly noticed usability defect:
+
+- manipulating TTS speed violently moved surrounding layout;
+- the visible speed control snapped back to the old `2.5` value during interaction;
+- command/status traffic made the reader feel unstable.
+
+Source review showed Speed/Volume were still rebuilt each frame from asynchronously acknowledged snapshot settings and emitted an `ApplySettings` command on every changed slider frame — the same class of stale-ack ownership mistake previously repaired for Search.
+
+### Search became editable but still was not usable
+
+Observed:
+
+- Search panel stayed open;
+- typing worked;
+- match count changed;
+- pressing Enter did nothing;
+- there was no visible way to navigate occurrences or tell where the selected occurrence lived.
+
+Source review confirmed the Search UI exposed only the editor, count, and focus button even though `SearchNext`/`SearchPrev` exist in the session model.
+
+### EPUB stale presentation evidence
+
+Observed:
+
+- the EPUB previously damaged during A7 reopened in the same truncated/broken-looking presentation state;
+- playing TTS and repeatedly moving Next appeared to restore the presentation;
+- a different/new EPUB survived aggressive Pretty/Text-only toggling under A9.
+
+This narrows the problem: A8/A9 fixed the active toggle race, but a previously damaged derived/persisted/session presentation state can still survive or be resurrected. A10 must identify the actual owner instead of deleting all caches blindly.
+
+### Caliberate Recent identity defect
+
+The real materialized PDF appeared in Recents as a hash-like title such as `725-13e8b7a0`, with no useful cover.
+
+Source review confirmed Recents infers title from the materialized source file stem and does not preserve Caliberate provider identity/title/cover. This is queued separately as Goal 0024.
+
 ## QA infrastructure observation
 
 Repeated `qa.ps1` runs inside one PowerShell process can eventually make Visual Studio environment setup fail with:
