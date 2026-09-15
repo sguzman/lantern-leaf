@@ -1,210 +1,126 @@
-# 0022 — Native PDF embedded-text / TTS trustworthy path — A10
+# 0022 — Native PDF embedded-text / TTS trustworthy path — A11
 
 ## Status
 
-**READY — A10 CORRECTION AFTER A9 REAL-DESKTOP REJECTION**
+**READY — A11 CORRECTION AFTER A10 DIRECTOR REJECTION**
 
 Read first:
 
+- `docs/work/reviews/0022-a10-director-rejection.md`
 - `docs/work/reviews/0022-a9-real-desktop-rejection.md`
-- `docs/work/reviews/0022-a9-director-acceptance.md`
-- `docs/work/reviews/0022-a7-real-desktop-rejection.md`
 - `docs/architecture/pdf-text-recovery-boundary-2026-09.md`
 - `docs/project/qa-evidence-ledger.md`
 
-A9 source architecture remains accepted in direction, but physical Windows QA rejected Goal 0022 on interaction/state correctness.
+A10 is not authorized for physical QA. Preserve its accepted UI/state work, but close the two remaining evidence/correctness gaps at their actual runtime/lifecycle boundaries.
 
 ## Preserve
 
-Preserve the accepted native baseline:
+Preserve all accepted A10 direction:
 
-- Rust + `eframe`/`egui` authority;
+- synchronous app-owned TTS Speed/Volume drafts;
+- stale-ack resistance;
+- bounded/coalesced drag-stop settings submission;
+- fixed/bounded status presentation outside central reader geometry;
+- Search Previous/Next;
+- Enter/Shift+Enter navigation;
+- selected X/Y + page provenance + bounded excerpt;
+- `Start TTS at visible page` coarse PDF positioning;
+- reader/source transition invalidation of in-memory Pretty presentation state;
 - one process-wide Pdfium owner;
-- visual-first PDF open independent of text/search/TTS/recovery;
-- Goal 0020 continuous virtualized PDF scrolling/responsiveness;
-- cooperative bounded native text extraction with Current/Nearby raster priority;
-- trusted page-aligned `PreparedPdfEmbeddedText`;
-- prefix-indexed bounded enriched-PDF projections;
-- one bounded off-egui PDF retirement worker;
-- document-scale preparation/cache/search off egui;
-- source/generation/query-revision stale safety;
-- A8/A9 `SetTextOnly { enabled }` latest-target semantics;
-- A9 Search synchronous draft and actual-editor-focus ownership;
-- A9 runtime-level natural PDF page continuation;
-- global canonical identity + page-local plan-boundary correctness;
-- ordinary Windows TTS first-sample authority;
-- exact PDF sentence geometry/highlight/follow remains disabled;
-- Quack-check/Python/Docling/OCR/hostile recovery remain forbidden in Goal 0022.
+- visual-first PDF open;
+- Goal 0020 continuous PDF responsiveness;
+- trusted native embedded text and page-aligned canonical identity;
+- off-egui document/cache/search work;
+- Current/Nearby raster priority;
+- idempotent `SetTextOnly { enabled }`;
+- exact PDF visual sentence geometry/highlight/follow remains out of scope;
+- Quack-check/Python/Docling/OCR/hostile recovery remain forbidden.
 
-Physical A9 evidence to preserve:
+## A11 correction 1 — prove/fix burst seek through the actual runtime worker and first-sample ownership
 
-- violent PDF scrolling remains excellent;
-- `Rendering page N` placeholders are fast/transient;
-- PDF Text-only is page-aligned;
-- natural TTS crossed at least one native page boundary;
-- burst Next mostly works;
-- PDF Text-only stress works;
-- new EPUB Pretty/Text-only stress no longer reproduces the original nuke;
-- PDF reopen remains snappy.
+A10's new burst seek test calls `TtsRuntime::apply_command()` synchronously. That does not reproduce the physical A9 failure boundary.
 
-## A10 correction 1 — synchronous TTS settings editor state
+Required production-shaped harness:
 
-The TTS Speed/Volume sliders currently rebuild their visible values from asynchronous `ReaderSnapshot` settings every frame and emit `ApplySettings` on every changed frame.
+- use `TtsRuntimeMode::Simulated` plus `SimulatedBoundaryDriver` or equivalent;
+- submit playback/seek commands through the normal runtime command queue/worker path;
+- start real simulated playback and emit accepted first-sample boundaries;
+- issue rapid `SeekNext` and `SeekPrev` bursts while playback requests are being replaced;
+- deliberately deliver a stale first-sample boundary from a superseded request/generation;
+- prove stale boundary rejection;
+- prove monotonic canonical movement one sentence at a time;
+- cross native PDF page boundaries;
+- skip empty native pages;
+- clamp exactly at true beginning/end;
+- prove no prior/current sentence replay caused by stale boundary ownership;
+- add representative EPUB parity.
 
-Required:
+If the real harness reproduces the bug, fix runtime request/generation/boundary ownership. Do not paper over it only in ReaderSession helper methods.
 
-- app-owned synchronous draft state for Speed and Volume while editing;
-- no visible snap-back to stale acknowledged values;
-- stale `ReaderUpdated` cannot overwrite a newer local draft;
-- same-value acknowledgement settles the draft cleanly;
-- source/session change intentionally resynchronizes;
-- commit is bounded/coalesced: prefer commit-on-drag-stop or an equivalent bounded desired-state protocol rather than one unbounded settings effect per pixel/frame;
-- persisted canonical settings eventually equal the final visible target;
-- changing Speed/Volume must not move the central reading viewport merely because status/diagnostic strings change.
+## A11 correction 2 — diagnose same-EPUB close/reopen through real persistence/cache/session lifecycle
 
-Add delayed-ack and rapid-drag deterministic regressions.
+A10 clears in-memory Pretty caches on reader/source transitions, but did not satisfy the required persisted close/reopen diagnosis.
 
-## A10 correction 2 — diagnostic/status presentation must not reflow the reader
+Build a real temporary-cache lifecycle regression using LanternLeaf persistence/cache/session services:
 
-Transient command/status diagnostics are debugging evidence, not document geometry.
+1. open an EPUB fixture with enough Pretty content to detect truncation;
+2. stress Pretty/Text-only state changes;
+3. persist/close through the normal lifecycle;
+4. fully release the reader session;
+5. reopen the same source from the configured temporary cache root;
+6. render/build the Pretty projection without issuing TTS or Next;
+7. verify complete document content immediately;
+8. verify valid bookmark/canonical position survives;
+9. verify stale in-flight Pretty results from the prior session/source generation cannot attach to the reopened session;
+10. verify valid dual-view/structured artifacts can be reused;
+11. verify corrupt/incomplete derived artifacts are rejected/rebuilt safely rather than trusted.
 
-Required:
+Investigate and identify the real owner of the A7-surviving truncated state. It may be in-memory, bookmark/session, dual-view artifacts, structured restoration, worker completion, or another derived artifact. Document the evidence.
 
-- changing `Last command`, status messages, persistence notices, TTS control notices, or repeated command traffic must not change the central reader viewport rect/height;
-- use a fixed-height bounded status region, truncation/ellipsis, overlay/toast, or another stable layout;
-- cap visible message count/width;
-- diagnostics may remain inspectable through a diagnostics panel/log;
-- spamming Next/Previous or dragging a settings slider must not vertically/horizontally shove reader content.
+Do not globally delete healthy caches as a workaround.
 
-Add an egui/layout regression or deterministic layout-policy projection proving central reader geometry is invariant to short/long diagnostic strings and command churn.
+If the issue is proven to be only egui in-memory Pretty cache identity, keep the A10 reset but add the production lifecycle proof and document why durable artifacts were not culpable.
 
-## A10 correction 3 — make Search usable, not merely computable
+## Validation
 
-A9 successfully keeps Search open and preserves typed text, but the panel exposes no navigation.
+Run at minimum:
 
-Required Search UX:
-
-- visible `Previous match` and `Next match` controls;
-- Enter = next match;
-- Shift+Enter = previous match;
-- show selected match position as `X / Y`;
-- show native page provenance when known, e.g. `Page 127`;
-- show a bounded excerpt/snippet for the selected canonical sentence;
-- PDF visual mode must jump native page ownership to the selected match even though exact in-page rectangle geometry does not yet exist;
-- Text-only mode may select/follow the exact canonical sentence row;
-- empty/no-match states are explicit;
-- query changes reset/repair selected-match state deterministically;
-- Search stays open while navigating.
-
-Do not implement guessed PDF rectangles.
-
-Add production-shaped later-page PDF tests for buttons + Enter/Shift+Enter + provenance, plus EPUB parity.
-
-## A10 correction 4 — burst TTS seek monotonicity
-
-Physical A9 behavior: repeated Next worked; repeated Previous eventually repeated the same sentence.
-
-Required:
-
-- through the real `TtsRuntime` control worker, a burst of accepted `SeekNext` commands moves monotonically forward one canonical sentence at a time until true end;
-- burst `SeekPrev` moves monotonically backward one canonical sentence at a time until true beginning;
-- page boundaries and empty PDF pages do not cause replay;
-- stale first-sample events from canceled/replaced playback requests cannot reassert the sentence being left;
-- command ordering remains bounded and deterministic;
-- behavior is correct for enriched PDF and representative EPUB.
-
-Use simulated runtime/first-sample driver coverage, not helper-only tests.
-
-## A10 correction 5 — explicit coarse PDF TTS positioning without fake geometry
-
-Exact click-on-rendered-text cannot exist truthfully until native sentence geometry exists. Do not fake it.
-
-But visual PDF mode must expose an obvious page-level positioning action:
-
-- `Play from current PDF page` / `Start TTS at visible page` in the quick controls;
-- it must use authoritative viewport/current native page ownership;
-- first sentence on the next non-empty text-bearing native page may be used if the visible page has no accepted text;
-- action must be discoverable without opening a diagnostics panel;
-- ordinary Text-only sentence rows remain click-to-play for precise canonical positioning.
-
-Exact rendered-text click-to-sentence, visual spoken overlays, and visual PDF auto-follow remain subsequent geometry work.
-
-## A10 correction 6 — stale/damaged EPUB presentation must not survive reopen
-
-The EPUB damaged during A7 reopened later in the same truncated-looking state, while a newly opened EPUB no longer reproduced the stress-toggle race. TTS/Next activity appeared to recover the damaged presentation.
-
-A10 must diagnose this path from evidence rather than assume which cache is guilty.
-
-Required:
-
-- reproduce a prior/stale presentation state through the actual persistence/cache/session reopen path;
-- identify whether the surviving state comes from bookmark/session state, dual-view artifacts, Pretty cache identity, structured-document restoration, text-only state, or another derived artifact;
-- transient/incomplete presentation state must never become authoritative durable document content;
-- stale/corrupt derived presentation artifacts must be rejected/rebuilt safely;
-- reopening the same EPUB after stress must render the complete Pretty document immediately, without requiring TTS or Next to repair it;
-- preserve bookmark/canonical reading position where valid;
-- do not globally discard healthy caches as a brute-force fix;
-- new EPUB stress-toggle behavior must remain green.
-
-Add a close/reopen regression that uses persisted QA/cache state, not only one in-memory session.
-
-## Scope exclusions
-
-Do not add:
-
-- PDF sentence rectangles;
-- visual spoken sentence overlay;
-- visual PDF auto-follow;
-- OCR;
-- Quack-check;
-- Python;
-- Docling;
-- hostile/mixed recovery.
-
-The Caliberate Recents title/cover defect for materialized hash-named sources is real but belongs to queued Goal 0024, not A10.
-
-## Required validation
-
-At minimum:
-
-- TTS Speed/Volume delayed-ack draft stability;
-- bounded/coalesced settings commit behavior;
-- central reader layout invariant under diagnostic/status churn;
-- Search Previous/Next controls;
-- Enter/Shift+Enter search navigation;
-- selected match X/Y + native page provenance + excerpt;
-- later-page PDF Search navigation;
-- burst PDF TTS Next monotonicity;
-- burst PDF TTS Previous monotonicity;
-- stale first-sample rejection during seek bursts;
-- coarse `Play from current PDF page` semantics including empty native pages;
-- persisted EPUB close/reopen after Text-only stress;
-- complete Pretty document after reopen without TTS repair;
-- A8/A9 idempotent Text-only stress regressions;
-- A9 Search focus/draft regressions;
-- A9 runtime natural page continuation regression;
+- real asynchronous simulated-runtime SeekNext burst;
+- real asynchronous simulated-runtime SeekPrev burst;
+- stale first-sample after superseding seek;
+- PDF empty-page/page-boundary seek cases;
+- EPUB runtime seek parity;
+- persisted same-source EPUB close/reopen after Text-only stress;
+- complete Pretty document immediately on reopen;
+- bookmark/canonical-position preservation;
+- stale prior-session Pretty result rejection;
+- corrupt/incomplete derived artifact recovery;
+- A10 TTS draft regressions;
+- A10 Search navigation regressions;
+- A10 stable status/layout regressions;
+- A10 `Start TTS at visible page` regression;
+- A8/A9 Text-only/Search/natural page-continuation regressions;
 - Goal 0019/0020 renderer regressions;
 - representative EPUB visual/TTS regressions.
 
-Run:
+Then run:
 
-- focused A10 tests;
 - `cargo test --workspace -- --test-threads=1`;
 - `cargo check --workspace`;
 - `cargo build --workspace`;
 - `git diff --check`;
 - repo-native Windows QA preparation;
 - fresh hosted `native-workspace`;
-- fresh hosted `hosted-renderer-probe` for the substantive A10 lineage.
+- fresh hosted `hosted-renderer-probe`.
 
-Do not terminalize Goal 0022 or signal Goal achieved until the fresh hosted Windows workflow is green.
+Do not terminalize or signal Goal achieved until fresh hosted Windows validation for the substantive A11 lineage is green.
 
-Update `docs/work/reports/0022.md` with A10 evidence.
+Update `docs/work/reports/0022.md` with A11 evidence.
 
 Move ready -> active -> done normally.
 
 Push before terminal signaling.
 
-Restore the shared checkout to `main`.
+Restore shared checkout to `main`.
 
-Do not request human QA. Director reviews A10 first.
+Do not request human QA. Director reviews A11 first.
