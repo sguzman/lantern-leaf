@@ -320,6 +320,7 @@ pub enum SessionCommand {
     NextSentence,
     PrevSentence,
     ToggleTextOnly,
+    SetTextOnly { enabled: bool },
     ApplySettings { patch: ReaderSettingsPatch },
     SearchSetQuery { query: String },
     SearchNext,
@@ -524,6 +525,14 @@ impl ReaderSession {
             });
         self.highlighted_canonical_idx()
             .is_some_and(|idx| idx.saturating_add(1) < total)
+    }
+
+    /// Whether the current native page still has a display sentence after the
+    /// authoritative highlight. TTS uses this to distinguish a bounded refill
+    /// on the same page from a PDF page transition.
+    pub fn has_sentence_after_current_on_page(&self) -> bool {
+        self.highlighted_display_idx
+            .is_some_and(|idx| idx.saturating_add(1) < self.current_display_len())
     }
 
     /// Lightweight constructor for test-only sessions without IO.
@@ -1471,7 +1480,7 @@ fn pdf_ocr_alignment_summary_from_artifact(
 }
 
 impl ReaderSession {
-    pub(crate) fn is_pdf_source(&self) -> bool {
+    pub fn is_pdf_source(&self) -> bool {
         self.source_path
             .extension()
             .and_then(|ext| ext.to_str())
@@ -2991,6 +3000,65 @@ mod tests {
     }
 
     #[test]
+    fn enriched_pdf_tts_continues_from_title_across_empty_pages_and_seeks_without_replay() {
+        let path = unique_pdf_source_path();
+        fs::write(&path, b"%PDF-1.7\nvisual-session-fixture").expect("write readable PDF");
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = ReaderSession::from_pages_for_test(
+            path.clone(),
+            "title.pdf".to_string(),
+            vec![String::new(); 6],
+            vec![Vec::new(); 6],
+        );
+        session.set_pdf_page_count(6);
+        let prepared = ReaderSession::prepare_pdf_embedded_text(
+            vec![
+                "Title page only.".to_string(),
+                String::new(),
+                String::new(),
+                "Chapter one begins.".to_string(),
+                "Chapter two begins.".to_string(),
+                String::new(),
+            ],
+            "",
+            true,
+        )
+        .expect("prepared trusted text");
+        session
+            .apply_prepared_pdf_embedded_text(Arc::new(prepared))
+            .expect("trusted text adoption");
+        session.tts_play(&normalizer);
+        assert_eq!(session.current_tts_audio_display_ids(&normalizer), vec![0]);
+        session
+            .apply_tts_sentence_boundary(&normalizer, 0, 0)
+            .expect("title first sample");
+
+        assert!(session.advance_tts_to_next_non_empty_page(&normalizer));
+        assert_eq!(session.current_page, 3);
+        assert_eq!(session.current_tts_audio_display_ids(&normalizer), vec![1]);
+        session
+            .apply_tts_sentence_boundary(&normalizer, 0, 1)
+            .expect("chapter one first sample");
+        assert!(session.advance_tts_to_next_non_empty_page(&normalizer));
+        assert_eq!(session.current_page, 4);
+        assert_eq!(session.current_tts_audio_display_ids(&normalizer), vec![2]);
+        session
+            .apply_tts_sentence_boundary(&normalizer, 0, 2)
+            .expect("chapter two first sample");
+        assert!(!session.has_canonical_sentence_after_current());
+
+        session.tts_seek_prev(&normalizer);
+        assert_eq!(session.current_page, 3);
+        assert_eq!(session.highlighted_canonical_idx(), Some(1));
+        session.tts_seek_next(&normalizer);
+        assert_eq!(session.current_page, 4);
+        assert_eq!(session.highlighted_canonical_idx(), Some(2));
+        session.tts_seek_next(&normalizer);
+        assert_eq!(session.tts_state, TtsPlaybackState::Paused);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn enriched_pdf_reconciles_live_search_query_and_rejects_stale_results() {
         let path = unique_pdf_source_path();
         fs::write(&path, b"%PDF-1.7\nvisual-session-fixture").expect("write readable PDF");
@@ -3494,6 +3562,38 @@ mod tests {
 
         session.toggle_text_only(&normalizer);
         assert_eq!(session.current_highlight_idx(), Some(2));
+    }
+
+    #[test]
+    fn set_text_only_is_idempotent_and_preserves_complete_canonical_document() {
+        let normalizer = normalizer::TextNormalizer::default();
+        let mut session = build_test_session(&[&["A.", "B."], &["C.", "D."]]);
+        session.set_page(1, &normalizer);
+        session.highlighted_display_idx = Some(1);
+        let before = session.snapshot(PanelState::default(), &normalizer);
+        session
+            .apply_command_lightweight(SessionCommand::SetTextOnly { enabled: true }, &normalizer);
+        session
+            .apply_command_lightweight(SessionCommand::SetTextOnly { enabled: true }, &normalizer);
+        assert!(session.text_only_mode);
+        assert_eq!(session.current_highlight_idx(), Some(1));
+        assert_eq!(session.active_page_sentences().iter().flatten().count(), 4);
+        for idx in 0..64 {
+            session.apply_command_lightweight(
+                SessionCommand::SetTextOnly {
+                    enabled: idx % 2 == 0,
+                },
+                &normalizer,
+            );
+        }
+        session
+            .apply_command_lightweight(SessionCommand::SetTextOnly { enabled: false }, &normalizer);
+        assert!(!session.text_only_mode);
+        assert_eq!(session.active_page_sentences().iter().flatten().count(), 4);
+        assert_eq!(
+            session.current_highlight_idx(),
+            before.highlighted_sentence_idx
+        );
     }
 
     #[test]

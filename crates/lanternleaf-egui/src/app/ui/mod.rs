@@ -158,9 +158,7 @@ impl LanternLeafApp {
             .as_ref()
             .map(|session| session.panels)
             .unwrap_or_default();
-        let show_search_panel = self.pending_search_focus
-            || !state.reader_ui.search_query.trim().is_empty()
-            || !state.reader_ui.search_matches.is_empty();
+        let show_search_panel = super::search_panel_is_visible(self.search_panel_open);
         SidePanel::left("panel_toggle")
             .resizable(true)
             .min_width(READER_PANEL_MIN_WIDTH)
@@ -242,10 +240,6 @@ impl LanternLeafApp {
                 _ => {
                     self.render_starter_content(ui, state);
                 }
-            }
-            if self.pending_search_focus {
-                ui.label("Search field would be focused (shortcut handled).");
-                self.pending_search_focus = false;
             }
             if let Some(plan) = self.last_plan.as_ref() {
                 ui.separator();

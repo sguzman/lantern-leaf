@@ -349,6 +349,19 @@ pub(crate) fn text_only_mode_transition(
     }
 }
 
+pub(crate) fn search_panel_is_visible(open: bool) -> bool {
+    open
+}
+
+pub(crate) fn consume_search_focus_request(pending: &mut bool) -> bool {
+    if *pending {
+        *pending = false;
+        true
+    } else {
+        false
+    }
+}
+
 impl LifecycleHandshake {
     pub(crate) fn begin_close_book(&mut self) {
         self.close_after_persistence = true;
@@ -417,11 +430,13 @@ struct LanternLeafApp {
     show_safe_quit_modal: bool,
     show_reader_confirm_modal: bool,
     lifecycle: LifecycleHandshake,
+    search_panel_open: bool,
     pending_search_focus: bool,
     last_plan: Option<DispatchPlan>,
     auto_scroll_state: AutoScrollState,
     text_only_override: Option<bool>,
     text_only_toggle_pending: bool,
+    text_only_pending_target: Option<bool>,
     anchor_diagnostics: AnchorDiagnostics,
     overlay_diagnostics: OverlayDiagnostics,
     audio_diagnostics: AudioDiagnostics,
@@ -1015,11 +1030,13 @@ impl LanternLeafApp {
             show_safe_quit_modal: false,
             show_reader_confirm_modal: false,
             lifecycle: LifecycleHandshake::default(),
+            search_panel_open: false,
             pending_search_focus: false,
             last_plan: None,
             auto_scroll_state: AutoScrollState::default(),
             text_only_override: None,
             text_only_toggle_pending: false,
+            text_only_pending_target: None,
             anchor_diagnostics: AnchorDiagnostics::default(),
             overlay_diagnostics: OverlayDiagnostics::default(),
             audio_diagnostics: AudioDiagnostics::default(),
@@ -1166,11 +1183,13 @@ impl LanternLeafApp {
             show_safe_quit_modal: false,
             show_reader_confirm_modal: false,
             lifecycle: LifecycleHandshake::default(),
+            search_panel_open: false,
             pending_search_focus: false,
             last_plan: None,
             auto_scroll_state: AutoScrollState::default(),
             text_only_override: None,
             text_only_toggle_pending: false,
+            text_only_pending_target: None,
             anchor_diagnostics: AnchorDiagnostics::default(),
             overlay_diagnostics: OverlayDiagnostics::default(),
             audio_diagnostics: AudioDiagnostics::default(),
@@ -1319,6 +1338,7 @@ impl LanternLeafApp {
         match action {
             ShortcutAction::Command(command) => self.execute_command(command.clone()),
             ShortcutAction::Ui(UiShortcutAction::FocusSearch) => {
+                self.search_panel_open = true;
                 self.pending_search_focus = true;
                 self.push_status("Shortcut: focus search".to_string());
             }
@@ -2483,20 +2503,25 @@ impl LanternLeafApp {
     }
 
     fn maybe_reapply_text_only(&mut self, snapshot: &ReaderSnapshot) {
-        if self.text_only_override == Some(true) && !snapshot.text_only_mode {
-            if !self.text_only_toggle_pending {
+        if let Some(desired) = self.text_only_override {
+            if snapshot.text_only_mode == desired {
+                self.text_only_toggle_pending = false;
+                self.text_only_pending_target = None;
+            } else if self.text_only_pending_target != Some(desired) {
                 trace!(
                     current = snapshot.text_only_mode,
-                    desired = true,
-                    "Text-only override mismatch detected, reapplying toggle"
+                    desired,
+                    "Text-only desired state mismatch detected, reapplying idempotent request"
                 );
                 self.execute_reader_command(ReaderCommand::Session(
-                    session::SessionCommand::ToggleTextOnly,
+                    session::SessionCommand::SetTextOnly { enabled: desired },
                 ));
                 self.text_only_toggle_pending = true;
+                self.text_only_pending_target = Some(desired);
             }
         } else {
             self.text_only_toggle_pending = false;
+            self.text_only_pending_target = None;
         }
     }
 
@@ -3564,6 +3589,13 @@ impl eframe::App for LanternLeafApp {
             "Prepared lightweight egui state projection"
         );
         let reader_snapshot = snapshot.reader_document.snapshot.as_deref();
+        if reader_snapshot.is_none() {
+            self.search_panel_open = false;
+            self.pending_search_focus = false;
+            self.text_only_override = None;
+            self.text_only_toggle_pending = false;
+            self.text_only_pending_target = None;
+        }
         if let Some(reader_snapshot) = reader_snapshot {
             self.maybe_reapply_text_only(reader_snapshot);
         }
@@ -3632,6 +3664,23 @@ mod tts_repaint_policy_tests {
     #[test]
     fn idle_without_pending_command_is_event_driven() {
         assert!(!super::tts_repaint_due(false));
+    }
+
+    #[test]
+    fn search_panel_stays_open_while_one_shot_focus_is_consumed() {
+        let mut open = false;
+        let mut focus_pending = false;
+        open = true;
+        focus_pending = true;
+        assert!(super::search_panel_is_visible(open));
+        assert!(super::consume_search_focus_request(&mut focus_pending));
+        assert!(!focus_pending);
+        assert!(super::search_panel_is_visible(open));
+        assert!(!super::consume_search_focus_request(&mut focus_pending));
+        // Empty and cleared queries do not participate in visibility.
+        assert!(super::search_panel_is_visible(open));
+        open = false; // only an explicit close may hide the panel.
+        assert!(!super::search_panel_is_visible(open));
     }
 
     #[test]

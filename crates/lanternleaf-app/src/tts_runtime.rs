@@ -1057,20 +1057,52 @@ fn run_tts_runtime_loop(
         if next_start < plan.sentences.len() {
             resume_start_override = Some(next_start);
         } else {
-            let has_more_canonical = ctx
+            let (has_more_canonical, is_pdf, has_more_on_page) = ctx
                 .session
                 .lock()
                 .ok()
                 .and_then(|guard| {
-                    guard
-                        .as_ref()
-                        .map(session::ReaderSession::has_canonical_sentence_after_current)
+                    guard.as_ref().map(|reader| {
+                        (
+                            reader.has_canonical_sentence_after_current(),
+                            reader.is_pdf_source(),
+                            reader.has_sentence_after_current_on_page(),
+                        )
+                    })
                 })
-                .unwrap_or(false);
+                .unwrap_or((false, false, false));
             if has_more_canonical {
-                // The bounded normalization window ended, but the document did
-                // not. Rebuild the next local window around the current identity.
-                resume_start_override = Some(next_start);
+                if is_pdf && !has_more_on_page {
+                    // A PDF plan ended at a native-page boundary. Advance the
+                    // authoritative session first, skipping empty native pages,
+                    // so the next plan starts on the next real sentence.
+                    let advanced = ctx
+                        .session
+                        .lock()
+                        .ok()
+                        .and_then(|mut guard| {
+                            guard.as_mut().map(|reader| {
+                                reader.advance_tts_to_next_non_empty_page(&ctx.normalizer)
+                            })
+                        })
+                        .unwrap_or(false);
+                    if !advanced {
+                        if let Ok(mut guard) = ctx.session.lock() {
+                            if let Some(reader) = guard.as_mut() {
+                                let _ = reader.apply_command_lightweight(
+                                    session::SessionCommand::TtsStop,
+                                    &ctx.normalizer,
+                                );
+                            }
+                        }
+                        break;
+                    }
+                    resume_start_override = None;
+                } else {
+                    // EPUB and same-page PDF refills retain the bounded-window
+                    // continuation semantics without changing native page.
+                    resume_start_override = Some(next_start);
+                }
             } else if let Ok(mut guard) = ctx.session.lock() {
                 // The actual page/document is exhausted. Do not let the last
                 // boundary become the next plan's start and replay indefinitely.
