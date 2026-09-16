@@ -61,6 +61,12 @@ Important directories:
 - [`work/reports/`](work/reports/) — Codex implementation/validation evidence.
 - [`work/reviews/`](work/reviews/) — director acceptance/rejection reasoning.
 
+## Concept art
+
+See [`concept-art/`](concept-art/) for preserved visual design explorations.
+
+These are product/design north stars rather than implementation contracts. The EPUB + TTS reader concept documents the dark jade three-pane reading surface, dense appearance inspector, synchronized TTS highlight, and persistent player that should inform future GUI work without being mistaken for current runtime truth.
+
 ## Historical migration documents
 
 Top-level migration/parity/Tauri documents remain useful as historical evidence of the transition from the older web/Tauri product toward the native Rust/egui authority.

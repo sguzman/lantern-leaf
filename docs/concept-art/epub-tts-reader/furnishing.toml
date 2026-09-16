@@ -1,0 +1,742 @@
+# LanternLeaf EPUB + TTS reader concept furnishing
+#
+# STATUS: visual/product reference only.
+# This is a TOML-like semantic furnishing of the archived concept art.
+# It is not a production parser/schema commitment and must not be treated
+# as current implementation truth.
+
+[concept]
+id = "leafline-epub-tts-reader"
+status = "visual-reference"
+implementation_contract = false
+source = "ChatGPT UI-authoring concept experiment"
+created = "2026-09-15"
+archived = "2026-09-16"
+
+[ui]
+id = "leafline-reader"
+kind = "epub-reader"
+title = "Leafline"
+viewport = [1440, 1024]
+
+[ui.layout]
+type = "shell"
+columns = [
+    "library:260",
+    "reader:1fr",
+    "inspector:330",
+]
+rows = [
+    "content:1fr",
+    "tts:96",
+]
+
+
+# ============================================================
+# LEFT SIDEBAR
+# ============================================================
+
+[region.library]
+slot = "library"
+layout = "column"
+padding = 20
+gap = 20
+scroll = "vertical"
+
+[[region.library.children]]
+type = "brand"
+icon = "leaf"
+title = "Leafline"
+subtitle = "Great stories live longer"
+
+[[region.library.children]]
+type = "nav"
+id = "primary"
+
+[[region.library.children.items]]
+icon = "library"
+label = "Library"
+active = true
+
+[[region.library.children.items]]
+icon = "search"
+label = "Search"
+
+[[region.library.children.items]]
+icon = "highlighter"
+label = "Highlights"
+
+[[region.library.children.items]]
+icon = "bookmark"
+label = "Bookmarks"
+
+[[region.library.children.items]]
+icon = "note"
+label = "Notes"
+
+
+# ------------------------------------------------------------
+# Current book
+# ------------------------------------------------------------
+
+[[region.library.children]]
+type = "book-summary"
+id = "current-book"
+label = "CURRENT BOOK"
+
+cover = "wandering-horizon"
+title = "The Wandering Horizon"
+author = "Elise Carter"
+
+chapter = 3
+chapter_count = 14
+progress = 0.28
+
+[[region.library.children]]
+type = "table-of-contents"
+title = "TABLE OF CONTENTS"
+
+[[region.library.children.items]]
+number = 1
+title = "A Different Dawn"
+
+[[region.library.children.items]]
+number = 2
+title = "Maps and Motives"
+
+[[region.library.children.items]]
+number = 3
+title = "The Mountain Path"
+active = true
+
+[[region.library.children.items]]
+number = 4
+title = "Valleys of Quiet"
+
+[[region.library.children.items]]
+number = 5
+title = "The Longer Road"
+
+[[region.library.children.items]]
+number = 6
+title = "Letters from Home"
+
+[[region.library.children.items]]
+number = 7
+title = "A Wilder Sky"
+
+[[region.library.children.items]]
+number = 8
+title = "Turning Points"
+
+
+# ============================================================
+# CENTRAL READER
+# ============================================================
+
+[region.reader]
+slot = "reader"
+layout = "column"
+padding = [20, 28]
+gap = 16
+
+
+# ------------------------------------------------------------
+# Reader toolbar
+# ------------------------------------------------------------
+
+[[region.reader.children]]
+type = "toolbar"
+id = "reader-toolbar"
+
+[region.reader.children.layout]
+type = "row"
+align = "center"
+justify = "between"
+
+[[region.reader.children.children]]
+type = "search"
+placeholder = "Search in book..."
+width = 390
+
+[[region.reader.children.children]]
+type = "cluster"
+gap = 12
+
+[[region.reader.children.children.children]]
+type = "icon-button"
+icon = "chevron-left"
+
+[[region.reader.children.children.children]]
+type = "icon-button"
+icon = "chevron-right"
+
+[[region.reader.children.children.children]]
+type = "status"
+text = "Chapter 3 of 14"
+
+[[region.reader.children.children.children]]
+type = "status"
+text = "28%"
+
+[[region.reader.children.children.children]]
+type = "icon-button"
+icon = "bookmark"
+
+[[region.reader.children.children.children]]
+type = "icon-button"
+icon = "more-horizontal"
+
+
+# ------------------------------------------------------------
+# EPUB document surface
+# ------------------------------------------------------------
+
+[[region.reader.children]]
+type = "document"
+id = "epub-content"
+grow = true
+scroll = "vertical"
+
+[region.reader.children.presentation]
+mode = "continuous"
+column_width = 690
+page_margin = 72
+horizontal_align = "center"
+
+[region.reader.children.document]
+format = "epub"
+chapter = 3
+
+[[region.reader.children.document.blocks]]
+type = "eyebrow"
+text = "CHAPTER 3"
+
+[[region.reader.children.document.blocks]]
+type = "heading"
+level = 1
+text = "The Mountain Path"
+
+[[region.reader.children.document.blocks]]
+type = "divider"
+width = 40
+
+[[region.reader.children.document.blocks]]
+type = "paragraph"
+id = "p1"
+text = """
+The trail began before dawn, a thin ribbon of earth threading through
+pine and stone. The air was cold enough to make our breath visible,
+and everything felt sharper — the crunch of gravel, the distant rush
+of water, the steady rhythm of our own footsteps.
+"""
+
+[[region.reader.children.document.blocks]]
+type = "paragraph"
+id = "p2"
+text = """
+As the first light touched the ridge, the valley below unfolded like a
+map, rivers of mist curling between the trees. I stopped for a moment,
+taking it all in, reminded that some of the most important discoveries
+arrive not with noise, but with stillness.
+"""
+
+[[region.reader.children.document.blocks]]
+type = "paragraph"
+id = "p3"
+text = """
+We walked for hours, following the mountain's gentle insistence
+upward. Each turn revealed something new — a wider view, a quieter
+mind, a little more space between who I had been and who I was
+becoming. The journey, I realized, was not just about reaching the top,
+but about learning to notice the beauty in the climb.
+"""
+
+[[region.reader.children.document.blocks]]
+type = "quote"
+text = """
+Not all those who wander are lost,
+but many find exactly what they need.
+"""
+
+
+# ------------------------------------------------------------
+# Active TTS projection into document
+# ------------------------------------------------------------
+
+[region.reader.children.tts_projection]
+enabled = true
+follow_playback = true
+auto_scroll = true
+
+current_block = "p2"
+current_sentence = 1
+
+highlight_mode = "sentence"
+highlight_style = "soft-fill"
+
+[region.reader.children.tts_projection.current_range]
+start = 0
+end = 104
+
+
+# ============================================================
+# RIGHT INSPECTOR
+# ============================================================
+
+[region.inspector]
+slot = "inspector"
+layout = "column"
+padding = 20
+gap = 20
+scroll = "vertical"
+
+[[region.inspector.children]]
+type = "header"
+title = "Reading Settings"
+
+[[region.inspector.children.actions]]
+type = "text-button"
+label = "Reset"
+
+
+# ------------------------------------------------------------
+# Inspector tabs
+# ------------------------------------------------------------
+
+[[region.inspector.children]]
+type = "tabs"
+id = "settings-tabs"
+active = "appearance"
+
+[[region.inspector.children.items]]
+id = "appearance"
+label = "Appearance"
+
+[[region.inspector.children.items]]
+id = "tts"
+label = "TTS"
+
+[[region.inspector.children.items]]
+id = "more"
+label = "More"
+
+
+# ============================================================
+# APPEARANCE SETTINGS
+# ============================================================
+
+[[region.inspector.children]]
+type = "settings-group"
+id = "text-layout"
+title = "TEXT & LAYOUT"
+
+[[region.inspector.children.controls]]
+type = "select"
+id = "font-family"
+label = "Font Family"
+value = "Literata"
+options = [
+    "Literata",
+    "Source Serif",
+    "Georgia",
+    "Atkinson Hyperlegible",
+    "OpenDyslexic",
+]
+
+[[region.inspector.children.controls]]
+type = "slider"
+id = "font-size"
+label = "Font Size"
+min = 12
+max = 32
+step = 1
+value = 18
+unit = "px"
+
+[[region.inspector.children.controls]]
+type = "slider"
+id = "line-height"
+label = "Line Height"
+min = 1.0
+max = 2.4
+step = 0.1
+value = 1.7
+
+[[region.inspector.children.controls]]
+type = "slider"
+id = "paragraph-spacing"
+label = "Paragraph Spacing"
+min = 0.0
+max = 3.0
+step = 0.1
+value = 1.2
+
+[[region.inspector.children.controls]]
+type = "slider"
+id = "page-margin"
+label = "Page Margins"
+min = 20
+max = 140
+step = 4
+value = 72
+semantic_value = "Wide"
+
+[[region.inspector.children.controls]]
+type = "slider"
+id = "column-width"
+label = "Column Width"
+min = 420
+max = 960
+step = 10
+value = 690
+semantic_value = "Comfortable"
+
+[[region.inspector.children.controls]]
+type = "segmented"
+id = "text-alignment"
+label = "Text Alignment"
+value = "left"
+
+[[region.inspector.children.controls.options]]
+value = "left"
+icon = "align-left"
+
+[[region.inspector.children.controls.options]]
+value = "center"
+icon = "align-center"
+
+[[region.inspector.children.controls.options]]
+value = "right"
+icon = "align-right"
+
+[[region.inspector.children.controls.options]]
+value = "justify"
+icon = "align-justify"
+
+[[region.inspector.children.controls]]
+type = "toggle"
+id = "dyslexia-font"
+label = "Dyslexia-Friendly Font"
+value = false
+
+
+# ============================================================
+# THEMES & COLOR
+# ============================================================
+
+[[region.inspector.children]]
+type = "settings-group"
+id = "theme-colors"
+title = "THEME & COLORS"
+
+[[region.inspector.children.controls]]
+type = "preset-grid"
+id = "theme-preset"
+columns = 4
+
+[[region.inspector.children.controls.items]]
+id = "default"
+title = "Default"
+subtitle = "Clean & calm"
+preview = { background = "#111817", text = "#F3EDE2" }
+active = true
+
+[[region.inspector.children.controls.items]]
+id = "sepia"
+title = "Sepia"
+subtitle = "Warm tones"
+preview = { background = "#E9DDC4", text = "#332B21" }
+
+[[region.inspector.children.controls.items]]
+id = "night"
+title = "Night"
+subtitle = "Easy on eyes"
+preview = { background = "#0A0C0D", text = "#C7C9C7" }
+
+[[region.inspector.children.controls.items]]
+id = "ocean"
+title = "Ocean"
+subtitle = "Blue light filter"
+preview = { background = "#183246", text = "#D8E3EA" }
+
+[[region.inspector.children.controls]]
+type = "slider"
+id = "brightness"
+label = "Brightness"
+min = 20
+max = 120
+step = 1
+value = 80
+unit = "%"
+
+[[region.inspector.children.controls]]
+type = "slider"
+id = "contrast"
+label = "Contrast"
+min = 50
+max = 150
+step = 1
+value = 100
+unit = "%"
+
+
+# ============================================================
+# READING MODE
+# ============================================================
+
+[[region.inspector.children]]
+type = "settings-group"
+id = "reading-mode"
+title = "READING MODE"
+
+[[region.inspector.children.controls]]
+type = "segmented"
+id = "reading-flow"
+value = "scroll"
+
+[[region.inspector.children.controls.options]]
+value = "scroll"
+label = "Scroll"
+icon = "list"
+
+[[region.inspector.children.controls.options]]
+value = "paged"
+label = "Paged"
+icon = "book-open"
+
+
+# ============================================================
+# ANNOTATIONS
+# ============================================================
+
+[[region.inspector.children]]
+type = "settings-group"
+id = "annotations"
+title = "ANNOTATIONS"
+
+[[region.inspector.children.controls]]
+type = "color-picker"
+id = "highlight-color"
+label = "Highlight Color"
+value = "#77E7A5"
+palette = [
+    "#F4D86A",
+    "#79E49C",
+    "#65E5C0",
+    "#6DB7FF",
+    "#AE83FF",
+    "#FF7A8A",
+    "#FFA76D",
+]
+
+[[region.inspector.children.controls]]
+type = "toggle"
+id = "show-highlights"
+label = "Show Highlights"
+value = true
+
+[[region.inspector.children.controls]]
+type = "toggle"
+id = "show-notes"
+label = "Show Notes"
+value = true
+
+[[region.inspector.children.controls]]
+type = "toggle"
+id = "show-bookmarks"
+label = "Show Bookmarks"
+value = true
+
+
+# ============================================================
+# TTS SETTINGS
+# ============================================================
+
+[settings.tts]
+engine = "system"
+voice = "Aria"
+voice_variant = "Natural"
+
+rate = 1.2
+pitch = 1.0
+volume = 0.82
+
+sentence_highlighting = true
+word_highlighting = false
+auto_scroll = true
+follow_cursor = true
+
+skip_backward_seconds = 15
+skip_forward_seconds = 15
+
+pause_at_paragraphs = 180
+pause_at_headings = 350
+
+[[settings.tts.pronunciations]]
+match = "Elise"
+speak_as = "ee-LEES"
+
+[[settings.tts.pronunciations]]
+match = "Wandering Horizon"
+speak_as = "Wandering Horizon"
+
+
+# ============================================================
+# BOTTOM TTS PLAYER
+# ============================================================
+
+[region.tts]
+slot = "tts"
+layout = "row"
+align = "center"
+padding = [12, 22]
+gap = 28
+
+[[region.tts.children]]
+type = "media-summary"
+width = 360
+image = "wandering-horizon"
+title = "The Wandering Horizon"
+subtitle = "Chapter 3 · The Mountain Path"
+tertiary = "Narrated by Aria (Natural)"
+
+[[region.tts.children.actions]]
+icon = "heart"
+active = true
+
+[[region.tts.children.actions]]
+icon = "more-horizontal"
+
+[[region.tts.children]]
+type = "tts-transport"
+grow = true
+
+[region.tts.children.controls]
+layout = "row"
+justify = "center"
+gap = 20
+
+[[region.tts.children.controls.items]]
+type = "skip-back"
+seconds = 15
+
+[[region.tts.children.controls.items]]
+type = "play-pause"
+state = "playing"
+emphasis = "primary"
+
+[[region.tts.children.controls.items]]
+type = "skip-forward"
+seconds = 15
+
+[region.tts.children.progress]
+type = "waveform-scrubber"
+current = 384
+duration = 1140
+elapsed_label = "6:24"
+remaining_label = "-12:36"
+waveform = "chapter-3-waveform"
+highlight_played = true
+seekable = true
+
+[[region.tts.children]]
+type = "cluster"
+gap = 14
+
+[[region.tts.children.children]]
+type = "select"
+id = "tts-rate"
+value = "1.2x"
+width = 90
+options = [
+    "0.75x",
+    "1.0x",
+    "1.2x",
+    "1.5x",
+    "1.75x",
+    "2.0x",
+]
+
+[[region.tts.children.children]]
+type = "select"
+id = "tts-voice"
+value = "Aria"
+icon = "waveform"
+width = 150
+options = [
+    "Aria",
+    "Jenny",
+    "Guy",
+    "Sonia",
+]
+
+[[region.tts.children.children]]
+type = "volume"
+value = 0.82
+
+
+# ============================================================
+# READER PRESENTATION MODEL
+# ============================================================
+
+[reader.style]
+font_family = "Literata"
+font_size = 18
+line_height = 1.7
+paragraph_spacing = 1.2
+column_width = 690
+page_margin = 72
+text_align = "left"
+
+background = "#101716"
+foreground = "#F2ECE1"
+foreground_muted = "#A4AAA4"
+selection = "#335E4A"
+tts_highlight = "#315E4A"
+
+heading_font = "Literata"
+heading_weight = 600
+ui_font = "Inter"
+
+
+# ============================================================
+# APPLICATION THEME
+# ============================================================
+
+[theme]
+mode = "dark"
+accent = "jade"
+
+[theme.color]
+app_background = "#09100F"
+surface = "#101716"
+surface_raised = "#141D1B"
+surface_hover = "#1B2824"
+
+text = "#F4F4EF"
+text_muted = "#909A94"
+text_faint = "#64706A"
+
+accent = "#62E89C"
+accent_soft = "#254F3D"
+
+border = "#26322E"
+divider = "#202B27"
+
+[theme.radius]
+small = 7
+medium = 12
+large = 20
+pill = 999
+
+[theme.spacing]
+xs = 4
+sm = 8
+md = 14
+lg = 20
+xl = 28
+
+[theme.shadow]
+panel = "soft"
+floating = "medium"
